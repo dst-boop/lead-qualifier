@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lead Qualifier</title>
+<style>
+  :root{
+    --paper:#FAFBF9; --card:#FFFFFF; --ink:#1A2B33; --muted:#5C6E75;
+    --line:#DCE3E0; --accent:#0E6E5C; --accent-soft:#E7F1EE;
+    --brass:#B58A2E; --brass-soft:#F6EEDC;
+    --good:#0E6E5C; --good-soft:#E7F1EE;
+    --maybe:#4A6584; --maybe-soft:#E9EEF4;
+    --bad:#8A5A52; --bad-soft:#F3E9E7;
+    --shadow:0 1px 3px rgba(26,43,51,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#141B1E; --card:#1C2529; --ink:#E4EAE8; --muted:#93A4A8;
+      --line:#2E3B40; --accent:#4FB39A; --accent-soft:#1E312D;
+      --brass:#D4A94E; --brass-soft:#33301F;
+      --good:#4FB39A; --good-soft:#1E312D;
+      --maybe:#8FAECE; --maybe-soft:#212B36;
+      --bad:#C39288; --bad-soft:#332622;
+      --shadow:0 1px 3px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#141B1E; --card:#1C2529; --ink:#E4EAE8; --muted:#93A4A8;
+    --line:#2E3B40; --accent:#4FB39A; --accent-soft:#1E312D;
+    --brass:#D4A94E; --brass-soft:#33301F;
+    --good:#4FB39A; --good-soft:#1E312D;
+    --maybe:#8FAECE; --maybe-soft:#212B36;
+    --bad:#C39288; --bad-soft:#332622;
+    --shadow:0 1px 3px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#FAFBF9; --card:#FFFFFF; --ink:#1A2B33; --muted:#5C6E75;
+    --line:#DCE3E0; --accent:#0E6E5C; --accent-soft:#E7F1EE;
+    --brass:#B58A2E; --brass-soft:#F6EEDC;
+    --good:#0E6E5C; --good-soft:#E7F1EE;
+    --maybe:#4A6584; --maybe-soft:#E9EEF4;
+    --bad:#8A5A52; --bad-soft:#F3E9E7;
+    --shadow:0 1px 3px rgba(26,43,51,.08);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:1100px; margin:0 auto; padding:32px 24px 80px}
+  .eyebrow{
+    font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 6px;
+  }
+  h1{
+    font-family:Georgia,"Times New Roman",serif; font-weight:600;
+    font-size:34px; line-height:1.15; margin:0 0 8px; text-wrap:balance;
+  }
+  .sub{color:var(--muted); margin:0 0 28px; max-width:62ch}
+  .drop{
+    border:1.5px dashed var(--line); border-radius:10px; background:var(--card);
+    padding:38px 24px; text-align:center; cursor:pointer; box-shadow:var(--shadow);
+    transition:border-color .15s, background .15s;
+  }
+  .drop:hover,.drop:focus-visible,.drop.over{border-color:var(--accent); background:var(--accent-soft)}
+  .drop:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .drop strong{display:block; font-size:16.5px; margin-bottom:4px}
+  .drop span{color:var(--muted); font-size:13.5px}
+  .filemeta{margin:14px 2px 0; font-size:13.5px; color:var(--muted)}
+  .filemeta b{color:var(--ink)}
+  .notice{
+    margin:14px 0 0; padding:10px 14px; border-radius:8px; font-size:13.5px;
+    border:1px solid var(--line); background:var(--card);
+  }
+  .notice.err{border-color:var(--bad); background:var(--bad-soft); color:var(--bad)}
+  .notice.info{border-color:var(--maybe); background:var(--maybe-soft)}
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:28px 0 24px}
+  .metric{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px 12px; box-shadow:var(--shadow); border-top:3px solid var(--line);
+  }
+  .metric .n{font-size:30px; font-weight:650; font-variant-numeric:tabular-nums; line-height:1.1}
+  .metric .l{font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-top:2px}
+  .metric.t-ideal{border-top-color:var(--brass)} .metric.t-ideal .n{color:var(--brass)}
+  .metric.t-good{border-top-color:var(--good)} .metric.t-good .n{color:var(--good)}
+  .metric.t-maybe{border-top-color:var(--maybe)} .metric.t-maybe .n{color:var(--maybe)}
+  .metric.t-bad{border-top-color:var(--bad)} .metric.t-bad .n{color:var(--bad)}
+  .tabs{display:flex; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--line); margin:8px 0 0}
+  .tab{
+    border:none; background:none; color:var(--muted); font:inherit; font-size:14px;
+    padding:9px 14px 10px; cursor:pointer; border-bottom:2.5px solid transparent; margin-bottom:-1px;
+  }
+  .tab[aria-selected="true"]{color:var(--ink); font-weight:600; border-bottom-color:var(--accent)}
+  .tab:focus-visible{outline:2px solid var(--accent); outline-offset:-2px; border-radius:6px}
+  .tab .c{font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
+  .tablewrap{overflow-x:auto; background:var(--card); border:1px solid var(--line); border-top:none; border-radius:0 0 10px 10px; box-shadow:var(--shadow)}
+  table{border-collapse:collapse; width:100%; font-size:13.5px}
+  th{
+    text-align:left; font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); font-weight:600; padding:10px 12px; border-bottom:1px solid var(--line);
+    white-space:nowrap; position:sticky; top:0; background:var(--card);
+  }
+  td{padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.score{font-variant-numeric:tabular-nums; font-weight:650; text-align:right}
+  td.why{color:var(--muted); font-size:12.5px; max-width:380px}
+  .pill{
+    display:inline-block; font-size:11px; font-weight:600; letter-spacing:.05em;
+    padding:2px 9px; border-radius:99px; white-space:nowrap;
+  }
+  .pill.ideal{background:var(--brass-soft); color:var(--brass)}
+  .pill.good{background:var(--good-soft); color:var(--good)}
+  .pill.maybe{background:var(--maybe-soft); color:var(--maybe)}
+  .pill.bad{background:var(--bad-soft); color:var(--bad)}
+  .empty{padding:36px; text-align:center; color:var(--muted)}
+  .bar{display:flex; align-items:center; justify-content:space-between; gap:16px; margin:30px 0 10px; flex-wrap:wrap}
+  .bar h2{font-family:Georgia,serif; font-weight:600; font-size:20px; margin:0}
+  .btn{
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    font:inherit; font-size:14px; font-weight:600; padding:10px 18px; cursor:pointer;
+  }
+  .btn:hover{filter:brightness(1.08)}
+  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .truncnote{font-size:12.5px; color:var(--muted); padding:10px 12px}
+  .privacy{margin-top:26px; font-size:12.5px; color:var(--muted); max-width:70ch}
+  .authbar{display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:0 0 10px; font-size:13.5px; color:var(--muted)}
+  .authbar a{color:var(--accent); font-weight:600; text-decoration:none}
+  .mini{border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:6px; font:inherit; font-size:12.5px; padding:3px 8px; cursor:pointer; margin-right:4px; white-space:nowrap}
+  .mini:hover{border-color:var(--accent); color:var(--accent)}
+  .modalbg{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:50}
+  .modalbg.open{display:flex}
+  .modal{background:var(--card); color:var(--ink); border-radius:12px; padding:22px 24px; width:min(520px,92vw); box-shadow:0 10px 40px rgba(0,0,0,.3)}
+  .modal h3{margin:0 0 10px; font-family:Georgia,serif}
+  .modal label{display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:10px 0 4px}
+  .modal input,.modal textarea,.modal select{width:100%; box-sizing:border-box; font:inherit; font-size:14px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:7px; padding:8px 10px}
+  .modal textarea{min-height:120px; resize:vertical}
+  .modal .row2{display:flex; gap:10px}
+  .modal .row2>div{flex:1}
+  .modal .btns{display:flex; justify-content:flex-end; gap:10px; margin-top:16px}
+  .btn.ghost{background:none; color:var(--muted); border:1px solid var(--line)}
+  @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="authbar" id="authbar"></div>
+  <p class="eyebrow">Financial Planners of America · Internal tool</p>
+  <h1>Lead Qualifier</h1>
+  <p class="sub">Upload a ZoomInfo CSV export and every contact is scored and sorted into
+  four tiers. All processing happens right here in your browser — the file is never uploaded to any server.</p>
+
+  <div class="drop" id="drop" role="button" tabindex="0" aria-label="Upload CSV file">
+    <strong>Drop your CSV here, or click to choose a file</strong>
+    <span>Auto-detects ZoomInfo column names like “First Name”, “Direct Phone Number”, “Email Address”, “Person State” — and skips junk header rows.</span>
+  </div>
+  <input type="file" id="file" accept=".csv,text/csv" hidden>
+  <div id="out"></div>
+
+  <div class="modalbg" id="modalbg">
+    <div class="modal">
+      <h3 id="m_title">Send email</h3>
+      <label>To</label><input id="m_to" type="email">
+      <label>Subject</label><input id="m_subject" type="text">
+      <div class="row2" id="m_when" hidden>
+        <div><label>Start</label><input id="m_start" type="datetime-local"></div>
+        <div><label>Duration</label><select id="m_dur"><option value="30">30 minutes</option><option value="60">60 minutes</option></select></div>
+      </div>
+      <label>Message</label><textarea id="m_body"></textarea>
+      <div class="btns">
+        <button class="btn ghost" id="m_cancel">Cancel</button>
+        <button class="btn" id="m_send">Send</button>
+      </div>
+      <div id="m_status" class="notice" hidden></div>
+    </div>
+  </div>
+  <p class="privacy">Scoring: age inferred from graduation year (ideal 50–65) · years of experience (28–43) ·
+  senior job titles · recent job change after a long prior tenure (orphaned 401k signal) · retirement intent ·
+  phone/email on file. Frequent job-hoppers are deprioritized; Connecticut and Massachusetts contacts are excluded.</p>
+</div>
+
+<script>
+"use strict";
+const ALIASES = {
+  first_name:['first_name','firstname','contact_first_name'],
+  last_name:['last_name','lastname','contact_last_name'],
+  employer:['employer','company_name','company','account_name'],
+  phone:['phone','direct_phone_number','direct_phone','mobile_phone','phone_number','contact_phone'],
+  email:['email','email_address','contact_email'],
+  job_title:['job_title','title'],
+  state:['state','person_state','contact_state','person_state/province'],
+  graduation_year:['graduation_year','grad_year'],
+  years_of_experience:['years_of_experience','total_years_experience'],
+  years_at_current_employer:['years_at_current_employer','years_at_company','tenure_at_current_company'],
+  number_of_companies:['number_of_companies','company_count'],
+  retirement_intent:['retirement_intent','intent','intent_topic'],
+};
+const BUCKETS = ['Ideal Client','Good','Maybe','Not Good'];
+const PILL = {'Ideal Client':'ideal','Good':'good','Maybe':'maybe','Not Good':'bad'};
+const MCLASS = {'Ideal Client':'t-ideal','Good':'t-good','Maybe':'t-maybe','Not Good':'t-bad'};
+const MAX_ROWS = 500;
+
+function parseCSV(text){
+  const rows=[]; let row=[], field='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; }
+      else field+=ch;
+    } else if(ch==='"') q=true;
+    else if(ch===','){ row.push(field); field=''; }
+    else if(ch==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+    else if(ch!=='\r') field+=ch;
+  }
+  if(field!=='' || row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+const blank = v => v===undefined || v===null || String(v).trim()==='';
+const num = v => { const n=parseFloat(v); return Number.isFinite(n)?Math.trunc(n):null; };
+
+function smartRead(text){
+  let rows = parseCSV(text).filter(r => r.some(c => !blank(c)));
+  if(!rows.length) throw new Error('The file appears to be empty.');
+  // Junk "Column1,Column2,..." placeholder header row → real headers on row 2
+  const ph = rows[0].slice(0,20).filter(c => String(c).trim().toLowerCase().startsWith('column')).length;
+  if(ph >= 10) rows = rows.slice(1);
+  let headers = rows[0].map(h => String(h).trim().toLowerCase().replace(/ /g,'_'));
+  const body = rows.slice(1);
+  // Drop unnamed + fully-empty columns
+  const keep = headers.map((h,i) =>
+    h && !h.startsWith('unnamed') && body.some(r => !blank(r[i])));
+  headers = headers.filter((_,i)=>keep[i]);
+  const data = body.map(r => {
+    const o={};
+    let k=0;
+    keep.forEach((ok,i)=>{ if(ok) o[headers[k++]] = r[i]!==undefined?String(r[i]).trim():''; });
+    return o;
+  }).filter(o => Object.values(o).some(v=>!blank(v)));
+  // Alias → standard names (first match wins, only if std absent)
+  const present = new Set(headers);
+  const ren = {};
+  for(const [std,opts] of Object.entries(ALIASES)){
+    if(present.has(std)) continue;
+    for(const opt of opts){ if(present.has(opt)){ ren[opt]=std; break; } }
+  }
+  if(Object.keys(ren).length){
+    for(const o of data) for(const [from,to] of Object.entries(ren)){ o[to]=o[from]; delete o[from]; }
+    headers = headers.map(h => ren[h]||h);
+  }
+  return {headers, data};
+}
+
+function qualify(rows){
+  const YEAR = new Date().getFullYear();
+  for(const r of rows){
+    let s=0; const why=[];
+    const gy = blank(r.graduation_year)?null:num(r.graduation_year);
+    if(gy!==null){ const age=YEAR-(gy-22); if(age>=50&&age<=65){s+=25; why.push(`Age ~${age} (ideal)`);} }
+    const yoe = blank(r.years_of_experience)?null:num(r.years_of_experience);
+    if(yoe!==null && yoe>=28 && yoe<=43){ s+=20; why.push(`YOE ${yoe} (ideal range)`); }
+    if(!blank(r.job_title)){
+      const t=r.job_title.toLowerCase();
+      if(['ceo','cfo','coo','cto','chief','svp','evp','vice president','vp','partner','principal',
+          'owner','managing director','executive','director','president','head of'].some(k=>t.includes(k)))
+        { s+=20; why.push('Senior title (likely $250K+ income)'); }
+    }
+    if(!blank(r.company_size)){
+      const z=r.company_size.toLowerCase();
+      if(['large','5000+','1000-5000','enterprise'].some(k=>z.includes(k)))
+        { s+=10; why.push('Large company (asset potential)'); }
+    }
+    const yace = blank(r.years_at_current_employer)?null:num(r.years_at_current_employer);
+    if(yace!==null){
+      if(yoe!==null && yace>=1 && yace<=5 && (yoe-yace)>=10){ s+=25; why.push(`Recent move (${yace}yr) after long prior role`); }
+      else if(yace>5){ s-=5; why.push(`Long tenure (${yace}yr) - less orphaned 401K potential`); }
+    }
+    const nc = blank(r.number_of_companies)?null:num(r.number_of_companies);
+    if(nc!==null && nc>5 && yoe!==null && yoe/nc<3){ s-=15; why.push('Frequent job hopper - deprioritize'); }
+    if(!blank(r.retirement_intent)){
+      const it=r.retirement_intent.toLowerCase();
+      if(['yes','true','interested','retirement'].some(k=>it.includes(k)))
+        { s+=20; why.push('Retirement planning intent confirmed'); }
+    }
+    const hasPhone=!blank(r.phone), hasMobile=!blank(r.mobile_phone), hasEmail=!blank(r.email);
+    if(hasPhone||hasMobile){ s+=5; why.push('Phone on file'); }
+    if(hasEmail){ s+=5; why.push('Email on file'); }
+    if(!hasPhone&&!hasMobile&&!hasEmail){ s-=20; why.push('No contact info - cannot reach'); }
+    if(!blank(r.state)){
+      const st=r.state.trim().toUpperCase();
+      if(['CT','MA','CONNECTICUT','MASSACHUSETTS'].includes(st)){ s-=100; why.push('EXCLUDED: CT or MA'); }
+    }
+    r.qualification_score=Math.max(0,s);
+    r.score_breakdown=why.length?why.join('; '):'No qualifying signals';
+    r.bucket = r.qualification_score<=14?'Not Good':r.qualification_score<=29?'Maybe':r.qualification_score<=44?'Good':'Ideal Client';
+  }
+  return rows.slice().sort((a,b)=>b.qualification_score-a.qualification_score);
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let RESULT=null, HEADERS=null, ACTIVE='Ideal Client';
+
+function render(){
+  const out=document.getElementById('out');
+  if(!RESULT) return;
+  const counts=Object.fromEntries(BUCKETS.map(b=>[b,RESULT.filter(r=>r.bucket===b).length]));
+  const cols=['first_name','last_name','employer','job_title','state','phone','email'].filter(c=>HEADERS.includes(c));
+  const label={first_name:'First',last_name:'Last',employer:'Employer',job_title:'Title',state:'State',phone:'Phone',email:'Email'};
+  const rows=RESULT.filter(r=>r.bucket===ACTIVE);
+  const shown=rows.slice(0,MAX_ROWS);
+  out.querySelector('#results').innerHTML = `
+    <div class="metrics">${BUCKETS.map(b=>`
+      <div class="metric ${MCLASS[b]}"><div class="n">${counts[b]}</div><div class="l">${b}</div></div>`).join('')}
+    </div>
+    <div class="bar"><h2>Results by tier</h2>
+      <button class="btn" id="dl">Download qualified leads (CSV)</button></div>
+    <div class="tabs" role="tablist">${BUCKETS.map(b=>`
+      <button class="tab" role="tab" aria-selected="${b===ACTIVE}" data-b="${b}">${b} <span class="c">· ${counts[b]}</span></button>`).join('')}
+    </div>
+    <div class="tablewrap">
+      ${rows.length?`<table><thead><tr>
+        ${cols.map(c=>`<th>${label[c]}</th>`).join('')}<th style="text-align:right">Score</th><th>Tier</th><th>Why</th><th>Actions</th>
+      </tr></thead><tbody>
+        ${shown.map(r=>`<tr>
+          ${cols.map(c=>`<td>${esc(r[c]??'')}</td>`).join('')}
+          <td class="score">${r.qualification_score}</td>
+          <td><span class="pill ${PILL[r.bucket]}">${r.bucket}</span></td>
+          <td class="why">${esc(r.score_breakdown)}</td>
+          <td>${r.email?`<button class="mini act" data-a="email" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#9993; Email</button><button class="mini act" data-a="invite" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#128197; Invite</button>`:''}</td>
+        </tr>`).join('')}
+      </tbody></table>
+      ${rows.length>MAX_ROWS?`<div class="truncnote">Showing first ${MAX_ROWS} of ${rows.length} — the CSV download includes every lead.</div>`:''}`
+      :`<div class="empty">No leads in the ${ACTIVE} tier</div>`}
+    </div>`;
+  out.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{ACTIVE=t.dataset.b;render();}));
+  out.querySelectorAll('.act').forEach(b=>b.addEventListener('click',()=>openCompose(b.dataset.a,b.dataset.e,b.dataset.n)));
+  out.querySelector('#dl').addEventListener('click',()=>{
+    const allCols=[...HEADERS.filter(h=>!['qualification_score','score_breakdown','bucket'].includes(h)),'qualification_score','score_breakdown','bucket'];
+    const q=v=>{v=v??'';v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+    const csv=[allCols.map(q).join(',')].concat(RESULT.map(r=>allCols.map(c=>q(r[c])).join(','))).join('\n');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='qualified_leads.csv'; a.click(); URL.revokeObjectURL(a.href);
+  });
+}
+
+function handle(file){
+  const out=document.getElementById('out');
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const {headers,data}=smartRead(reader.result);
+      const missing=['first_name','last_name'].filter(c=>!headers.includes(c));
+      let html=`<p class="filemeta"><b>${esc(file.name)}</b> — loaded ${data.length} leads. Columns: ${headers.slice(0,12).map(esc).join(', ')}${headers.length>12?'…':''}</p>`;
+      if(missing.length){
+        html+=`<div class="notice err">Missing required columns: ${missing.join(', ')}. Check that your export includes contact names.</div>`;
+        out.innerHTML=html; return;
+      }
+      const absent=['employer','phone','email','job_title','state'].filter(c=>!headers.includes(c));
+      if(absent.length) html+=`<div class="notice info">Optional columns not found (scoring will adapt): ${absent.join(', ')}</div>`;
+      RESULT=qualify(data);
+      HEADERS=[...headers];
+      ACTIVE='Ideal Client';
+      out.innerHTML=html+`<div id="results"></div>`;
+      render();
+    }catch(e){
+      out.innerHTML=`<div class="notice err">Could not read that file: ${esc(e.message)}</div>`;
+    }
+  };
+  reader.readAsText(file);
+}
+
+const drop=document.getElementById('drop'), fi=document.getElementById('file');
+drop.addEventListener('click',()=>fi.click());
+drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click();}});
+fi.addEventListener('change',()=>{if(fi.files[0])handle(fi.files[0]);});
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handle(f);});
+
+// ---- Microsoft 365 (sign-in, email, calendar invite) ----
+let MODE='email';
+window.ME={signed_in:false};
+async function loadMe(){
+  try{
+    const r=await fetch('/api/me');
+    if(!r.ok) return;
+    window.ME=await r.json();
+  }catch(e){ return; } // static hosting — no backend available
+  const bar=document.getElementById('authbar');
+  if(window.ME.signed_in){
+    bar.innerHTML=`Signed in as <b>${esc(window.ME.name||window.ME.email)}</b> &middot; <a href="/auth/logout">Sign out</a>`;
+  }else{
+    bar.innerHTML=`<a href="/auth/login">Sign in with Microsoft</a>&nbsp;to send email &amp; calendar invites`;
+  }
+}
+const pad2=n=>String(n).padStart(2,'0');
+function localStamp(d){
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function openCompose(mode,email,first){
+  MODE=mode;
+  document.getElementById('m_title').textContent=mode==='email'?'Send email':'Send calendar invite';
+  document.getElementById('m_when').hidden=mode!=='invite';
+  document.getElementById('m_to').value=email;
+  document.getElementById('m_subject').value=mode==='email'
+    ?'Introduction — Financial Planners of America'
+    :'Retirement planning conversation — Financial Planners of America';
+  document.getElementById('m_body').value=`Hi ${first||'there'},\n\n`+(mode==='email'
+    ?'I work with professionals approaching retirement on 401(k) rollovers and retirement income planning. I\'d welcome a brief conversation to see whether we can be helpful.\n\nBest regards,\nDan Treacy\nFinancial Planners of America'
+    :'Looking forward to speaking with you.\n\nDan Treacy\nFinancial Planners of America');
+  if(mode==='invite'){
+    const d=new Date(Date.now()+26*3600*1000); d.setMinutes(0,0,0);
+    document.getElementById('m_start').value=localStamp(d);
+  }
+  document.getElementById('m_status').hidden=true;
+  document.getElementById('modalbg').classList.add('open');
+}
+document.getElementById('m_cancel').addEventListener('click',()=>document.getElementById('modalbg').classList.remove('open'));
+document.getElementById('m_send').addEventListener('click',async()=>{
+  const st=document.getElementById('m_status');
+  const show=(msg,cls)=>{st.textContent=msg; st.className='notice '+(cls||''); st.hidden=false;};
+  if(!window.ME.signed_in){ show('Sign in with Microsoft first (link at the top of the page).','err'); return; }
+  const to=document.getElementById('m_to').value.trim();
+  const subject=document.getElementById('m_subject').value;
+  const body=document.getElementById('m_body').value;
+  let url,payload;
+  if(MODE==='email'){
+    url='/api/send-email'; payload={to,subject,body};
+  }else{
+    const start=document.getElementById('m_start').value;
+    if(!start){ show('Pick a start time.','err'); return; }
+    const dur=parseInt(document.getElementById('m_dur').value,10);
+    const end=new Date(new Date(start).getTime()+dur*60000);
+    url='/api/create-event';
+    payload={attendee:to,subject,body,start:start+':00',end:localStamp(end)+':00',timezone:'America/New_York'};
+  }
+  show('Sending…','info');
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(r.ok){
+      show(MODE==='email'?'Email sent from your O365 account.':'Invite sent — it\'s on your calendar and in their inbox.');
+      setTimeout(()=>document.getElementById('modalbg').classList.remove('open'),1400);
+    }else{
+      const d=await r.json().catch(()=>({}));
+      show('Failed: '+(d.detail||('HTTP '+r.status)),'err');
+    }
+  }catch(e){ show('Network error: '+e.message,'err'); }
+});
+loadMe();
+</script>
+
+</body>
+</html>
