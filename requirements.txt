@@ -1,2 +1,10 @@
-streamlit
-pandas
+# Web app (FastAPI backend — webapp/)
+fastapi>=0.110
+uvicorn>=0.29
+msal>=1.28
+httpx>=0.27
+email-validator>=2.0
+
+# Legacy Streamlit app (app.py) — kept for reference
+streamlit==1.60.0
+pandas==3.0.5

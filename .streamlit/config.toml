@@ -1,0 +1,9 @@
+# Streamlit server config used when hosting on Railway (or any container host).
+# The port/address are also passed on the command line so $PORT is honored.
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
