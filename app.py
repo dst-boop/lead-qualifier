@@ -7,7 +7,7 @@ COLUMN_ALIASES = {
     'first_name': ['first_name', 'firstname', 'contact_first_name'],
     'last_name': ['last_name', 'lastname', 'contact_last_name'],
     'employer': ['employer', 'company_name', 'company', 'account_name'],
-    'phone': ['phone', 'direct_phone_number', 'direct_phone', 'mobile_phone',
+    'phone': ['phone', 'mobile_phone', 'direct_phone_number', 'direct_phone',
               'phone_number', 'contact_phone'],
     'email': ['email', 'email_address', 'contact_email'],
     'job_title': ['job_title', 'title'],
