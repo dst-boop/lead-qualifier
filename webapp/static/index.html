@@ -251,34 +251,34 @@
 <div class="overlay" id="mSettings"><div class="modal">
   <h2>Ideal prospect definition</h2>
   <p class="hint">Adjust these to redefine who scores well. Every lead is re-scored the moment you save.</p>
-  <h3>Age proxy</h3>
+  <h3>A &mdash; Age</h3>
+  <p class="hint">Hits when either test passes. Age comes from the &#127968; enrichment; graduation year is the fallback.</p>
   <div class="mgrid">
-    <label>Grad year from <input type="number" id="sGradMin"></label>
-    <label>Grad year to <input type="number" id="sGradMax"></label>
+    <label>Age over <input type="number" step="0.5" id="sAgeMin"></label>
+    <label>&hellip; or graduated before <input type="number" id="sGradBefore"></label>
   </div>
-  <h3>Orphaned 401(k) signal &mdash; time in current role</h3>
+  <h3>R &mdash; Time in current role</h3>
   <div class="mgrid">
-    <label>Min months at current job <input type="number" id="sTenMin"></label>
-    <label>Max months at current job <input type="number" id="sTenMax"></label>
+    <label>In role fewer than (months) <input type="number" id="sTenMax"></label>
   </div>
-  <h3>Income &amp; asset proxies</h3>
+  <h3>T &mdash; Decision-maker level</h3>
   <div class="mcol" style="display:grid;gap:10px">
-    <label>Senior title keywords (comma-separated)<textarea id="sTitles" rows="2"></textarea></label>
+    <label>Level keywords (comma-separated) &mdash; matched against title and management level<textarea id="sTitles" rows="2"></textarea></label>
     <label>Exclude title keywords<textarea id="sExTitles" rows="1"></textarea></label>
   </div>
-  <div class="mgrid" style="margin-top:10px">
-    <label>Min company employees <input type="number" id="sEmpMin"></label>
+  <h3>E &mdash; Prior senior experience</h3>
+  <p class="hint">Years at previous companies = Years of Experience minus Years at Current Employer. Only counts when the level test above also passes.</p>
+  <div class="mgrid">
+    <label>Min years at previous companies <input type="number" id="sPriorMin"></label>
     <label>Excluded states (comma) <input type="text" id="sExStates"></label>
   </div>
   <h3>Scoring weights</h3>
   <div class="mgrid">
-    <label>Recent job change <input type="number" id="wRecent"></label>
-    <label>Senior title <input type="number" id="wTitle"></label>
-    <label>Mgmt level (C/VP) <input type="number" id="wMgmt"></label>
-    <label>Company size <input type="number" id="wSize"></label>
-    <label>Age in range <input type="number" id="wAge"></label>
-    <label>Email + mobile on file <input type="number" id="wContact"></label>
-    <label>Job-hopper penalty <input type="number" id="wHop"></label>
+    <label>A &mdash; Age <input type="number" id="wAge"></label>
+    <label>R &mdash; In role under ceiling <input type="number" id="wRecent"></label>
+    <label>T &mdash; Decision-maker level <input type="number" id="wTitle"></label>
+    <label>E &mdash; Prior senior experience <input type="number" id="wPrior"></label>
+    <label>C &mdash; Email + mobile on file <input type="number" id="wContact"></label>
   </div>
   <h3>Tier thresholds</h3>
   <div class="mgrid">
@@ -423,13 +423,16 @@
 /* =============== state & persistence =============== */
 /* Persistence: window.storage (per-user, survives sessions). */
 const DEFAULTS={
-  gradMin:1983, gradMax:1998,
-  tenMin:12, tenMax:60,
-  titles:'VP,Vice President,SVP,EVP,Chief,CEO,CFO,COO,CIO,CTO,President,Partner,Principal,Owner,Founder,Managing Director,General Counsel,Physician,Attorney,Head of',
-  exTitles:'Assistant,Associate,Junior,Intern,Coordinator',
-  empMin:200, exStates:'Connecticut,Massachusetts,CT,MA',
-  wRecent:30, wTitle:20, wMgmt:10, wSize:10, wAge:15, wContact:10, wHop:15,
-  tierA:60, tierB:40,
+  ageMin:59.5, gradBefore:1990,
+  tenMax:60, priorMin:10,
+  titles:'C Level,C-Level,Chief,CEO,CFO,COO,CIO,CTO,CMO,VP,Vice President,SVP,EVP,Director,Partner,Principal,Owner,President,Founder,Co-Founder,Managing Director',
+  exTitles:'Assistant,Associate,Junior,Intern,Coordinator,Deputy Director',
+  exStates:'Connecticut,Massachusetts,CT,MA',
+  wAge:25, wRecent:25, wTitle:20, wPrior:20, wContact:10,
+  // Weights total 100. Tier A therefore needs four of the five signals
+  // including the heavy ones — three signals alone should not be call-first.
+  tierA:80, tierB:60,
+  modelVersion:2,
   source:'ZoomInfo', addrType:'Business',
   orgName:'', orgEmail:'', dur:30,
   callVia:'rcapp', emailVia:'mailto',
@@ -448,6 +451,7 @@ const DEFAULTS={
   subj:'Retirement planning introduction — {firstName}, meet {yourName}',
   body:'Hi {firstName},\n\nLooking forward to connecting. We\'ll cover your retirement picture, any accounts left with prior employers, and whether a review makes sense.\n\nTalk soon,\n{yourName}'
 };
+const SCORING_KEYS=['ageMin','gradBefore','tenMax','priorMin','titles','exTitles','wAge','wRecent','wTitle','wPrior','wContact','tierA','tierB'];
 const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='function');}catch(e){return false;}})();
 window.__inClaude=HAS_WS;
 let state={settings:{...DEFAULTS},leads:[]};
@@ -465,7 +469,13 @@ async function boot(){
     else{try{raw=localStorage.getItem('lq-data');}catch(e){}}
     if(raw){const s=JSON.parse(raw);
       if(s.leads){s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
-        state={settings:{...DEFAULTS,...s.settings},leads:s.leads};}}
+        const saved={...(s.settings||{})};
+        // Saved settings win over defaults, which would otherwise pin an old
+        // scoring model in place forever. Drop just the scoring keys when the
+        // model changes; keep templates, org details and pricing.
+        if((saved.modelVersion||1)<DEFAULTS.modelVersion)
+          SCORING_KEYS.forEach(k=>delete saved[k]);
+        state={settings:{...DEFAULTS,...saved,modelVersion:DEFAULTS.modelVersion},leads:s.leads};}}
   }catch(e){/* first run — nothing saved yet */}
   rescoreAll();render();
 }
@@ -496,37 +506,42 @@ function scoreLead(L){
   if(st&&exSt.includes(st)){L.score=0;L.tier='X';L.signals=[{k:'G',label:'Excluded state: '+L.state,hit:false,neg:true,pts:0}];return L;}
 
   let score=0;
-  // R — recent job change (orphaned 401k)
+  // A — age: confirmed 59.5+, or graduated before 1990
+  const gy=parseInt(L.gradYear,10);
+  const age=(L.hd&&L.hd.age)||null;
+  if(age&&age>=+s.ageMin){score+=+s.wAge;sig.push({k:'A',label:`Age ${age} — over ${s.ageMin} (public record)`,hit:true,conf:true,pts:+s.wAge});}
+  else if(L.ageVerified){score+=+s.wAge;sig.push({k:'A',label:'Age verified manually (LinkedIn)',hit:true,conf:true,pts:+s.wAge});}
+  else if(gy&&gy<+s.gradBefore){score+=+s.wAge;sig.push({k:'A',label:`Graduated ${gy} — before ${s.gradBefore} (inferred)`,hit:true,conf:false,pts:+s.wAge});}
+  else if(age){sig.push({k:'A',label:`Age ${age} — under ${s.ageMin}`,hit:false,pts:0});}
+  else if(gy){sig.push({k:'A',label:`Graduated ${gy} — ${s.gradBefore} or later`,hit:false,pts:0});}
+  else sig.push({k:'A',label:'Age unknown — enrich or check LinkedIn',hit:false,pts:0});
+  // R — in role under the tenure ceiling (the orphaned-401k window)
   const mo=monthsSince(parseStart(L.jobStartDate));
-  if(mo!==null&&mo>=s.tenMin&&mo<=s.tenMax){score+=+s.wRecent;sig.push({k:'R',label:`Recent job change (${mo} mo in role)`,hit:true,conf:true,pts:+s.wRecent});}
-  else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — outside ${s.tenMin}–${s.tenMax} window`,hit:false,pts:0});}
+  if(mo!==null&&mo<+s.tenMax){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo — under ${s.tenMax}`,hit:true,conf:true,pts:+s.wRecent});}
+  else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — ${s.tenMax}+`,hit:false,pts:0});}
   else sig.push({k:'R',label:'Start date unknown',hit:false,pts:0});
-  // T — senior title
+  // T — level: C / VP / Director / Partner / Owner / President / Founder
   const tt=(L.title||'').toLowerCase();
+  const ml=(L.mgmtLevel||'').toLowerCase();
   const kw=s.titles.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
   const ex=s.exTitles.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-  const tHit=tt&&kw.some(k=>tt.includes(k))&&!ex.some(k=>tt.includes(k));
-  if(tHit){score+=+s.wTitle;sig.push({k:'T',label:'Senior title (income proxy): '+L.title,hit:true,conf:false,pts:+s.wTitle});}
-  else sig.push({k:'T',label:'Title not on senior keyword list',hit:false,pts:0});
-  // M — management level
-  const ml=(L.mgmtLevel||'').toLowerCase();
-  if(/c[\s-]?level|vp|executive|director/.test(ml)){score+=+s.wMgmt;sig.push({k:'M',label:'Mgmt level: '+L.mgmtLevel,hit:true,conf:true,pts:+s.wMgmt});}
-  else sig.push({k:'M',label:'Mgmt level not C/VP/Dir',hit:false,pts:0});
-  // S — company size
-  const emp=parseInt((''+(L.employees||'')).replace(/[^\d]/g,''),10);
-  if(emp&&emp>=+s.empMin){score+=+s.wSize;sig.push({k:'S',label:`Company size ${emp.toLocaleString()} employees`,hit:true,conf:true,pts:+s.wSize});}
-  else sig.push({k:'S',label:'Company size below threshold / unknown',hit:false,pts:0});
-  // A — age proxy
-  const gy=parseInt(L.gradYear,10);
-  if(L.ageVerified){score+=+s.wAge;sig.push({k:'A',label:'Age verified manually (LinkedIn)',hit:true,conf:true,pts:+s.wAge});}
-  else if(gy&&gy>=+s.gradMin&&gy<=+s.gradMax){score+=+s.wAge;sig.push({k:'A',label:'Grad year '+gy+' in range (inferred)',hit:true,conf:false,pts:+s.wAge});}
-  else sig.push({k:'A',label:'Age unverified — check LinkedIn',hit:false,pts:0});
+  const senior=(txt)=>!!txt&&kw.some(k=>txt.includes(k))&&!ex.some(k=>txt.includes(k));
+  const tHit=senior(tt)||senior(ml);
+  if(tHit){score+=+s.wTitle;sig.push({k:'T',label:'Decision-maker level: '+(L.title||L.mgmtLevel),hit:true,conf:true,pts:+s.wTitle});}
+  else sig.push({k:'T',label:'Not C/VP/Director/Partner/Owner/President/Founder',hit:false,pts:0});
+  // E — 10+ years of senior-level experience at previous companies
+  const totYrs=parseFloat((''+(L.yearsExperience||'')).replace(/[^\d.]/g,''));
+  let hereYrs=parseFloat((''+(L.yearsAtEmployer||'')).replace(/[^\d.]/g,''));
+  if(!(hereYrs>=0)&&mo!==null)hereYrs=mo/12;
+  const priorYrs=(totYrs>0&&hereYrs>=0)?Math.max(0,totYrs-hereYrs):null;
+  if(priorYrs!==null&&priorYrs>=+s.priorMin&&tHit){score+=+s.wPrior;sig.push({k:'E',label:`${priorYrs.toFixed(0)} yrs at previous companies at senior level`,hit:true,conf:false,pts:+s.wPrior});}
+  else if(priorYrs!==null&&priorYrs>=+s.priorMin){sig.push({k:'E',label:`${priorYrs.toFixed(0)} yrs prior experience, but not senior level`,hit:false,pts:0});}
+  else if(priorYrs!==null){sig.push({k:'E',label:`Only ${priorYrs.toFixed(0)} yrs at previous companies`,hit:false,pts:0});}
+  else sig.push({k:'E',label:'Career length unknown — needs Years of Experience column',hit:false,pts:0});
   // C — contact completeness
   if(L.email&&L.mobilePhone){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile on file',hit:true,conf:true,pts:+s.wContact});}
   else if(L.enriched===false&&truthy(L.hasEmail)&&truthy(L.hasMobile)){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile confirmed by ZoomInfo — enrich to reveal',hit:true,conf:false,pts:+s.wContact});}
   else sig.push({k:'C',label:'Missing email or mobile',hit:false,pts:0});
-  // H — job hopper penalty (manual flag)
-  if(L.jobHopper){score-=+s.wHop;sig.push({k:'H',label:'Job hopper — likely unvested matches',hit:false,neg:true,pts:-s.wHop});}
 
   L.score=Math.max(0,Math.min(100,score));
   L.tier=L.score>=+s.tierA?'A':L.score>=+s.tierB?'B':'C';
@@ -565,6 +580,9 @@ const FIELDS=[
   ['linkedinUrl','LinkedIn URL',['linkedin contact profile url','linkedin url','linkedin','person linkedin url','linkedin profile']],
   ['contactId','ZoomInfo Contact ID',['zoominfo contact id','contact id','person id','id']],
   ['employees','Company Employees',['number of employees','employees','company employees','employee count','company size']],
+  ['yearsExperience','Years of Experience',['years of experience','total years of experience','experience years','total experience','career length']],
+  ['yearsAtEmployer','Years at Current Employer',['years at current employer','years at company','tenure','years in current role','time in role']],
+  ['numCompanies','Number of Companies',['number of companies','companies','number of employers','employer count']],
   ['hasEmail','ZI: email available',['has email','hasemail']],
   ['hasMobile','ZI: mobile available',['has mobile phone','has mobile','hasmobilephone']],
   ['mobileDnc','Mobile DNC flag',['mobile phone do not call','mobilephonedonotcall','mobile dnc']],
@@ -853,8 +871,7 @@ function render(){
   document.getElementById('empty').style.display=state.leads.length?'none':'block';
   const rows=document.getElementById('rows');
   rows.innerHTML=list.map(L=>{
-    const tape=(L.signals||[]).filter(s=>'RTMSAC'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('')
-      +((L.signals||[]).some(s=>s.k==='H')?'<span class="sig neg" title="Job hopper penalty">H</span>':'');
+    const tape=(L.signals||[]).filter(s=>'ARTEC'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('');
     const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
     const inv=L.email?'' :'disabled title="No email on file"';
     return `<tr class="lead">
@@ -900,7 +917,7 @@ function detailRow(L){
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}</div>`:''}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
-        <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (deprioritize)</label>
+        <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
       </div>
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
@@ -1075,7 +1092,7 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
     const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
-    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?`Home: ${L.hd.value?'$'+L.hd.value.toLocaleString():'value unknown'}${L.hd.city?' — '+L.hd.city+', '+L.hd.state:''}${(L.hd.mobiles&&L.hd.mobiles.length)?' — '+L.hd.mobiles.length+' mobile on file':''}`:'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
     return [L.firstName,L.lastName,L.email,L.directPhone,L.mobilePhone,L.street,comments,L.employer,L.state,state.settings.addrType,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
   }));
   dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
@@ -1097,7 +1114,7 @@ document.getElementById('jsonFile').addEventListener('change',e=>{
   r.readAsText(f);});
 
 /* =============== settings modal =============== */
-const SFIELDS=[['sGradMin','gradMin'],['sGradMax','gradMax'],['sTenMin','tenMin'],['sTenMax','tenMax'],['sTitles','titles'],['sExTitles','exTitles'],['sEmpMin','empMin'],['sExStates','exStates'],['wRecent','wRecent'],['wTitle','wTitle'],['wMgmt','wMgmt'],['wSize','wSize'],['wAge','wAge'],['wContact','wContact'],['wHop','wHop'],['sTierA','tierA'],['sTierB','tierB'],['sSource','source'],['sAddrType','addrType'],['sOrgName','orgName'],['sOrgEmail','orgEmail'],['sDur','dur'],['sSubj','subj'],['sBody','body'],['sCallVia','callVia'],['sEmailVia','emailVia'],['sLiNote','liNote'],['sRecipe','recipe'],['sE1n','e1n'],['sE1s','e1s'],['sE1b','e1b'],['sE2n','e2n'],['sE2s','e2s'],['sE2b','e2b'],['sE3n','e3n'],['sE3s','e3s'],['sE3b','e3b'],['sMeet','meet'],['sContact','contact'],['sMeetRate','meetRate'],['sAdvisors','advisors'],['sPriceA','priceA'],['sPriceB','priceB'],['sPriceC','priceC']];
+const SFIELDS=[['sAgeMin','ageMin'],['sGradBefore','gradBefore'],['sTenMax','tenMax'],['sPriorMin','priorMin'],['sTitles','titles'],['sExTitles','exTitles'],['sExStates','exStates'],['wRecent','wRecent'],['wTitle','wTitle'],['wPrior','wPrior'],['wAge','wAge'],['wContact','wContact'],['sTierA','tierA'],['sTierB','tierB'],['sSource','source'],['sAddrType','addrType'],['sOrgName','orgName'],['sOrgEmail','orgEmail'],['sDur','dur'],['sSubj','subj'],['sBody','body'],['sCallVia','callVia'],['sEmailVia','emailVia'],['sLiNote','liNote'],['sRecipe','recipe'],['sE1n','e1n'],['sE1s','e1s'],['sE1b','e1b'],['sE2n','e2n'],['sE2s','e2s'],['sE2b','e2b'],['sE3n','e3n'],['sE3s','e3s'],['sE3b','e3b'],['sMeet','meet'],['sContact','contact'],['sMeetRate','meetRate'],['sAdvisors','advisors'],['sPriceA','priceA'],['sPriceB','priceB'],['sPriceC','priceC']];
 document.getElementById('btnRecipe').addEventListener('click',()=>{
   document.getElementById('recipeText').textContent=state.settings.recipe;openModal('mRecipe');});
 document.getElementById('btnSettings').addEventListener('click',()=>{
@@ -1209,7 +1226,7 @@ document.getElementById('btnQC').addEventListener('click',async()=>{
     for(let i=0;i<pend.length;i+=10){
       const batch=pend.slice(i,i+10);
       btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
-      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
+      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
       (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
       doneN+=batch.length;save();render();
     }
