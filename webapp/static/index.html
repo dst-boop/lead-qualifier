@@ -335,7 +335,7 @@ function render(){
           <td class="score">${r.qualification_score}</td>
           <td><span class="pill ${PILL[r.bucket]}">${r.bucket}</span></td>
           <td class="why">${esc(r.score_breakdown)}</td>
-          <td>${r.email?`<button class="mini act" data-a="email" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#9993; Email</button><button class="mini act" data-a="invite" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#128197; Invite</button>`:''}</td>
+          <td>${r.email?`<button class="mini act" data-a="email" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#9993; Email</button><button class="mini act" data-a="invite" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#128197; Invite</button>`:''}${r.phone?(r._pv?` <span class="pill ${r._pv.cls}">${esc(r._pv.label)}</span>`:` <button class="mini pv" data-id="${r._id}">&#128222; Verify</button>`):''}</td>
         </tr>`).join('')}
       </tbody></table>
       ${rows.length>MAX_ROWS?`<div class="truncnote">Showing first ${MAX_ROWS} of ${rows.length} — the CSV download includes every lead.</div>`:''}`
@@ -343,6 +343,7 @@ function render(){
     </div>`;
   out.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{ACTIVE=t.dataset.b;render();}));
   out.querySelectorAll('.act').forEach(b=>b.addEventListener('click',()=>openCompose(b.dataset.a,b.dataset.e,b.dataset.n)));
+  out.querySelectorAll('.pv').forEach(b=>b.addEventListener('click',()=>verifyPhone(b.dataset.id,b)));
   out.querySelector('#dl').addEventListener('click',()=>{
     const allCols=[...HEADERS.filter(h=>!['qualification_score','score_breakdown','bucket'].includes(h)),'qualification_score','score_breakdown','bucket'];
     const q=v=>{v=v??'';v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
@@ -368,6 +369,7 @@ function handle(file){
       const absent=['employer','phone','email','job_title','state'].filter(c=>!headers.includes(c));
       if(absent.length) html+=`<div class="notice info">Optional columns not found (scoring will adapt): ${absent.join(', ')}</div>`;
       RESULT=qualify(data);
+      RESULT.forEach((r,i)=>r._id=String(i));
       HEADERS=[...headers];
       ACTIVE='Ideal Client';
       out.innerHTML=html+`<div id="results"></div>`;
@@ -386,6 +388,39 @@ fi.addEventListener('change',()=>{if(fi.files[0])handle(fi.files[0]);});
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
 drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handle(f);});
+
+// ---- Phone verification (WhitePages / Trestle) ----
+async function verifyPhone(id,btn){
+  const r=RESULT.find(x=>x._id===id);
+  if(!r) return;
+  if(!(window.ME&&window.ME.signed_in)){ alert('Sign in first — phone lookups use your WhitePages credits.'); return; }
+  btn.disabled=true; btn.textContent='Checking…';
+  try{
+    const resp=await fetch('/api/verify-phone',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:r.phone,first_name:r.first_name||'',last_name:r.last_name||''})});
+    const d=await resp.json();
+    if(!resp.ok) throw new Error(d.detail||('HTTP '+resp.status));
+    let label,cls;
+    if(d.valid===false){ label='Invalid number'; cls='bad'; }
+    else{
+      const bits=[d.line_type||'Unknown type'];
+      if(d.carrier) bits.push(d.carrier);
+      if(d.name_match===true) bits.push('name match');
+      else if(d.name_match===false&&d.owner) bits.push('owner: '+d.owner);
+      label=bits.join(' · ');
+      cls=(d.line_type||'').toLowerCase().includes('mobile')?'good':'maybe';
+    }
+    r._pv={label,cls};
+    r.phone_valid=d.valid===false?'no':'yes';
+    r.phone_line_type=d.line_type||'';
+    r.phone_owner=d.owner||'';
+    ['phone_valid','phone_line_type','phone_owner'].forEach(c=>{if(!HEADERS.includes(c))HEADERS.push(c);});
+    render();
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='&#128222; Verify';
+    alert('Verify failed: '+e.message);
+  }
+}
 
 // ---- Microsoft 365 (sign-in, email, calendar invite) ----
 let MODE='email';
