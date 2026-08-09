@@ -785,6 +785,9 @@ class QCLead(BaseModel):
     positionStart: str = ""
     employees: str = ""
     notes: str = ""
+    yearsExperience: str = ""
+    yearsAtEmployer: str = ""
+    jobHopper: bool = False
     # Confirmed facts from a WhitePages enrichment, when one has been run.
     age: Optional[int] = None
     ownsHome: Optional[bool] = None
