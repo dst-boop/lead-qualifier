@@ -870,7 +870,8 @@ function render(){
         ${['New','Called','Call Back','Not Interested','Has Advisor','Set'].map(s=>`<option ${s===L.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td><div class="act">
         ${L.enriched===false&&L.contactId&&window.__inClaude?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
-        ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
+        ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
+        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: home city/state, home value, mobile numbers on file (1-2 lookups)">&#127968;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
         <button class="abtn" onclick="toggleDetail('${L.id}')">${expanded===L.id?'Close':'More'}</button>
@@ -887,6 +888,12 @@ function detailRow(L){
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
       ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
       ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
+      ${L.hd?`<h4 style="margin-top:12px">Household &mdash; WhitePages</h4>
+      <div class="sigrow ${L.hd.value?'hit':'miss'}"><span>Home value</span><span class="pts">${L.hd.value?'$'+L.hd.value.toLocaleString():'unknown'}</span></div>
+      <div class="sigrow ${L.hd.city?'hit':'miss'}"><span>Lives in</span><span class="pts">${L.hd.city?esc(L.hd.city+', '+L.hd.state):'unknown'}</span></div>
+      <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}</span></div>
+      ${(L.hd.mobiles&&L.hd.mobiles.length)?`<div class="hint mono" style="margin-top:3px">${L.hd.mobiles.map(esc).join(' &middot; ')}</div>`:''}
+      ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}</div>`:''}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
         <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (deprioritize)</label>
@@ -1064,7 +1071,7 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
     const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
-    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?`Home: ${L.hd.value?'$'+L.hd.value.toLocaleString():'value unknown'}${L.hd.city?' — '+L.hd.city+', '+L.hd.state:''}${(L.hd.mobiles&&L.hd.mobiles.length)?' — '+L.hd.mobiles.length+' mobile on file':''}`:'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
     return [L.firstName,L.lastName,L.email,L.directPhone,L.mobilePhone,L.street,comments,L.employer,L.state,state.settings.addrType,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
   }));
   dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
@@ -1164,6 +1171,24 @@ window.verifyLead=async id=>{
     L.pv={label:bits.join(' \u00b7 '),ok:d.valid!==false&&mob&&d.name_match!==false};
     L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
   }catch(e){toast('Verify failed: '+e.message);}
+};
+ACT_LABEL.enrichHome='Home data';
+window.enrichHome=async id=>{
+  const L=byId(id);if(!L)return;
+  if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
+  toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+'…');
+  try{
+    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||''});
+    if(!d.found){toast('No WhitePages record found.');L.hd={value:null,city:'',state:'',mobiles:[],owner:''};save();render();return;}
+    L.hd={value:d.home_value||null,city:d.home_city||'',state:d.home_state||'',zip:d.home_zip||'',mobiles:d.mobiles||[],owner:d.owner||''};
+    if(!L.street&&d.home_street)L.street=d.home_street;
+    if(!L.city&&d.home_city)L.city=d.home_city;
+    if(!L.zip&&d.home_zip)L.zip=d.home_zip;
+    if(!L.mobilePhone&&d.mobiles&&d.mobiles.length)L.mobilePhone=d.mobiles[0];
+    L.updatedAt=Date.now();
+    logAct(id,'enrichHome',(d.home_value?'$'+d.home_value.toLocaleString():'no value')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile');
+    save();render();
+  }catch(e){toast('Enrich failed: '+e.message);}
 };
 document.getElementById('btnQC').addEventListener('click',async()=>{
   if(!(window.ME&&ME.signed_in)){toast('Sign in to run AI quality control.');return;}

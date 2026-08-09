@@ -56,9 +56,16 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events"
 )
 
-# --- WhitePages / Trestle (phone verification) ---
+# --- WhitePages (phone verification) ---
+# Two flavours of this API exist and they are not compatible:
+#   Whitepages Pro   https://api.whitepages.com   /v2/phone   header X-Api-Key
+#   Trestle          https://api.trestleiq.com    /3.1/phone  header x-api-key
+# The path is inferred from the base URL; WHITEPAGES_PHONE_PATH overrides it.
 WHITEPAGES_API_KEY = os.environ.get("WHITEPAGES_API_KEY", "")
-WHITEPAGES_BASE_URL = os.environ.get("WHITEPAGES_BASE_URL", "https://api.trestleiq.com").rstrip("/")
+WHITEPAGES_BASE_URL = os.environ.get("WHITEPAGES_BASE_URL", "https://api.whitepages.com").rstrip("/")
+WHITEPAGES_PHONE_PATH = os.environ.get("WHITEPAGES_PHONE_PATH", "")
+WHITEPAGES_PERSON_PATH = os.environ.get("WHITEPAGES_PERSON_PATH", "")
+WHITEPAGES_PROPERTY_PATH = os.environ.get("WHITEPAGES_PROPERTY_PATH", "")
 
 # --- Claude (AI lead QC) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -388,46 +395,233 @@ class VerifyPhoneRequest(BaseModel):
     last_name: str = ""
 
 
-@app.post("/api/verify-phone")
-async def verify_phone(req: VerifyPhoneRequest, request: Request):
-    # Lookups cost money per call — signed-in users only.
-    await _active_token(request)
+def _wp_path(kind: str) -> str:
+    """Endpoint path for a lookup, per API flavour."""
+    override = {"phone": WHITEPAGES_PHONE_PATH, "person": WHITEPAGES_PERSON_PATH,
+                "property": WHITEPAGES_PROPERTY_PATH}[kind]
+    if override:
+        return "/" + override.lstrip("/")
+    if "trestle" in WHITEPAGES_BASE_URL:
+        return {"phone": "/3.1/phone", "person": "/3.1/person", "property": "/3.1/property"}[kind]
+    return f"/v2/{kind}"
+
+
+async def _wp_get(kind: str, params: dict) -> dict:
+    """One WhitePages call, normalised to a dict (empty when no record)."""
     if not WHITEPAGES_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="WhitePages not configured — set WHITEPAGES_API_KEY "
                    "(see SETUP-whitepages.md).",
         )
+    url = WHITEPAGES_BASE_URL + _wp_path(kind)
     async with httpx.AsyncClient(timeout=30) as cx:
-        r = await cx.get(
-            f"{WHITEPAGES_BASE_URL}/3.1/phone",
-            params={"phone": req.phone},
-            headers={"x-api-key": WHITEPAGES_API_KEY},
-        )
+        r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
     if r.status_code in (401, 403):
         raise HTTPException(status_code=502, detail="WhitePages rejected the API key — check WHITEPAGES_API_KEY.")
+    if r.status_code == 404:
+        # Documented as "no records matched" — also what a wrong path returns.
+        return {}
     if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"WhitePages error {r.status_code}: {r.text[:300]}")
-    d = r.json()
+        raise HTTPException(
+            status_code=502,
+            detail=f"WhitePages error {r.status_code} from {url}: {r.text[:300]}",
+        )
+    try:
+        d = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail=f"WhitePages returned non-JSON from {url}.")
+    if isinstance(d, list):
+        d = d[0] if d and isinstance(d[0], dict) else {}
+    return d if isinstance(d, dict) else {}
 
-    owner = ""
-    belongs_to = d.get("belongs_to")
-    if isinstance(belongs_to, dict):
-        owner = belongs_to.get("name") or ""
-    elif isinstance(belongs_to, list) and belongs_to:
-        owner = (belongs_to[0] or {}).get("name") or ""
 
+def _first_str(d: dict, *keys) -> str:
+    """First non-empty string among keys, ignoring nested containers."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return str(v)
+    return ""
+
+
+def _first_dict(d: dict, *keys) -> dict:
+    """First dict among keys, unwrapping single-element lists."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            return v[0]
+    return {}
+
+
+def _owner_name(d: dict) -> str:
+    """Owner name out of whichever shape the API used."""
+    nested = _first_dict(d, "belongs_to", "owners", "associated_people", "people",
+                         "person", "residents", "current_residents", "results")
+    return _first_str(nested, "name", "full_name") or _first_str(d, "name", "full_name")
+
+
+@app.post("/api/verify-phone")
+async def verify_phone(req: VerifyPhoneRequest, request: Request):
+    # Lookups cost money per call — signed-in users only.
+    await _active_token(request)
+    d = await _wp_get("phone", {"phone": req.phone})
+    if not d:
+        return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
+                "owner": "", "name_match": None, "note": "no record found"}
+
+    # Line type sits at the top level on Trestle, inside phones[] on the Pro API.
+    line_type = _first_str(d, "line_type", "phone_type", "type")
+    if not line_type:
+        line_type = _first_str(_first_dict(d, "phones"), "type", "line_type", "phone_type")
+
+    valid = d.get("is_valid")
+    if valid is None:
+        valid = d.get("valid")
+    prepaid = d.get("is_prepaid")
+    if prepaid is None:
+        prepaid = d.get("prepaid")
+
+    owner = _owner_name(d)
     name_match = None
     if owner and req.last_name.strip():
         name_match = req.last_name.strip().lower() in owner.lower()
 
     return {
-        "valid": d.get("is_valid"),
-        "line_type": d.get("line_type"),
-        "carrier": d.get("carrier"),
-        "prepaid": d.get("is_prepaid"),
+        "valid": valid,
+        "line_type": line_type,
+        "carrier": _first_str(d, "carrier", "carrier_name"),
+        "prepaid": prepaid,
         "owner": owner,
         "name_match": name_match,
+    }
+
+
+class EnrichRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    city: str = ""
+    state: str = ""
+    street: str = ""
+
+
+EMPTY_ADDR = {"street": "", "city": "", "state": "", "zip": ""}
+
+
+def _parse_one_line(s: str) -> dict:
+    """'123 Main St, Seattle, WA 98101' -> parts."""
+    bits = [b.strip() for b in s.split(",") if b.strip()]
+    if not bits:
+        return dict(EMPTY_ADDR)
+    tail = bits[-1].split() if len(bits) >= 3 else []
+    return {
+        "street": bits[0],
+        "city": bits[1] if len(bits) >= 3 else "",
+        "state": tail[0] if tail else "",
+        "zip": tail[1] if len(tail) > 1 else "",
+    }
+
+
+def _home_address(person: dict) -> dict:
+    """Home address whether the API returns structured fields or one line."""
+    raw = None
+    for key in ("current_addresses", "addresses", "current_address", "address"):
+        v = person.get(key)
+        if isinstance(v, list) and v:
+            raw = v[0]
+            break
+        if isinstance(v, (dict, str)) and v:
+            raw = v
+            break
+    if isinstance(raw, str):
+        return _parse_one_line(raw)
+    if not isinstance(raw, dict):
+        return dict(EMPTY_ADDR)
+
+    parts = {
+        "street": _first_str(raw, "street_line_1", "street_line", "street", "line1"),
+        "city": _first_str(raw, "city", "city_name", "locality"),
+        "state": _first_str(raw, "state_code", "state", "region"),
+        "zip": _first_str(raw, "postal_code", "zip", "zip_code"),
+    }
+    # Pro API nests the whole thing in a single "address" string.
+    if not parts["city"]:
+        one_line = _first_str(raw, "address", "full_address", "formatted_address")
+        if one_line:
+            return _parse_one_line(one_line)
+    return parts
+
+
+def _money(v) -> Optional[int]:
+    """Whole dollars from a number or a string like '$1,250,000'."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    digits = "".join(c for c in str(v) if c.isdigit())
+    return int(digits) if digits else None
+
+
+@app.post("/api/enrich")
+async def enrich(req: EnrichRequest, request: Request):
+    """Home address, home value and mobile availability for one lead.
+
+    Costs one person lookup, plus one property lookup when an address comes
+    back — so it stays a per-lead button rather than a bulk sweep.
+    """
+    await _active_token(request)
+    name = f"{req.first_name} {req.last_name}".strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="A name is required to enrich a lead.")
+
+    params = {"name": name}
+    if req.city:
+        params["city"] = req.city
+    if req.state:
+        params["state_code"] = req.state
+    if req.street:
+        params["street"] = req.street
+    person = await _wp_get("person", params)
+    if not person:
+        return {"found": False}
+
+    addr = _home_address(person)
+
+    phones = person.get("phones")
+    phones = phones if isinstance(phones, list) else []
+    mobiles = [
+        _first_str(p, "number", "phone_number", "phone")
+        for p in phones
+        if isinstance(p, dict) and "mobile" in _first_str(p, "type", "line_type", "phone_type").lower()
+    ]
+    mobiles = [m for m in mobiles if m]
+
+    home_value = None
+    if addr["street"] and addr["state"]:
+        prop = await _wp_get("property", {
+            "street": addr["street"], "city": addr["city"], "state_code": addr["state"],
+        })
+        if prop:
+            home_value = _money(
+                prop.get("estimated_value") or prop.get("market_value")
+                or prop.get("value") or prop.get("assessed_value")
+                or _first_dict(prop, "valuation", "avm").get("value")
+            )
+
+    return {
+        "found": True,
+        "owner": _first_str(person, "name", "full_name"),
+        "home_street": addr["street"],
+        "home_city": addr["city"],
+        "home_state": addr["state"],
+        "home_zip": addr["zip"],
+        "home_value": home_value,
+        "mobiles": mobiles,
+        "mobile_count": len(mobiles),
     }
 
 
