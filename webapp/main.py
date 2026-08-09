@@ -547,15 +547,23 @@ class VerifyPhoneRequest(BaseModel):
 
 
 def _wp_path(kind: str) -> str:
-    """Endpoint path for a lookup, per API flavour."""
+    """Endpoint path for a lookup, per API flavour.
+
+    There is no /v2/phone on the Pro API. "Reverse phone lookup" is documented
+    as a mode of person search — GET /v2/person?phone= — and the responses
+    prove it: they come back as person records tagged matched_by:["phone"].
+    Calling /v2/phone 404s, which the app reported as "no record found" while
+    the account showed no usage at all, because nothing was ever billed.
+    """
     override = {"phone": WHITEPAGES_PHONE_PATH, "person": WHITEPAGES_PERSON_PATH,
                 "property": WHITEPAGES_PROPERTY_PATH}[kind]
     if override:
         return "/" + override.lstrip("/")
     if "trestle" in WHITEPAGES_BASE_URL:
         return {"phone": "/3.1/phone", "person": "/3.1/person", "property": "/3.1/property"}[kind]
-    # The Pro property endpoint is documented with a trailing slash.
-    return "/v2/property/" if kind == "property" else f"/v2/{kind}"
+    if kind == "property":
+        return "/v2/property/"     # documented with the trailing slash
+    return "/v2/person"            # both person search and reverse phone
 
 
 async def _wp_get(kind: str, params: dict):
@@ -846,6 +854,7 @@ async def enrich(req: EnrichRequest, request: Request):
         "found": True,
         "owner": _first_str(person, "name", "full_name"),
         "age": person.get("age"),
+        "dob": _first_str(person, "date_of_birth"),
         "home_street": addr["street"],
         "home_city": addr["city"],
         "home_state": addr["state"],

@@ -257,7 +257,8 @@
     <label>Age over <input type="number" step="0.5" id="sAgeMin"></label>
     <label>&hellip; or graduated before <input type="number" id="sGradBefore"></label>
   </div>
-  <h3>R &mdash; Time in current role</h3>
+  <h3>R &mdash; Recent move with a second current role</h3>
+  <p class="hint">Both must be true: under the month ceiling in the current role, <em>and</em> another role still marked Present. Set per lead in the detail row, or mapped from an &ldquo;Other Current Roles&rdquo; column.</p>
   <div class="mgrid">
     <label>In role fewer than (months) <input type="number" id="sTenMax"></label>
   </div>
@@ -428,11 +429,12 @@ const DEFAULTS={
   titles:'C Level,C-Level,Chief,CEO,CFO,COO,CIO,CTO,CMO,VP,Vice President,SVP,EVP,Director,Partner,Principal,Owner,President,Founder,Co-Founder,Managing Director',
   exTitles:'Assistant,Associate,Junior,Intern,Coordinator,Deputy Director',
   exStates:'Connecticut,Massachusetts,CT,MA',
-  wAge:25, wRecent:25, wTitle:20, wPrior:20, wContact:10,
-  // Weights total 100. Tier A therefore needs four of the five signals
-  // including the heavy ones — three signals alone should not be call-first.
-  tierA:80, tierB:60,
-  modelVersion:2,
+  wAge:25, wRecent:5, wTitle:20, wPrior:20, wContact:10,
+  // Weights total 80 now that the recent-move signal is worth 5. Tier A needs
+  // age plus level plus prior experience (65); adding contact or the second
+  // role clears it comfortably.
+  tierA:60, tierB:40,
+  modelVersion:3,
   source:'ZoomInfo', addrType:'Business',
   orgName:'', orgEmail:'', dur:30,
   callVia:'rcapp', emailVia:'mailto',
@@ -537,6 +539,29 @@ function parseStart(v){
 }
 function monthsSince(d){if(!d)return null;const n=new Date();return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth());}
 function truthy(v){return /^(true|yes|y|1)$/i.test((''+(v||'')).trim());}
+const NOW_YEAR=new Date().getFullYear();
+/* Career length: use the stated figure, else derive it. Graduation year and
+   first-job year both mark the start of working life, so either works; take
+   whichever is earlier when both are present. */
+function careerYears(L){
+  const stated=parseFloat((''+(L.yearsExperience||'')).replace(/[^\d.]/g,''));
+  if(stated>0)return stated;
+  const gy=parseInt(L.gradYear,10), fy=parseInt(L.firstJobYear,10);
+  const starts=[gy,fy].filter(y=>y>1900&&y<=NOW_YEAR);
+  if(!starts.length)return NaN;
+  return NOW_YEAR-Math.min(...starts);
+}
+/* A second role that is still current. Comes from a mapped CSV column, from
+   ZoomInfo employment history with more than one open-ended entry, or from the
+   manual checkbox in the detail row. */
+function hasConcurrentRole(L){
+  if(L.concurrentRole===true)return true;
+  if(L.concurrentRole===false)return false;
+  const t=(''+(L.concurrentRoles||'')).trim();
+  if(!t)return false;
+  if(/^(no|none|n|0|false)$/i.test(t))return false;
+  return truthy(t)||/present|current/i.test(t)||t.length>2;
+}
 
 function scoreLead(L){
   const s=state.settings, sig=[];
@@ -554,9 +579,13 @@ function scoreLead(L){
   else if(age){sig.push({k:'A',label:`Age ${age} — under ${s.ageMin}`,hit:false,pts:0});}
   else if(gy){sig.push({k:'A',label:`Graduated ${gy} — ${s.gradBefore} or later`,hit:false,pts:0});}
   else sig.push({k:'A',label:'Age unknown — enrich or check LinkedIn',hit:false,pts:0});
-  // R — in role under the tenure ceiling (the orphaned-401k window)
+  // R — recent move AND still holding another current role. Both required:
+  // a concurrent "Present" position is what separates a genuine second seat
+  // (board, advisory, own business) from an ordinary job change.
   const mo=monthsSince(parseStart(L.jobStartDate));
-  if(mo!==null&&mo<+s.tenMax){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo — under ${s.tenMax}`,hit:true,conf:true,pts:+s.wRecent});}
+  const conc=hasConcurrentRole(L);
+  if(mo!==null&&mo<+s.tenMax&&conc){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo and holds another current role${L.concurrentRoles?': '+L.concurrentRoles:''}`,hit:true,conf:true,pts:+s.wRecent});}
+  else if(mo!==null&&mo<+s.tenMax){sig.push({k:'R',label:`In role ${mo} mo, but no second current role`,hit:false,pts:0});}
   else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — ${s.tenMax}+`,hit:false,pts:0});}
   else sig.push({k:'R',label:'Start date unknown',hit:false,pts:0});
   // T — level: C / VP / Director / Partner / Owner / President / Founder
@@ -569,7 +598,7 @@ function scoreLead(L){
   if(tHit){score+=+s.wTitle;sig.push({k:'T',label:'Decision-maker level: '+(L.title||L.mgmtLevel),hit:true,conf:true,pts:+s.wTitle});}
   else sig.push({k:'T',label:'Not C/VP/Director/Partner/Owner/President/Founder',hit:false,pts:0});
   // E — 10+ years of senior-level experience at previous companies
-  const totYrs=parseFloat((''+(L.yearsExperience||'')).replace(/[^\d.]/g,''));
+  const totYrs=careerYears(L);
   let hereYrs=parseFloat((''+(L.yearsAtEmployer||'')).replace(/[^\d.]/g,''));
   if(!(hereYrs>=0)&&mo!==null)hereYrs=mo/12;
   const priorYrs=(totYrs>0&&hereYrs>=0)?Math.max(0,totYrs-hereYrs):null;
@@ -622,6 +651,9 @@ const FIELDS=[
   ['yearsExperience','Years of Experience',['years of experience','total years of experience','experience years','total experience','career length']],
   ['yearsAtEmployer','Years at Current Employer',['years at current employer','years at company','tenure','years in current role','time in role']],
   ['numCompanies','Number of Companies',['number of companies','companies','number of employers','employer count']],
+  ['firstJobYear','First Work Year',['first work year','career start year','first job year','start of career','earliest position year']],
+  ['concurrentRoles','Other Current Roles',['other current roles','concurrent roles','additional titles','other titles','board memberships','secondary title','other positions']],
+  ['personalEmail','Personal Email',['personal email','other email','secondary email','home email','email address 2','alternate email']],
   ['hasEmail','ZI: email available',['has email','hasemail']],
   ['hasMobile','ZI: mobile available',['has mobile phone','has mobile','hasmobilephone']],
   ['mobileDnc','Mobile DNC flag',['mobile phone do not call','mobilephonedonotcall','mobile dnc']],
@@ -956,6 +988,7 @@ function detailRow(L){
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}</div>`:''}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
+        <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
         <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
       </div>
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
@@ -1123,16 +1156,36 @@ document.getElementById('btnMakeIcs').addEventListener('click',async()=>{
 const pad=n=>(''+n).padStart(2,'0');
 
 /* =============== CSV export =============== */
+/* Home address wins when WhitePages found one — that is where the person
+   actually is. Fall back to whatever address came with the contact record. */
+function exportAddress(L){
+  const h=L.hd||{};
+  if(h.city&&(h.street||L.street))
+    return {street:h.street||L.street||'',city:h.city,state:h.state||'',zip:h.zip||'',type:'Home'};
+  return {street:L.street||'',city:L.city||'',state:L.state||'',zip:L.zip||'',
+          type:state.settings.addrType||'Business'};
+}
+/* Business email is primary. The secondary is whichever personal address we
+   have — from the CSV, or from the WhitePages record. */
+function exportEmails(L){
+  const seen=new Set(),out=[];
+  const add=e=>{e=(e||'').trim();if(e&&!seen.has(e.toLowerCase())){seen.add(e.toLowerCase());out.push(e);}};
+  add(L.email);                                   // business, from ZoomInfo
+  add(L.personalEmail);                           // personal, from the import
+  ((L.hd||{}).emails||[]).forEach(add);           // personal, from WhitePages
+  return {primary:out[0]||'',secondary:out[1]||''};
+}
 document.getElementById('btnExport').addEventListener('click',()=>{
   const list=filtered();
   if(!list.length){toast('Nothing to export with current filters.');return;}
-  const H=['First Name','Last Name','Email Address','Business Phone','Mobile phone','Street Address','Comments','Employer','State/Province','Address Type','Lead Other 2','Lead Source Detail','Lead External ID'];
+  const H=['First Name','Last Name','Email Address','Secondary Email','Business Phone','Mobile phone','Street Address','City','State/Province','Zip','Address Type','Comments','Employer','Lead Other 2','Lead Source Detail','Lead External ID'];
   const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
     const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
     const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
-    return [L.firstName,L.lastName,L.email,L.directPhone,L.mobilePhone,L.street,comments,L.employer,L.state,state.settings.addrType,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
+    const a=exportAddress(L), em=exportEmails(L);
+    return [L.firstName,L.lastName,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
   }));
   dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
   toast(`Exported ${list.length} leads (current filter).`);});
@@ -1242,7 +1295,8 @@ window.enrichHome=async id=>{
   try{
     const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||''});
     if(!d.found){toast('No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:''};save();render();return;}
-    L.hd={age:d.age||null,city:d.home_city||'',state:d.home_state||'',zip:d.home_zip||'',
+    L.hd={age:d.age||null,dob:d.dob||'',street:d.home_street||'',city:d.home_city||'',
+          state:d.home_state||'',zip:d.home_zip||'',emails:d.emails||[],
           mobiles:d.mobiles||[],phonesTotal:d.phones_total||0,props:d.properties_owned||0,
           ownsHome:(d.owns_home===undefined?null:d.owns_home),ownerType:d.owner_type||'',
           coOwners:d.co_owners||[],owner:d.owner||''};
