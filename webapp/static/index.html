@@ -640,7 +640,7 @@ const FIELDS=[
   ['mgmtLevel','Management Level',['management level','job function level','seniority']],
   ['employer','Employer / Company',['company name','company','employer','account name']],
   ['state','State/Province',['person state','state','contact state','state/province','person location state']],
-  ['street','Street Address',['person street','street address','street','address','person address']],
+  ['street','Street Address',['person street','street address','person address','mailing address','street']],
   ['city','City',['person city','city']],
   ['zip','Zip',['person zip code','zip','zip code','postal code']],
   ['jobStartDate','Job Start Date',['job start date','position start date','start date','hire date']],
@@ -669,15 +669,32 @@ document.getElementById('csvFile').addEventListener('change',e=>{
     openMapper(f.name); };
   r.readAsText(f);
 });
+/* Column guessing. Two passes, and no column is ever claimed twice — without
+   that, "Email Address" satisfied the street field's loose "address" alias and
+   the email landed in Street Address. Exact header matches are resolved first
+   so a real column always beats another field's fuzzy guess. */
+function guessColumns(headers){
+  const low=headers.map(h=>(h||'').toLowerCase().trim());
+  const used=new Set(),map={};
+  FIELDS.forEach(([key,,syn])=>{
+    for(const s of syn){const i=low.indexOf(s);if(i>-1&&!used.has(i)){map[key]=i;used.add(i);return;}}
+  });
+  FIELDS.forEach(([key,,syn])=>{
+    if(map[key]!==undefined)return;
+    for(const s of syn){
+      const i=low.findIndex((h,j)=>!used.has(j)&&h.includes(s));
+      if(i>-1){map[key]=i;used.add(i);return;}
+    }
+  });
+  return map;
+}
 function openMapper(fname){
   document.getElementById('impInfo').textContent=`${pending.data.length} rows found in ${fname}. Check the mapping, then import.`;
   document.getElementById('impBatch').value=fname.replace(/\.csv$/i,'');
-  const low=pending.headers.map(h=>h.toLowerCase());
+  const guess=guessColumns(pending.headers);
   const body=document.getElementById('mapRows');body.innerHTML='';
   FIELDS.forEach(([key,label,syn])=>{
-    let idx=-1;
-    for(const s of syn){const i=low.indexOf(s);if(i>-1){idx=i;break;}}
-    if(idx===-1)for(const s of syn){const i=low.findIndex(h=>h.includes(s));if(i>-1){idx=i;break;}}
+    const idx=guess[key]===undefined?-1:guess[key];
     const opts=['<option value="-1">— skip —</option>'].concat(pending.headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${esc(h)}</option>`)).join('');
     body.insertAdjacentHTML('beforeend',`<tr><td>${label}</td><td><select data-key="${key}">${opts}</select></td></tr>`);
   });
