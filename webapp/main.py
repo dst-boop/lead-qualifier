@@ -403,11 +403,12 @@ def _wp_path(kind: str) -> str:
         return "/" + override.lstrip("/")
     if "trestle" in WHITEPAGES_BASE_URL:
         return {"phone": "/3.1/phone", "person": "/3.1/person", "property": "/3.1/property"}[kind]
-    return f"/v2/{kind}"
+    # The Pro property endpoint is documented with a trailing slash.
+    return "/v2/property/" if kind == "property" else f"/v2/{kind}"
 
 
-async def _wp_get(kind: str, params: dict) -> dict:
-    """One WhitePages call, normalised to a dict (empty when no record)."""
+async def _wp_get(kind: str, params: dict):
+    """One WhitePages call. Returns parsed JSON, or None when nothing matched."""
     if not WHITEPAGES_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -415,25 +416,65 @@ async def _wp_get(kind: str, params: dict) -> dict:
                    "(see SETUP-whitepages.md).",
         )
     url = WHITEPAGES_BASE_URL + _wp_path(kind)
-    async with httpx.AsyncClient(timeout=30) as cx:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
     if r.status_code in (401, 403):
         raise HTTPException(status_code=502, detail="WhitePages rejected the API key — check WHITEPAGES_API_KEY.")
     if r.status_code == 404:
-        # Documented as "no records matched" — also what a wrong path returns.
-        return {}
+        return None          # documented as "no matching record"
+    if r.status_code == 429:
+        raise HTTPException(status_code=502, detail="WhitePages rate limit hit — try again shortly.")
+    if r.status_code == 400:
+        try:
+            msg = (r.json().get("error") or {}).get("long_message") or r.text
+        except ValueError:
+            msg = r.text
+        raise HTTPException(status_code=502, detail=f"WhitePages rejected the query: {msg[:300]}")
     if r.status_code != 200:
         raise HTTPException(
             status_code=502,
             detail=f"WhitePages error {r.status_code} from {url}: {r.text[:300]}",
         )
     try:
-        d = r.json()
+        return r.json()
     except ValueError:
         raise HTTPException(status_code=502, detail=f"WhitePages returned non-JSON from {url}.")
-    if isinstance(d, list):
-        d = d[0] if d and isinstance(d[0], dict) else {}
-    return d if isinstance(d, dict) else {}
+
+
+def _best_person(payload, require_last: str = "") -> dict:
+    """Highest-confidence person record out of a search response.
+
+    Live responses wrap candidates in {"results": [...], "metadata": {...}};
+    the docs show a bare array. Candidates carry an explicit match_score and
+    partial records come back with it null, so pick on score rather than
+    trusting position.
+
+    require_last guards against the API's fuzzy fallback: a search for a name
+    that isn't in the data happily returns near-spellings — "Tracy" for
+    "Treacy" — and attributing a stranger's home address and phone numbers to
+    a lead is worse than returning nothing.
+    """
+    if isinstance(payload, dict):
+        for key in ("results", "result"):
+            v = payload.get(key)
+            if isinstance(v, list):
+                payload = v
+                break
+            if isinstance(v, dict):
+                return v
+        else:
+            return payload if "name" in payload else {}
+    if not isinstance(payload, list):
+        return {}
+    people = [p for p in payload if isinstance(p, dict)]
+    last = require_last.strip().lower()
+    if last:
+        people = [
+            p for p in people
+            if last in (p.get("name") or "").lower()
+            or any(last in (a or "").lower() for a in (p.get("aliases") or []))
+        ]
+    return max(people, key=lambda p: p.get("match_score") or 0) if people else {}
 
 
 def _first_str(d: dict, *keys) -> str:
@@ -447,66 +488,54 @@ def _first_str(d: dict, *keys) -> str:
     return ""
 
 
-def _first_dict(d: dict, *keys) -> dict:
-    """First dict among keys, unwrapping single-element lists."""
-    for k in keys:
-        v = d.get(k)
-        if isinstance(v, dict):
-            return v
-        if isinstance(v, list) and v and isinstance(v[0], dict):
-            return v[0]
-    return {}
+def _digits(s: str) -> str:
+    return "".join(c for c in str(s) if c.isdigit())[-10:]
 
 
-def _owner_name(d: dict) -> str:
-    """Owner name out of whichever shape the API used."""
-    nested = _first_dict(d, "belongs_to", "owners", "associated_people", "people",
-                         "person", "residents", "current_residents", "results")
-    return _first_str(nested, "name", "full_name") or _first_str(d, "name", "full_name")
+US_STATES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
 
 
-@app.post("/api/verify-phone")
-async def verify_phone(req: VerifyPhoneRequest, request: Request):
-    # Lookups cost money per call — signed-in users only.
-    await _active_token(request)
-    d = await _wp_get("phone", {"phone": req.phone})
-    if not d:
-        return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
-                "owner": "", "name_match": None, "note": "no record found"}
+def _state_code(s: str) -> str:
+    """Two-letter code, or "" when it can't be resolved.
 
-    # Line type sits at the top level on Trestle, inside phones[] on the Pro API.
-    line_type = _first_str(d, "line_type", "phone_type", "type")
-    if not line_type:
-        line_type = _first_str(_first_dict(d, "phones"), "type", "line_type", "phone_type")
-
-    valid = d.get("is_valid")
-    if valid is None:
-        valid = d.get("valid")
-    prepaid = d.get("is_prepaid")
-    if prepaid is None:
-        prepaid = d.get("prepaid")
-
-    owner = _owner_name(d)
-    name_match = None
-    if owner and req.last_name.strip():
-        name_match = req.last_name.strip().lower() in owner.lower()
-
-    return {
-        "valid": valid,
-        "line_type": line_type,
-        "carrier": _first_str(d, "carrier", "carrier_name"),
-        "prepaid": prepaid,
-        "owner": owner,
-        "name_match": name_match,
-    }
+    state_code is validated server-side and a full name like "New York" is a
+    400, so an unrecognisable value is dropped from the query rather than sent.
+    """
+    s = (s or "").strip()
+    if len(s) == 2 and s.isalpha():
+        return s.upper()
+    return US_STATES.get(s.lower(), "")
 
 
-class EnrichRequest(BaseModel):
-    first_name: str = ""
-    last_name: str = ""
-    city: str = ""
-    state: str = ""
-    street: str = ""
+def _phone_list(person: dict) -> list:
+    out = []
+    for p in person.get("phones") or []:
+        if not isinstance(p, dict):
+            continue
+        num = _first_str(p, "number", "phone_number", "phone")
+        if num:
+            out.append({"number": num,
+                        "type": _first_str(p, "type", "line_type", "phone_type"),
+                        "score": p.get("score")})
+    return out
+
+
+def _mobiles(person: dict) -> list:
+    return [p["number"] for p in _phone_list(person) if "mobile" in p["type"].lower()]
 
 
 EMPTY_ADDR = {"street": "", "city": "", "state": "", "zip": ""}
@@ -526,49 +555,88 @@ def _parse_one_line(s: str) -> dict:
     }
 
 
-def _home_address(person: dict) -> dict:
-    """Home address whether the API returns structured fields or one line."""
-    raw = None
-    for key in ("current_addresses", "addresses", "current_address", "address"):
-        v = person.get(key)
-        if isinstance(v, list) and v:
-            raw = v[0]
-            break
-        if isinstance(v, (dict, str)) and v:
-            raw = v
-            break
+def _addr(raw) -> dict:
+    """Address parts from a structured record or a one-line string."""
     if isinstance(raw, str):
         return _parse_one_line(raw)
     if not isinstance(raw, dict):
         return dict(EMPTY_ADDR)
-
     parts = {
-        "street": _first_str(raw, "street_line_1", "street_line", "street", "line1"),
+        "street": _first_str(raw, "line1", "street_line_1", "street_line", "street"),
         "city": _first_str(raw, "city", "city_name", "locality"),
-        "state": _first_str(raw, "state_code", "state", "region"),
-        "zip": _first_str(raw, "postal_code", "zip", "zip_code"),
+        "state": _first_str(raw, "state", "state_code", "region"),
+        "zip": _first_str(raw, "zip", "postal_code", "zip_code"),
     }
-    # Pro API nests the whole thing in a single "address" string.
     if not parts["city"]:
-        one_line = _first_str(raw, "address", "full_address", "formatted_address")
-        if one_line:
-            return _parse_one_line(one_line)
+        one = _first_str(raw, "full_address", "address", "formatted_address")
+        if one:
+            return _parse_one_line(one)
     return parts
 
 
-def _money(v) -> Optional[int]:
-    """Whole dollars from a number or a string like '$1,250,000'."""
-    if isinstance(v, bool) or v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return int(v)
-    digits = "".join(c for c in str(v) if c.isdigit())
-    return int(digits) if digits else None
+def _home_address(person: dict) -> dict:
+    for key in ("current_addresses", "addresses", "current_address", "address"):
+        v = person.get(key)
+        if isinstance(v, list) and v:
+            return _addr(v[0])
+        if isinstance(v, (dict, str)) and v:
+            return _addr(v)
+    return dict(EMPTY_ADDR)
+
+
+def _list_total(person: dict, name: str) -> int:
+    """Full count of a capped list: what came back plus what was withheld."""
+    shown = person.get(name)
+    shown = len(shown) if isinstance(shown, list) else 0
+    meta = ((person.get("result_metadata") or {}).get(name)) or {}
+    return shown + (meta.get("additional") or 0)
+
+
+@app.post("/api/verify-phone")
+async def verify_phone(req: VerifyPhoneRequest, request: Request):
+    """Who a number belongs to, and whether it is a mobile.
+
+    The Pro API answers a reverse-phone query with person records, so there is
+    no carrier or prepaid flag to report — the useful signals are the line type
+    on the matching phone entry and whether the owner is the lead.
+    """
+    await _active_token(request)
+    person = _best_person(await _wp_get("phone", {"phone": _digits(req.phone)}))
+    if not person:
+        return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
+                "owner": "", "name_match": None, "note": "no record found"}
+
+    # Match the queried number inside the record rather than taking the first.
+    want = _digits(req.phone)
+    phones = _phone_list(person)
+    hit = next((p for p in phones if _digits(p["number"]) == want), None)
+
+    owner = _first_str(person, "name", "full_name")
+    name_match = None
+    if owner and req.last_name.strip():
+        name_match = req.last_name.strip().lower() in owner.lower()
+
+    return {
+        "valid": True if hit else None,
+        "line_type": (hit or {}).get("type", ""),
+        "carrier": "",          # not offered by this API
+        "prepaid": None,
+        "owner": owner,
+        "name_match": name_match,
+    }
+
+
+class EnrichRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    city: str = ""
+    state: str = ""
+    street: str = ""
 
 
 @app.post("/api/enrich")
 async def enrich(req: EnrichRequest, request: Request):
-    """Home address, home value and mobile availability for one lead.
+    """Household facts for one lead: where they live, what they own, how to reach them.
 
     Costs one person lookup, plus one property lookup when an address comes
     back — so it stays a per-lead button rather than a bulk sweep.
@@ -578,50 +646,69 @@ async def enrich(req: EnrichRequest, request: Request):
     if not name:
         raise HTTPException(status_code=400, detail="A name is required to enrich a lead.")
 
-    params = {"name": name}
+    # strict_match suppresses the server-side fuzzy fallback; the surname check
+    # in _best_person catches anything that slips through anyway.
+    params = {"name": name, "strict_match": "true"}
     if req.city:
         params["city"] = req.city
-    if req.state:
-        params["state_code"] = req.state
+    if _state_code(req.state):
+        params["state_code"] = _state_code(req.state)
     if req.street:
         params["street"] = req.street
-    person = await _wp_get("person", params)
+    person = _best_person(await _wp_get("person", params), require_last=req.last_name)
     if not person:
         return {"found": False}
 
     addr = _home_address(person)
+    mobiles = _mobiles(person)
 
-    phones = person.get("phones")
-    phones = phones if isinstance(phones, list) else []
-    mobiles = [
-        _first_str(p, "number", "phone_number", "phone")
-        for p in phones
-        if isinstance(p, dict) and "mobile" in _first_str(p, "type", "line_type", "phone_type").lower()
-    ]
-    mobiles = [m for m in mobiles if m]
-
-    home_value = None
-    if addr["street"] and addr["state"]:
-        prop = await _wp_get("property", {
-            "street": addr["street"], "city": addr["city"], "state_code": addr["state"],
-        })
-        if prop:
-            home_value = _money(
-                prop.get("estimated_value") or prop.get("market_value")
-                or prop.get("value") or prop.get("assessed_value")
-                or _first_dict(prop, "valuation", "avm").get("value")
-            )
+    # Ownership stands in for net worth here: this API carries no home value,
+    # but who holds the deed is itself a strong signal — a house in a trust or
+    # an LLC means someone has already done estate or entity planning.
+    owns_home = None
+    owner_type = ""
+    co_owners: list = []
+    if addr["street"] and (addr["city"] or addr["zip"]):
+        prop_params = {"street": addr["street"]}
+        if addr["city"]:
+            prop_params["city"] = addr["city"]
+        if _state_code(addr["state"]):
+            prop_params["state_code"] = _state_code(addr["state"])
+        if addr["zip"]:
+            prop_params["zipcode"] = addr["zip"]
+        prop = await _wp_get("property", prop_params)
+        result = (prop or {}).get("result") if isinstance(prop, dict) else None
+        if isinstance(result, dict):
+            info = result.get("ownership_info") or {}
+            owner_type = _first_str(info, "owner_type")
+            names = [_first_str(o, "name") for o in (info.get("person_owners") or [])
+                     if isinstance(o, dict)]
+            biz = [_first_str(o, "name") for o in (info.get("business_owners") or [])
+                   if isinstance(o, dict)]
+            last = req.last_name.strip().lower()
+            owns_home = bool(last) and any(last in n.lower() for n in names if n)
+            if biz:
+                owner_type = owner_type or "entity"
+            co_owners = [n for n in names + biz if n]
 
     return {
         "found": True,
         "owner": _first_str(person, "name", "full_name"),
+        "age": person.get("age"),
         "home_street": addr["street"],
         "home_city": addr["city"],
         "home_state": addr["state"],
         "home_zip": addr["zip"],
-        "home_value": home_value,
         "mobiles": mobiles,
         "mobile_count": len(mobiles),
+        "phones_total": _list_total(person, "phones"),
+        "properties_owned": _list_total(person, "owned_properties"),
+        "owns_home": owns_home,
+        "owner_type": owner_type,
+        "co_owners": co_owners,
+        "linkedin_url": _first_str(person, "linkedin_url"),
+        "emails": [_first_str(e, "email") for e in (person.get("emails") or [])
+                   if isinstance(e, dict) and _first_str(e, "email")],
     }
 
 
@@ -652,6 +739,7 @@ Then at least ONE gate must hold:
 If a lead record includes an explicit "age" value, use it verbatim with ageStatus "CONFIRMED" instead of estimating.
 Status vocabulary per gate: "CONFIRMED" (record explicitly states it), "INFERRED" (strong proxy: seniority, tenure, company size, title), "UNKNOWN" (no signal), "FAIL" (evidence contradicts it).
 Inference guides: senior titles (VP/SVP/C-suite/Partner/Principal/Owner/MD) at mid-size+ companies => income likely >$250K. Long tenure in high-income roles or equity titles => higher net-worth likelihood. Many stints under 3 years => job hopper (small 401k balances, penalize).
+Property fields, when present, come from public records and are CONFIRMED rather than inferred: "ownsHome" true means the deed carries their name, "propertiesOwned" counts deeded properties (two or more is a strong net-worth signal), and "deedHeldBy" naming a trust or an entity means estate or entity planning has already happened — treat that as a strong NW signal and note the existing planning in the checklist.
 
 Return ONLY a JSON array, one object per lead, same order, no prose:
 [{{"i":0,"ageEst":57,"ageStatus":"INFERRED","gates":{{"NW":{{"s":"INFERRED","ev":"short evidence"}},"YHE":{{"s":"FAIL","ev":""}},"401K":{{"s":"INFERRED","ev":""}},"WL":{{"s":"UNKNOWN","ev":""}},"INT":{{"s":"UNKNOWN","ev":""}}}},"jobHopper":false,"grade":"A","checklist":["Confirm approximate net worth","Confirm old 401(k) balance"],"note":"one-line QC summary"}}]
@@ -674,6 +762,11 @@ class QCLead(BaseModel):
     positionStart: str = ""
     employees: str = ""
     notes: str = ""
+    # Confirmed facts from a WhitePages enrichment, when one has been run.
+    age: Optional[int] = None
+    ownsHome: Optional[bool] = None
+    propertiesOwned: Optional[int] = None
+    deedHeldBy: str = ""
 
 
 class QCRequest(BaseModel):

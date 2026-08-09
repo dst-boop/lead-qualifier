@@ -11,9 +11,24 @@ Two per-lead buttons.
 
 **🏠 Enrich** looks the person up by name and shows:
 
+- **confirmed age** — a real date of birth, not a graduation-year guess
 - **home city and state** — where they live, not where the company is
-- **estimated home value** — the strongest net-worth proxy available here
+- **whether they own their home**, and whether the deed is held by a person, a
+  trust, or an entity
+- **how many properties they own**
 - **how many mobile numbers** are on file, and what they are
+
+### There is no home value in this API
+
+Property Search returns ownership, residents, geolocation, APN and county —
+no assessed value, no market estimate, no AVM. If a dollar figure per house is
+needed, it has to come from a property-data provider (ATTOM, Estated, county
+assessor records), not from here.
+
+Ownership is the substitute, and it is not a bad one: **who holds the deed**
+is a genuine wealth signal. A house in a trust or an LLC means the household
+has already done estate or entity planning, and the count of deeded properties
+separates one-home owners from people with a portfolio.
 
 Both write into the CSV export comments. Enrich also backfills empty street,
 city, zip and mobile fields on the lead, so a lead with no mobile number can
