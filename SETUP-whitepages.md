@@ -41,11 +41,18 @@ exactly one of them:
 
 | Flavour | Base URL | Paths | Header |
 |---|---|---|---|
-| **Whitepages Pro** (default) | `https://api.whitepages.com` | `/v2/phone`, `/v2/person`, `/v2/property` | `X-Api-Key` |
+| **Whitepages Pro** (default) | `https://api.whitepages.com` | `/v2/person`, `/v2/property/` | `X-Api-Key` |
 | **Trestle** | `https://api.trestleiq.com` | `/3.1/phone`, … | `x-api-key` |
 
 The app defaults to Whitepages Pro and infers the paths from the base URL, so
 setting `WHITEPAGES_BASE_URL` to the Trestle host switches the whole dialect.
+
+### There is no /v2/phone
+
+Reverse phone lookup is a *mode of person search* — `GET /v2/person?phone=` —
+not its own endpoint. Calling `/v2/phone` returns 404, which reads as "no
+record found" while the API account records **no usage at all**, because
+nothing was billed. Zero usage on the dashboard is the tell.
 
 ## Setup
 
@@ -57,7 +64,7 @@ setting `WHITEPAGES_BASE_URL` to the Trestle host switches the whole dialect.
 |---|---|
 | `WHITEPAGES_API_KEY` | your API key |
 | `WHITEPAGES_BASE_URL` | *(optional)* defaults to `https://api.whitepages.com` |
-| `WHITEPAGES_PHONE_PATH` | *(optional)* override, e.g. `/v2/phone` |
+| `WHITEPAGES_PHONE_PATH` | *(optional)* override for reverse-phone lookups |
 | `WHITEPAGES_PERSON_PATH` | *(optional)* override |
 | `WHITEPAGES_PROPERTY_PATH` | *(optional)* override |
 
