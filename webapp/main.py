@@ -12,10 +12,13 @@ Configure one provider or both; the UI only offers the ones configured.
 Environment variables:
   MS_CLIENT_ID / MS_CLIENT_SECRET / MS_TENANT_ID   (see SETUP-microsoft.md)
   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET          (see SETUP-google.md)
+  WHITEPAGES_API_KEY [/ WHITEPAGES_BASE_URL]       (see SETUP-whitepages.md)
+  ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
   APP_BASE_URL   Public URL of this app, no trailing slash
 """
 
 import base64
+import json
 import os
 import secrets
 import time
@@ -24,6 +27,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
+import anthropic
 import httpx
 import msal
 from fastapi import FastAPI, HTTPException, Request
@@ -55,6 +59,10 @@ GOOGLE_SCOPES = (
 # --- WhitePages / Trestle (phone verification) ---
 WHITEPAGES_API_KEY = os.environ.get("WHITEPAGES_API_KEY", "")
 WHITEPAGES_BASE_URL = os.environ.get("WHITEPAGES_BASE_URL", "https://api.trestleiq.com").rstrip("/")
+
+# --- Claude (AI lead QC) ---
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -275,6 +283,10 @@ async def me(request: Request):
         "microsoft": bool(MS_CLIENT_ID and MS_CLIENT_SECRET),
         "google": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
     }
+    features = {
+        "whitepages": bool(WHITEPAGES_API_KEY),
+        "ai_qc": bool(ANTHROPIC_API_KEY),
+    }
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -284,7 +296,7 @@ async def me(request: Request):
                 d = r.json()
                 return {"signed_in": True, "provider": "google",
                         "name": d.get("name"), "email": d.get("email"),
-                        "providers": providers}
+                        "providers": providers, "features": features}
     token = _ms_token(session)
     if token:
         async with httpx.AsyncClient(timeout=15) as cx:
@@ -294,8 +306,8 @@ async def me(request: Request):
             return {"signed_in": True, "provider": "microsoft",
                     "name": d.get("displayName"),
                     "email": d.get("mail") or d.get("userPrincipalName"),
-                    "providers": providers}
-    return JSONResponse({"signed_in": False, "providers": providers})
+                    "providers": providers, "features": features}
+    return JSONResponse({"signed_in": False, "providers": providers, "features": features})
 
 
 class EmailRequest(BaseModel):
@@ -417,6 +429,103 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
         "owner": owner,
         "name_match": name_match,
     }
+
+
+# ------------------------- AI lead QC (Claude) -------------------------
+
+QC_RULES = {
+    "base_age_min": 25,
+    "base_age_max": 75,
+    "net_worth_min": 2_000_000,
+    "young_age_max": 45,
+    "young_income_min": 250_000,
+    "old_401k_min": 250_000,
+    "wl_age_max": 70,
+    "intent_assets_min": 250_000,
+}
+
+QC_PROMPT = f"""You are the quality-control engine for a wealth-management lead generation company. Evaluate each lead against this qualification rule:
+
+BASE REQUIREMENT: Age between {QC_RULES['base_age_min']} and {QC_RULES['base_age_max']} (estimate age from graduation year + 22, or total career length if grad year absent).
+
+Then at least ONE gate must hold:
+- NW: net worth > ${QC_RULES['net_worth_min']:,}
+- YHE: age < {QC_RULES['young_age_max']} AND income > ${QC_RULES['young_income_min']:,}
+- 401K: orphaned 401(k) balance > ${QC_RULES['old_401k_min']:,} (proxy: changed jobs in the last 1-5 years AFTER a long prior tenure at a company likely to offer a 401(k))
+- WL: age < {QC_RULES['wl_age_max']} AND holds whole life insurance (NEVER inferable from prospect data — always UNKNOWN unless the record explicitly confirms it)
+- INT: actively seeking financial help AND investable assets > ${QC_RULES['intent_assets_min']:,} (intent requires an explicit signal in the record)
+
+If a lead record includes an explicit "age" value, use it verbatim with ageStatus "CONFIRMED" instead of estimating.
+Status vocabulary per gate: "CONFIRMED" (record explicitly states it), "INFERRED" (strong proxy: seniority, tenure, company size, title), "UNKNOWN" (no signal), "FAIL" (evidence contradicts it).
+Inference guides: senior titles (VP/SVP/C-suite/Partner/Principal/Owner/MD) at mid-size+ companies => income likely >$250K. Long tenure in high-income roles or equity titles => higher net-worth likelihood. Many stints under 3 years => job hopper (small 401k balances, penalize).
+
+Return ONLY a JSON array, one object per lead, same order, no prose:
+[{{"i":0,"ageEst":57,"ageStatus":"INFERRED","gates":{{"NW":{{"s":"INFERRED","ev":"short evidence"}},"YHE":{{"s":"FAIL","ev":""}},"401K":{{"s":"INFERRED","ev":""}},"WL":{{"s":"UNKNOWN","ev":""}},"INT":{{"s":"UNKNOWN","ev":""}}}},"jobHopper":false,"grade":"A","checklist":["Confirm approximate net worth","Confirm old 401(k) balance"],"note":"one-line QC summary"}}]
+
+Grading: A = base age passes + 2 or more gates at INFERRED-or-better, or 1 CONFIRMED gate, and not a job hopper. B = base age passes + exactly 1 INFERRED gate. C = base age passes but only UNKNOWNs, or job hopper with otherwise decent signals. If base age FAILS, grade "X".
+"checklist" = the specific facts a junior advisor must verify on the first call before this lead counts as fully qualified.
+
+LEADS:
+"""
+
+
+class QCLead(BaseModel):
+    i: int
+    name: str = ""
+    title: str = ""
+    jobLevel: str = ""
+    company: str = ""
+    state: str = ""
+    gradYear: str = ""
+    positionStart: str = ""
+    employees: str = ""
+    notes: str = ""
+
+
+class QCRequest(BaseModel):
+    leads: list[QCLead]
+
+
+@app.post("/api/qc")
+async def qc(req: QCRequest, request: Request):
+    # Each batch is a paid Claude API call — signed-in users only.
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="AI QC not configured — set ANTHROPIC_API_KEY "
+                   "(get one at console.anthropic.com).",
+        )
+    if not req.leads:
+        return {"verdicts": []}
+    if len(req.leads) > 12:
+        raise HTTPException(status_code=400, detail="Max 12 leads per QC batch.")
+
+    payload = json.dumps([lead.model_dump() for lead in req.leads], separators=(",", ":"))
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": QC_PROMPT + payload}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:300]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:300]}")
+
+    if msg.stop_reason == "refusal":
+        raise HTTPException(status_code=502, detail="Claude declined to process this batch.")
+
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    start, end = text.find("["), text.rfind("]")
+    if start == -1 or end == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON array.")
+    try:
+        verdicts = json.loads(text[start:end + 1])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+    return {"verdicts": verdicts}
 
 
 # ------------------------- Pages -------------------------
