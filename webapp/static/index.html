@@ -1002,7 +1002,8 @@ function detailRow(L){
       <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}${L.hd.phonesTotal?' of '+L.hd.phonesTotal+' phones':''}</span></div>
       ${(L.hd.mobiles&&L.hd.mobiles.length)?`<div class="hint mono" style="margin-top:3px">${L.hd.mobiles.map(esc).join(' &middot; ')}</div>`:''}
       ${(L.hd.coOwners&&L.hd.coOwners.length)?`<div class="hint" style="margin-top:3px">Deed names: ${esc(L.hd.coOwners.join(' · '))}</div>`:''}
-      ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}</div>`:''}`:''}
+      ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}${L.hd.matchedBy?' — matched on '+esc(L.hd.matchedBy)+(L.hd.matchedBy==='name'?' only, confirm it is the right person':''):''}${L.hd.matchScore?' ('+L.hd.matchScore+'/100)':''}</div>`:''}
+      ${L.hd.rejected?`<div class="hint" style="margin-top:3px;color:var(--tierX)">No record attached — ${esc(L.hd.rejected)}</div>`:''}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
@@ -1296,7 +1297,9 @@ window.verifyLead=async id=>{
     const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||''});
     const mob=(d.line_type||'').toLowerCase().includes('mobile');
     const bits=[];
-    if(d.valid===false)bits.push('INVALID');else bits.push(d.line_type||'unknown type');
+    if(d.valid===false)bits.push('INVALID');
+    else if(!d.line_type&&!d.owner)bits.push('no record for this number');
+    else bits.push(d.line_type||'unknown type');
     if(d.carrier)bits.push(d.carrier);
     if(d.name_match===true)bits.push('name \u2713');
     else if(d.name_match===false&&d.owner)bits.push('owner: '+d.owner);
@@ -1310,9 +1313,10 @@ window.enrichHome=async id=>{
   if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
   toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+'…');
   try{
-    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||''});
-    if(!d.found){toast('No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:''};save();render();return;}
-    L.hd={age:d.age||null,dob:d.dob||'',street:d.home_street||'',city:d.home_city||'',
+    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||'',phone:L.mobilePhone||L.directPhone||''});
+    if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||''};save();render();return;}
+    L.hd={matchedBy:d.matched_by||'',matchScore:d.match_score||null,
+          age:d.age||null,dob:d.dob||'',street:d.home_street||'',city:d.home_city||'',
           state:d.home_state||'',zip:d.home_zip||'',emails:d.emails||[],
           mobiles:d.mobiles||[],phonesTotal:d.phones_total||0,props:d.properties_owned||0,
           ownsHome:(d.owns_home===undefined?null:d.owns_home),ownerType:d.owner_type||'',
