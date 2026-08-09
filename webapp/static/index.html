@@ -1,504 +1,1201 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lead Qualifier</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lead Qualifier — FPA Command Center</title>
 <style>
   :root{
-    --paper:#FAFBF9; --card:#FFFFFF; --ink:#1A2B33; --muted:#5C6E75;
-    --line:#DCE3E0; --accent:#0E6E5C; --accent-soft:#E7F1EE;
-    --brass:#B58A2E; --brass-soft:#F6EEDC;
-    --good:#0E6E5C; --good-soft:#E7F1EE;
-    --maybe:#4A6584; --maybe-soft:#E9EEF4;
-    --bad:#8A5A52; --bad-soft:#F3E9E7;
-    --shadow:0 1px 3px rgba(26,43,51,.08);
+    --ink:#1b2a3a; --ink-soft:#44556b; --ink-faint:#7a8899;
+    --paper:#f4f5f2; --panel:#ffffff; --line:#dde1da; --line-soft:#eaece6;
+    --brass:#a87e2f; --brass-soft:#f3ead6;
+    --tierA:#1e6b4e; --tierA-bg:#e3efe8;
+    --tierB:#8a6d1f; --tierB-bg:#f4edd8;
+    --tierC:#5b6672; --tierC-bg:#e9ecef;
+    --tierX:#8c3a31; --tierX-bg:#f5e4e1;
+    --set:#1e6b4e; --called:#2c5f8a; --callback:#8a6d1f; --notint:#8c3a31; --hasadv:#5b6672;
+    --focus:#2c5f8a;
+    --font-body:"Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-disp:Georgia,"Times New Roman",serif;
+    --font-mono:Consolas,"SF Mono",Menlo,monospace;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --paper:#141B1E; --card:#1C2529; --ink:#E4EAE8; --muted:#93A4A8;
-      --line:#2E3B40; --accent:#4FB39A; --accent-soft:#1E312D;
-      --brass:#D4A94E; --brass-soft:#33301F;
-      --good:#4FB39A; --good-soft:#1E312D;
-      --maybe:#8FAECE; --maybe-soft:#212B36;
-      --bad:#C39288; --bad-soft:#332622;
-      --shadow:0 1px 3px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="dark"]{
-    --paper:#141B1E; --card:#1C2529; --ink:#E4EAE8; --muted:#93A4A8;
-    --line:#2E3B40; --accent:#4FB39A; --accent-soft:#1E312D;
-    --brass:#D4A94E; --brass-soft:#33301F;
-    --good:#4FB39A; --good-soft:#1E312D;
-    --maybe:#8FAECE; --maybe-soft:#212B36;
-    --bad:#C39288; --bad-soft:#332622;
-    --shadow:0 1px 3px rgba(0,0,0,.35);
-  }
-  :root[data-theme="light"]{
-    --paper:#FAFBF9; --card:#FFFFFF; --ink:#1A2B33; --muted:#5C6E75;
-    --line:#DCE3E0; --accent:#0E6E5C; --accent-soft:#E7F1EE;
-    --brass:#B58A2E; --brass-soft:#F6EEDC;
-    --good:#0E6E5C; --good-soft:#E7F1EE;
-    --maybe:#4A6584; --maybe-soft:#E9EEF4;
-    --bad:#8A5A52; --bad-soft:#F3E9E7;
-    --shadow:0 1px 3px rgba(26,43,51,.08);
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--paper); color:var(--ink);
-    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  }
-  .wrap{max-width:1100px; margin:0 auto; padding:32px 24px 80px}
-  .eyebrow{
-    font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
-    color:var(--muted); margin:0 0 6px;
-  }
-  h1{
-    font-family:Georgia,"Times New Roman",serif; font-weight:600;
-    font-size:34px; line-height:1.15; margin:0 0 8px; text-wrap:balance;
-  }
-  .sub{color:var(--muted); margin:0 0 28px; max-width:62ch}
-  .drop{
-    border:1.5px dashed var(--line); border-radius:10px; background:var(--card);
-    padding:38px 24px; text-align:center; cursor:pointer; box-shadow:var(--shadow);
-    transition:border-color .15s, background .15s;
-  }
-  .drop:hover,.drop:focus-visible,.drop.over{border-color:var(--accent); background:var(--accent-soft)}
-  .drop:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-  .drop strong{display:block; font-size:16.5px; margin-bottom:4px}
-  .drop span{color:var(--muted); font-size:13.5px}
-  .filemeta{margin:14px 2px 0; font-size:13.5px; color:var(--muted)}
-  .filemeta b{color:var(--ink)}
-  .notice{
-    margin:14px 0 0; padding:10px 14px; border-radius:8px; font-size:13.5px;
-    border:1px solid var(--line); background:var(--card);
-  }
-  .notice.err{border-color:var(--bad); background:var(--bad-soft); color:var(--bad)}
-  .notice.info{border-color:var(--maybe); background:var(--maybe-soft)}
-  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:28px 0 24px}
-  .metric{
-    background:var(--card); border:1px solid var(--line); border-radius:10px;
-    padding:14px 16px 12px; box-shadow:var(--shadow); border-top:3px solid var(--line);
-  }
-  .metric .n{font-size:30px; font-weight:650; font-variant-numeric:tabular-nums; line-height:1.1}
-  .metric .l{font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-top:2px}
-  .metric.t-ideal{border-top-color:var(--brass)} .metric.t-ideal .n{color:var(--brass)}
-  .metric.t-good{border-top-color:var(--good)} .metric.t-good .n{color:var(--good)}
-  .metric.t-maybe{border-top-color:var(--maybe)} .metric.t-maybe .n{color:var(--maybe)}
-  .metric.t-bad{border-top-color:var(--bad)} .metric.t-bad .n{color:var(--bad)}
-  .tabs{display:flex; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--line); margin:8px 0 0}
-  .tab{
-    border:none; background:none; color:var(--muted); font:inherit; font-size:14px;
-    padding:9px 14px 10px; cursor:pointer; border-bottom:2.5px solid transparent; margin-bottom:-1px;
-  }
-  .tab[aria-selected="true"]{color:var(--ink); font-weight:600; border-bottom-color:var(--accent)}
-  .tab:focus-visible{outline:2px solid var(--accent); outline-offset:-2px; border-radius:6px}
-  .tab .c{font-variant-numeric:tabular-nums; color:var(--muted); font-weight:400}
-  .tablewrap{overflow-x:auto; background:var(--card); border:1px solid var(--line); border-top:none; border-radius:0 0 10px 10px; box-shadow:var(--shadow)}
-  table{border-collapse:collapse; width:100%; font-size:13.5px}
-  th{
-    text-align:left; font-size:11px; letter-spacing:.09em; text-transform:uppercase;
-    color:var(--muted); font-weight:600; padding:10px 12px; border-bottom:1px solid var(--line);
-    white-space:nowrap; position:sticky; top:0; background:var(--card);
-  }
-  td{padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
-  tr:last-child td{border-bottom:none}
-  td.score{font-variant-numeric:tabular-nums; font-weight:650; text-align:right}
-  td.why{color:var(--muted); font-size:12.5px; max-width:380px}
-  .pill{
-    display:inline-block; font-size:11px; font-weight:600; letter-spacing:.05em;
-    padding:2px 9px; border-radius:99px; white-space:nowrap;
-  }
-  .pill.ideal{background:var(--brass-soft); color:var(--brass)}
-  .pill.good{background:var(--good-soft); color:var(--good)}
-  .pill.maybe{background:var(--maybe-soft); color:var(--maybe)}
-  .pill.bad{background:var(--bad-soft); color:var(--bad)}
-  .empty{padding:36px; text-align:center; color:var(--muted)}
-  .bar{display:flex; align-items:center; justify-content:space-between; gap:16px; margin:30px 0 10px; flex-wrap:wrap}
-  .bar h2{font-family:Georgia,serif; font-weight:600; font-size:20px; margin:0}
-  .btn{
-    background:var(--accent); color:#fff; border:none; border-radius:8px;
-    font:inherit; font-size:14px; font-weight:600; padding:10px 18px; cursor:pointer;
-  }
-  .btn:hover{filter:brightness(1.08)}
-  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-  .truncnote{font-size:12.5px; color:var(--muted); padding:10px 12px}
-  .privacy{margin-top:26px; font-size:12.5px; color:var(--muted); max-width:70ch}
-  .authbar{display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:0 0 10px; font-size:13.5px; color:var(--muted)}
-  .authbar a{color:var(--accent); font-weight:600; text-decoration:none}
-  .mini{border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:6px; font:inherit; font-size:12.5px; padding:3px 8px; cursor:pointer; margin-right:4px; white-space:nowrap}
-  .mini:hover{border-color:var(--accent); color:var(--accent)}
-  .modalbg{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:50}
-  .modalbg.open{display:flex}
-  .modal{background:var(--card); color:var(--ink); border-radius:12px; padding:22px 24px; width:min(520px,92vw); box-shadow:0 10px 40px rgba(0,0,0,.3)}
-  .modal h3{margin:0 0 10px; font-family:Georgia,serif}
-  .modal label{display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:10px 0 4px}
-  .modal input,.modal textarea,.modal select{width:100%; box-sizing:border-box; font:inherit; font-size:14px; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:7px; padding:8px 10px}
-  .modal textarea{min-height:120px; resize:vertical}
-  .modal .row2{display:flex; gap:10px}
-  .modal .row2>div{flex:1}
-  .modal .btns{display:flex; justify-content:flex-end; gap:10px; margin-top:16px}
-  .btn.ghost{background:none; color:var(--muted); border:1px solid var(--line)}
-  @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:15px}
+  body{font-family:var(--font-body);background:var(--paper);color:var(--ink);min-height:100vh}
+  button{font-family:inherit;cursor:pointer}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+
+  /* ---------- Top bar ---------- */
+  .topbar{background:var(--ink);color:#f2f4f0;padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column;gap:1px;margin-right:auto}
+  .brand h1{font-family:var(--font-disp);font-size:1.35rem;font-weight:600;letter-spacing:.02em}
+  .brand h1 .amp{color:var(--brass)}
+  .brand .sub{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:#9fb0c2}
+  .topbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .tbtn{background:transparent;border:1px solid #3d5069;color:#dfe6ee;border-radius:4px;padding:7px 12px;font-size:.82rem}
+  .tbtn:hover{border-color:var(--brass);color:#fff}
+  .tbtn.primary{background:var(--brass);border-color:var(--brass);color:#1b1508;font-weight:600}
+  .tbtn.primary:hover{background:#bd913c}
+
+  /* ---------- Summary strip ---------- */
+  .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:16px 22px 4px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;cursor:pointer;text-align:left;border-top:3px solid var(--line)}
+  .card .n{font-family:var(--font-mono);font-size:1.5rem;font-weight:700}
+  .card .l{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
+  .card.tA{border-top-color:var(--tierA)} .card.tA .n{color:var(--tierA)}
+  .card.tB{border-top-color:var(--tierB)} .card.tB .n{color:var(--tierB)}
+  .card.tC{border-top-color:var(--tierC)} .card.tC .n{color:var(--tierC)}
+  .card.tX{border-top-color:var(--tierX)} .card.tX .n{color:var(--tierX)}
+  .card.tAll{border-top-color:var(--ink)}
+  .card.active{background:var(--brass-soft);border-color:var(--brass)}
+
+  /* ---------- Toolbar ---------- */
+  .toolbar{display:flex;gap:10px;align-items:center;padding:12px 22px;flex-wrap:wrap}
+  .toolbar input[type=search]{flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--line);border-radius:4px;font-size:.88rem;background:var(--panel)}
+  .toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--panel);font-size:.85rem;color:var(--ink)}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--ink-soft);cursor:pointer;user-select:none}
+
+  /* ---------- Table ---------- */
+  .tablewrap{padding:0 22px 30px;overflow-x:auto}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);font-size:.85rem;min-width:980px}
+  thead th{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);text-align:left;padding:9px 10px;border-bottom:2px solid var(--ink);background:#fbfcfa;white-space:nowrap;position:sticky;top:0}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+  tbody tr.lead:hover{background:#f7f8f4}
+  .mono{font-family:var(--font-mono);font-size:.8rem}
+  .name{font-weight:600;white-space:nowrap}
+  .subline{font-size:.75rem;color:var(--ink-faint)}
+  td .title-emp{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .tierchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-weight:700;font-size:.78rem;padding:3px 8px;border-radius:3px;white-space:nowrap}
+  .tierchip.A{background:var(--tierA-bg);color:var(--tierA)}
+  .tierchip.B{background:var(--tierB-bg);color:var(--tierB)}
+  .tierchip.C{background:var(--tierC-bg);color:var(--tierC)}
+  .tierchip.X{background:var(--tierX-bg);color:var(--tierX)}
+
+  /* signal tape — the at-a-glance qualification read */
+  .tape{display:inline-flex;gap:3px;vertical-align:middle}
+  .sig{width:16px;height:16px;border-radius:2px;font-size:.6rem;font-family:var(--font-mono);font-weight:700;display:inline-flex;align-items:center;justify-content:center;border:1.5px solid var(--ink-faint);color:var(--ink-faint);background:transparent}
+  .sig.hit{background:var(--ink);border-color:var(--ink);color:#fff}
+  .sig.hit.inferred{background:#fff;border-color:var(--ink);color:var(--ink);border-style:dashed}
+  .sig.neg{background:var(--tierX);border-color:var(--tierX);color:#fff}
+
+  .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:var(--tierX-bg);color:var(--tierX);white-space:nowrap}
+
+  select.status{padding:4px 6px;border-radius:4px;border:1px solid var(--line);font-size:.78rem;font-weight:600;background:#fff}
+  select.status.sNew{color:var(--ink-soft)}
+  select.status.sCalled{color:var(--called);border-color:var(--called)}
+  select.status.sCallBack{color:var(--callback);border-color:var(--callback)}
+  select.status.sNotInterested{color:var(--notint);border-color:var(--notint)}
+  select.status.sHasAdvisor{color:var(--hasadv);border-color:var(--hasadv)}
+  select.status.sSet{color:#fff;background:var(--set);border-color:var(--set)}
+
+  .act{display:flex;gap:5px;white-space:nowrap}
+  .abtn{border:1px solid var(--line);background:#fff;border-radius:4px;padding:4px 8px;font-size:.75rem;color:var(--ink-soft)}
+  .abtn:hover{border-color:var(--ink);color:var(--ink)}
+  .abtn.li{color:#0a66c2;border-color:#b5d2ea;font-weight:700}
+  .abtn.li:hover{background:#eaf3fb}
+  .abtn.inv{color:var(--set);border-color:#bcd8cb;font-weight:600}
+  .abtn.inv:hover{background:var(--tierA-bg)}
+  .abtn.inv:disabled{opacity:.4;cursor:not-allowed}
+
+  /* expanded detail */
+  tr.detail td{background:#fbfcf9;border-bottom:1px solid var(--line);padding:14px 16px}
+  .detail-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:18px}
+  @media(max-width:860px){.detail-grid{grid-template-columns:1fr}}
+  .dsec h4{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .sigrow{display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0;gap:10px}
+  .sigrow .pts{font-family:var(--font-mono);font-weight:700}
+  .sigrow.hit .pts{color:var(--tierA)} .sigrow.miss{color:var(--ink-faint)} .sigrow.neg .pts{color:var(--tierX)}
+  .fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.8rem}
+  .fieldgrid label{display:flex;flex-direction:column;gap:2px;color:var(--ink-faint);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em}
+  .fieldgrid input{padding:5px 7px;border:1px solid var(--line);border-radius:3px;font-size:.82rem;font-family:var(--font-body)}
+  .detail textarea{width:100%;border:1px solid var(--line);border-radius:4px;padding:7px;font-family:var(--font-body);font-size:.83rem;min-height:56px;resize:vertical}
+  .manualtoggles{display:flex;gap:16px;margin:8px 0;font-size:.8rem}
+  .manualtoggles label{display:flex;gap:5px;align-items:center;cursor:pointer}
+
+  .empty{padding:60px 20px;text-align:center;color:var(--ink-faint)}
+  .empty h3{font-family:var(--font-disp);color:var(--ink-soft);font-weight:600;margin-bottom:6px}
+
+  /* ---------- Stats bar ---------- */
+  .stats{display:flex;gap:24px;flex-wrap:wrap;padding:12px 22px 0;font-size:.8rem;color:var(--ink-soft);align-items:baseline}
+  .stat{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+  .stat b{font-family:var(--font-mono);font-size:1.1rem;color:var(--ink)}
+  .stat.hot b{color:var(--set)}
+  .stat .per{color:var(--ink-faint);font-size:.72rem}
+  .statdiv{color:var(--line);align-self:center}
+  .phbtn{background:none;border:none;padding:0;font-family:var(--font-mono);font-size:.8rem;color:var(--called);text-decoration:underline dotted;cursor:pointer;white-space:nowrap}
+  .phbtn:hover{color:var(--ink)}
+  .abtn.em{color:var(--brass);border-color:#e0d2b0;font-weight:700}
+  .abtn.em:hover{background:var(--brass-soft)}
+  .actlog{max-height:150px;overflow:auto;font-size:.75rem;border:1px solid var(--line-soft);border-radius:4px;padding:6px 9px;background:#fff}
+  .actlog div{padding:2px 0;border-bottom:1px dashed var(--line-soft)}
+  .actlog div:last-child{border-bottom:none}
+  .actlog time{color:var(--ink-faint);font-family:var(--font-mono);margin-right:7px;font-size:.7rem}
+  .recipe-pre{white-space:pre-wrap;font-family:var(--font-mono);font-size:.8rem;background:#fbfcf9;border:1px solid var(--line);border-radius:5px;padding:12px;line-height:1.55}
+
+  /* ---------- Build panel ---------- */
+  .buildpanel{margin:14px 22px 0;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--brass);border-radius:6px}
+  .buildpanel summary{cursor:pointer;padding:12px 16px;font-family:var(--font-disp);font-size:1rem;font-weight:600;list-style:none;display:flex;align-items:center;gap:10px}
+  .buildpanel summary::before{content:"▸";color:var(--brass);transition:transform .15s}
+  .buildpanel[open] summary::before{transform:rotate(90deg)}
+  .bp-inner{padding:4px 16px 16px}
+  .bp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .bp-grid label,.bp-extra{display:flex;flex-direction:column;gap:3px;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)}
+  .bp-grid input,.bp-grid select,.bp-extra input{padding:7px 9px;border:1px solid var(--line);border-radius:4px;font-size:.85rem;font-family:var(--font-body);color:var(--ink)}
+  .bp-extra{margin-top:10px}
+  .bp-actions{display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap}
+  .bp-status{font-size:.82rem;color:var(--ink-soft)}
+  .bp-status.err{color:var(--tierX)}
+  .btnBuild[disabled]{opacity:.6;cursor:wait}
+
+  /* ---------- Modals ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(20,28,38,.55);display:none;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
+  .overlay.open{display:flex}
+  .modal{background:var(--panel);border-radius:8px;max-width:720px;width:100%;padding:22px 24px;border-top:4px solid var(--brass);max-height:90vh;overflow:auto}
+  .modal h2{font-family:var(--font-disp);font-size:1.15rem;margin-bottom:14px}
+  .modal h3{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--brass);margin:16px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .mgrid label,.mcol label{display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)}
+  .modal input,.modal textarea,.modal select{padding:7px 9px;border:1px solid var(--line);border-radius:4px;font-size:.85rem;font-family:var(--font-body);color:var(--ink)}
+  .modal textarea{resize:vertical}
+  .mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+  .mbtn{padding:8px 16px;border-radius:4px;border:1px solid var(--line);background:#fff;font-size:.85rem}
+  .mbtn.save{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600}
+  .mbtn.save:hover{background:#2a3d52}
+  .maptable{width:100%;font-size:.8rem;border-collapse:collapse;margin-top:8px}
+  .maptable td,.maptable th{padding:5px 8px;border-bottom:1px solid var(--line-soft);text-align:left}
+  .hint{font-size:.76rem;color:var(--ink-faint);margin:6px 0}
+  .filelabel{display:inline-block}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:5px;font-size:.85rem;z-index:99;opacity:0;transition:opacity .25s;pointer-events:none}
+  .toast.show{opacity:1}
+  @media(prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <div class="authbar" id="authbar"></div>
-  <p class="eyebrow">Financial Planners of America · Internal tool</p>
-  <h1>Lead Qualifier</h1>
-  <p class="sub">Upload a ZoomInfo CSV export and every contact is scored and sorted into
-  four tiers. All processing happens right here in your browser — the file is never uploaded to any server.</p>
-
-  <div class="drop" id="drop" role="button" tabindex="0" aria-label="Upload CSV file">
-    <strong>Drop your CSV here, or click to choose a file</strong>
-    <span>Auto-detects ZoomInfo column names like “First Name”, “Direct Phone Number”, “Email Address”, “Person State” — and skips junk header rows.</span>
+<header class="topbar">
+  <div class="brand">
+    <h1>Lead Qualifier <span class="amp">&middot;</span> Command Center</h1>
+    <div class="sub">Financial Planners of America &mdash; build &middot; score &middot; verify &middot; call &middot; set</div>
   </div>
-  <input type="file" id="file" accept=".csv,text/csv" hidden>
-  <div id="out"></div>
+  <div class="topbtns">
+    <button class="tbtn" id="btnRecipe">Build list</button>
+    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn primary" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
+    <button class="tbtn" id="btnExport">Export call list (CSV)</button>
+    <button class="tbtn" id="btnBackup">Backup</button>
+    <label class="filelabel"><input type="file" id="jsonFile" accept=".json" hidden><button class="tbtn" onclick="document.getElementById('jsonFile').click()">Restore</button></label>
+    <button class="tbtn" id="btnQC" style="display:none">AI quality control</button><button class="tbtn" id="btnAssign" style="display:none">Auto-assign</button><button class="tbtn" id="btnSettings">ICP settings</button>
+  </div>
+</header>
+<div id="authbar" style="display:none;padding:7px 22px;background:#243448;color:#cfd9e4;font-size:.8rem"></div>
 
-  <div class="modalbg" id="modalbg">
-    <div class="modal">
-      <h3 id="m_title">Send email</h3>
-      <label>To</label><input id="m_to" type="email">
-      <label>Subject</label><input id="m_subject" type="text">
-      <div class="row2" id="m_when" hidden>
-        <div><label>Start</label><input id="m_start" type="datetime-local"></div>
-        <div><label>Duration</label><select id="m_dur"><option value="30">30 minutes</option><option value="60">60 minutes</option></select></div>
-      </div>
-      <label>Message</label><textarea id="m_body"></textarea>
-      <div class="btns">
-        <button class="btn ghost" id="m_cancel">Cancel</button>
-        <button class="btn" id="m_send">Send</button>
-      </div>
-      <div id="m_status" class="notice" hidden></div>
+<section class="summary" id="summary"></section>
+<section class="stats" id="stats"></section>
+
+<details class="buildpanel" open>
+  <summary>Build a list from ZoomInfo</summary>
+  <div class="bp-inner" id="envWarn" style="display:none;padding-bottom:0"><p class="hint" style="color:var(--ink-soft);font-size:.82rem;border:1px solid var(--brass);background:var(--brass-soft);border-radius:4px;padding:8px 10px;margin:0"><strong>Standalone mode.</strong> Live pull &amp; enrich run inside Claude, or by messaging Claude with the filters below &mdash; you'll get back a CSV to import or paste here. Everything else (scoring, calling, email, invites, export) works right now.</p></div>
+  <div class="bp-inner">
+    <div class="bp-grid">
+      <label>Person state(s) <input id="bStates" value="New York"></label>
+      <label>Area keyword <input id="bArea" value="Long Island" placeholder="optional"></label>
+      <label>Excluded states <input id="bExStates" value="Connecticut, Massachusetts"></label>
+      <label>Management level <select id="bMgmt"><option>C Level Exec</option><option>VP Level Exec</option><option>Director</option></select></label>
+      <label>Job change within (months) <input type="number" id="bWindow" value="18" min="1"></label>
+      <label>Exclude titles <input id="bExT" value="Assistant, Associate, Junior, Coordinator"></label>
+      <label>Pull size <select id="bN"><option>25</option><option selected>50</option><option>100</option></select></label>
+      <label>Page <input type="number" id="bPage" value="1" min="1"></label>
+      <label>Min accuracy score <input type="number" id="bAcc" value="85" min="70" max="99"></label>
+    </div>
+    <label class="bp-extra">Extra criteria (optional) <input id="bExtra" placeholder="e.g., company revenue over $50M"></label>
+    <div class="bp-actions">
+      <button class="tbtn primary btnBuild" id="btnBuild">1 &middot; Build list (free)</button>
+      <button class="tbtn" id="btnPaste">Paste a list</button>
+      <button class="tbtn btnBuild" id="btnEnrich" style="border-color:var(--brass);color:var(--brass)">2 &middot; Enrich leads (uses credits)</button>
+      <span class="bp-status" id="bStatus">Search pulls names, titles, companies &amp; DNC flags free. Enriching reveals email, phones, start date &amp; LinkedIn — 1 credit per lead.</span>
     </div>
   </div>
-  <p class="privacy">Scoring: age inferred from graduation year (ideal 50–65) · years of experience (28–43) ·
-  senior job titles · recent job change after a long prior tenure (orphaned 401k signal) · retirement intent ·
-  phone/email on file. Frequent job-hoppers are deprioritized; Connecticut and Massachusetts contacts are excluded.</p>
-</div>
+</details>
 
+<section class="toolbar">
+  <input type="search" id="q" placeholder="Search name, employer, title, state&hellip;">
+  <select id="fStatus">
+    <option value="">All statuses</option>
+    <option>New</option><option>Called</option><option>Call Back</option>
+    <option>Not Interested</option><option>Has Advisor</option><option>Set</option>
+  </select>
+  <select id="fSort">
+    <option value="score">Sort: Score (high first)</option>
+    <option value="name">Sort: Name A&ndash;Z</option>
+    <option value="state">Sort: State</option>
+    <option value="updated">Sort: Recently worked</option>
+  </select>
+  <label class="toggle"><input type="checkbox" id="fEmailFirst"> Email-first (DNC) only</label>
+</section>
+
+<section class="tablewrap">
+  <table id="tbl" hidden>
+    <thead><tr>
+      <th>Tier / Score</th><th>Signals</th><th>Name</th><th>Title &middot; Employer</th>
+      <th>State</th><th>Business Phone</th><th>Mobile</th><th>Email</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty">
+    <h3>No leads yet</h3>
+    <p>Import a ZoomInfo contact export (CSV) to score and tier your list.<br>Column mapping is automatic &mdash; you can adjust it before importing.</p>
+  </div>
+</section>
+
+<!-- ICP Settings -->
+<div class="overlay" id="mSettings"><div class="modal">
+  <h2>Ideal prospect definition</h2>
+  <p class="hint">Adjust these to redefine who scores well. Every lead is re-scored the moment you save.</p>
+  <h3>Age proxy</h3>
+  <div class="mgrid">
+    <label>Grad year from <input type="number" id="sGradMin"></label>
+    <label>Grad year to <input type="number" id="sGradMax"></label>
+  </div>
+  <h3>Orphaned 401(k) signal &mdash; time in current role</h3>
+  <div class="mgrid">
+    <label>Min months at current job <input type="number" id="sTenMin"></label>
+    <label>Max months at current job <input type="number" id="sTenMax"></label>
+  </div>
+  <h3>Income &amp; asset proxies</h3>
+  <div class="mcol" style="display:grid;gap:10px">
+    <label>Senior title keywords (comma-separated)<textarea id="sTitles" rows="2"></textarea></label>
+    <label>Exclude title keywords<textarea id="sExTitles" rows="1"></textarea></label>
+  </div>
+  <div class="mgrid" style="margin-top:10px">
+    <label>Min company employees <input type="number" id="sEmpMin"></label>
+    <label>Excluded states (comma) <input type="text" id="sExStates"></label>
+  </div>
+  <h3>Scoring weights</h3>
+  <div class="mgrid">
+    <label>Recent job change <input type="number" id="wRecent"></label>
+    <label>Senior title <input type="number" id="wTitle"></label>
+    <label>Mgmt level (C/VP) <input type="number" id="wMgmt"></label>
+    <label>Company size <input type="number" id="wSize"></label>
+    <label>Age in range <input type="number" id="wAge"></label>
+    <label>Email + mobile on file <input type="number" id="wContact"></label>
+    <label>Job-hopper penalty <input type="number" id="wHop"></label>
+  </div>
+  <h3>Tier thresholds</h3>
+  <div class="mgrid">
+    <label>Tier A at score &ge; <input type="number" id="sTierA"></label>
+    <label>Tier B at score &ge; <input type="number" id="sTierB"></label>
+  </div>
+  <h3>Team, funnel &amp; pricing</h3>
+  <div class="mgrid">
+    <label>Meetings / advisor / day <input type="number" id="sMeet"></label>
+    <label>Contact rate % <input type="number" id="sContact"></label>
+    <label>Contact &rarr; meeting % <input type="number" id="sMeetRate"></label>
+    <label>Tier A lead price $ <input type="number" id="sPriceA"></label>
+    <label>Tier B price $ <input type="number" id="sPriceB"></label>
+    <label>Tier C price $ <input type="number" id="sPriceC"></label>
+  </div>
+  <div class="mcol" style="display:grid;gap:10px;margin-top:10px">
+    <label>Advisors (comma-separated &mdash; enables auto-assign)<input type="text" id="sAdvisors" placeholder="e.g. Advisor 1, Advisor 2"></label>
+  </div>
+  <h3>Export defaults</h3>
+  <div class="mgrid">
+    <label>Lead Source Detail <input type="text" id="sSource"></label>
+    <label>Address Type <input type="text" id="sAddrType"></label>
+  </div>
+  <h3>Meeting invite template (Outlook)</h3>
+  <div class="mgrid">
+    <label>Your name <input type="text" id="sOrgName"></label>
+    <label>Your email <input type="email" id="sOrgEmail"></label>
+    <label>Duration (minutes) <input type="number" id="sDur"></label>
+  </div>
+  <div class="mcol" style="display:grid;gap:10px;margin-top:10px">
+    <label>Invite subject &mdash; use {firstName} {lastName} {yourName}<input type="text" id="sSubj"></label>
+    <label>Invite body<textarea id="sBody" rows="4"></textarea></label>
+  </div>
+  <h3>Outreach channels</h3>
+  <div class="mgrid">
+    <label>Click-to-call via <select id="sCallVia"><option value="rcapp">RingCentral app</option><option value="tel">System dialer (tel:)</option><option value="rcweb">RingCentral web</option></select></label>
+    <label>Email via <select id="sEmailVia"><option value="mailto">Desktop Outlook</option><option value="owa">Outlook on the web</option></select></label>
+  </div>
+  <div class="mcol" style="display:grid;gap:10px;margin-top:10px">
+    <label>LinkedIn connection note &mdash; {firstName} {employer} {yourName}<textarea id="sLiNote" rows="2"></textarea></label>
+  </div>
+  <h3>Marketing email templates &mdash; {firstName} {lastName} {employer} {yourName}</h3>
+  <div class="mcol" style="display:grid;gap:8px">
+    <div class="mgrid"><label>Template 1 name <input id="sE1n"></label><label>Subject <input id="sE1s"></label></div>
+    <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Body<textarea id="sE1b" rows="3"></textarea></label>
+    <div class="mgrid"><label>Template 2 name <input id="sE2n"></label><label>Subject <input id="sE2s"></label></div>
+    <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Body<textarea id="sE2b" rows="3"></textarea></label>
+    <div class="mgrid"><label>Template 3 name <input id="sE3n"></label><label>Subject <input id="sE3s"></label></div>
+    <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Body<textarea id="sE3b" rows="3"></textarea></label>
+  </div>
+  <h3>List-build recipe (what the team sees under "Build list")</h3>
+  <div class="mcol" style="display:grid;gap:10px">
+    <label>Recipe<textarea id="sRecipe" rows="6"></textarea></label>
+  </div>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mSettings')">Cancel</button>
+    <button class="mbtn save" id="btnSaveSettings">Save &amp; re-score all leads</button>
+  </div>
+</div></div>
+
+<!-- Import mapping -->
+<div class="overlay" id="mImport"><div class="modal">
+  <h2>Import &mdash; confirm column mapping</h2>
+  <p class="hint" id="impInfo"></p>
+  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Batch name (goes into Lead Source Detail)<input type="text" id="impBatch"></label>
+  <table class="maptable"><thead><tr><th>App field</th><th>CSV column</th></tr></thead><tbody id="mapRows"></tbody></table>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mImport')">Cancel</button>
+    <button class="mbtn save" id="btnDoImport">Import &amp; score</button>
+  </div>
+</div></div>
+
+<!-- Invite scheduler -->
+<div class="overlay" id="mInvite"><div class="modal" style="max-width:460px">
+  <h2>Send calendar invite</h2>
+  <p class="hint" id="invWho"></p>
+  <div class="mgrid">
+    <label>Date <input type="date" id="invDate"></label>
+    <label>Time <input type="time" id="invTime" value="10:00"></label>
+    <label>Duration (min) <input type="number" id="invDur"></label>
+  </div>
+  <p class="hint">Signed in: the invite is sent instantly from your connected account (Google or O365) &mdash; on your calendar, in their inbox. Signed out: downloads an .ics for Outlook.</p>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mInvite')">Cancel</button>
+    <button class="mbtn save" id="btnMakeIcs">Create Outlook invite</button>
+  </div>
+</div></div>
+
+<!-- Marketing email -->
+<div class="overlay" id="mEmail"><div class="modal" style="max-width:540px">
+  <h2>Send marketing email</h2>
+  <p class="hint" id="emWho"></p>
+  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Template<select id="emSel"></select></label>
+  <div class="recipe-pre" id="emPrev" style="margin-top:10px;max-height:200px;overflow:auto"></div>
+  <p class="hint">Signed in: sends immediately from your connected account (Gmail or O365) and logs the touch. Signed out: opens a pre-filled Outlook draft instead.</p>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mEmail')">Cancel</button>
+    <button class="mbtn save" id="btnSendEmail">Open draft in Outlook</button>
+  </div>
+</div></div>
+
+<!-- List-build recipe -->
+<div class="overlay" id="mRecipe"><div class="modal" style="max-width:620px">
+  <h2>Build a lead list</h2>
+  <div class="recipe-pre" id="recipeText"></div>
+  <div class="mfoot"><button class="mbtn save" onclick="closeModal('mRecipe')">Done</button></div>
+</div></div>
+
+<!-- In-app confirm (browser popups are blocked in the sandbox) -->
+<div class="overlay" id="mConfirm"><div class="modal" style="max-width:440px">
+  <h2 id="cfTitle">Confirm</h2>
+  <p class="hint" id="cfMsg" style="font-size:.88rem;color:var(--ink)"></p>
+  <div class="mfoot">
+    <button class="mbtn" id="cfNo">Cancel</button>
+    <button class="mbtn save" id="cfYes">Confirm</button>
+  </div>
+</div></div>
+
+<!-- Paste a list -->
+<div class="overlay" id="mPaste"><div class="modal" style="max-width:620px">
+  <h2>Paste a list</h2>
+  <p class="hint">Paste CSV text &mdash; a ZoomInfo/Wiza export or a list Claude sent you. First line must be the column headers.</p>
+  <textarea id="pasteText" rows="9" style="width:100%;font-family:var(--font-mono);font-size:.78rem"></textarea>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mPaste')">Cancel</button>
+    <button class="mbtn save" id="pasteGo">Review &amp; import</button>
+  </div>
+</div></div>
+
+<!-- Log a note -->
+<div class="overlay" id="mNote"><div class="modal" style="max-width:440px">
+  <h2>Log a note</h2>
+  <textarea id="noteText" rows="3" style="width:100%"></textarea>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mNote')">Cancel</button>
+    <button class="mbtn save" id="noteSave">Log note</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast"></div>
 <script>
-"use strict";
-const ALIASES = {
-  first_name:['first_name','firstname','contact_first_name'],
-  last_name:['last_name','lastname','contact_last_name'],
-  employer:['employer','company_name','company','account_name'],
-  phone:['phone','mobile_phone','direct_phone_number','direct_phone','phone_number','contact_phone'],
-  email:['email','email_address','contact_email'],
-  job_title:['job_title','title'],
-  state:['state','person_state','contact_state','person_state/province'],
-  graduation_year:['graduation_year','grad_year'],
-  years_of_experience:['years_of_experience','total_years_experience'],
-  years_at_current_employer:['years_at_current_employer','years_at_company','tenure_at_current_company'],
-  number_of_companies:['number_of_companies','company_count'],
-  retirement_intent:['retirement_intent','intent','intent_topic'],
+/* =============== state & persistence =============== */
+/* Persistence: window.storage (per-user, survives sessions). */
+const DEFAULTS={
+  gradMin:1983, gradMax:1998,
+  tenMin:12, tenMax:60,
+  titles:'VP,Vice President,SVP,EVP,Chief,CEO,CFO,COO,CIO,CTO,President,Partner,Principal,Owner,Founder,Managing Director,General Counsel,Physician,Attorney,Head of',
+  exTitles:'Assistant,Associate,Junior,Intern,Coordinator',
+  empMin:200, exStates:'Connecticut,Massachusetts,CT,MA',
+  wRecent:30, wTitle:20, wMgmt:10, wSize:10, wAge:15, wContact:10, wHop:15,
+  tierA:60, tierB:40,
+  source:'ZoomInfo', addrType:'Business',
+  orgName:'', orgEmail:'', dur:30,
+  callVia:'rcapp', emailVia:'mailto',
+  liNote:'Hi {firstName} — I work with senior executives on Long Island on retirement planning. Congrats on the move to {employer}. Would be glad to connect. — {yourName}',
+  e1n:'Intro — orphaned 401(k)',
+  e1s:'The 401(k) at your previous employer',
+  e1b:'Hi {firstName},\n\nCongratulations on the move to {employer}. One thing most executives leave behind in a job change is the 401(k) at the prior employer — consolidating it is usually the easiest cleanup step ahead of retirement.\n\nWorth a 20-minute conversation?\n\n{yourName}',
+  e2n:'Follow-up',
+  e2s:'Following up — retirement review',
+  e2b:'Hi {firstName},\n\nCircling back on my earlier note about your retirement picture. If the timing is off, happy to reconnect next quarter.\n\n{yourName}',
+  e3n:'Meeting confirm',
+  e3s:'Good speaking with you',
+  e3b:'Hi {firstName},\n\nGood speaking with you today. I\'ll follow with a calendar invite shortly — looking forward to it.\n\n{yourName}',
+  recipe:'STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = Connecticut, Massachusetts\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.',
+  meet:5, contact:35, meetRate:12, advisors:'', priceA:45, priceB:25, priceC:10,
+  subj:'Retirement planning introduction — {firstName}, meet {yourName}',
+  body:'Hi {firstName},\n\nLooking forward to connecting. We\'ll cover your retirement picture, any accounts left with prior employers, and whether a review makes sense.\n\nTalk soon,\n{yourName}'
 };
-const BUCKETS = ['Ideal Client','Good','Maybe','Not Good'];
-const PILL = {'Ideal Client':'ideal','Good':'good','Maybe':'maybe','Not Good':'bad'};
-const MCLASS = {'Ideal Client':'t-ideal','Good':'t-good','Maybe':'t-maybe','Not Good':'t-bad'};
-const MAX_ROWS = 500;
+const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='function');}catch(e){return false;}})();
+window.__inClaude=HAS_WS;
+let state={settings:{...DEFAULTS},leads:[]};
+let _pt=null;
+function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
+  const payload=JSON.stringify({settings:state.settings,leads:state.leads});
+  try{
+    if(HAS_WS)await window.storage.set('lq-data',payload);
+    else localStorage.setItem('lq-data',payload);
+  }catch(e){console.error('save failed',e);}},400);}
+async function boot(){
+  try{
+    let raw=null;
+    if(HAS_WS){const r=await window.storage.get('lq-data');raw=r&&r.value;}
+    else{try{raw=localStorage.getItem('lq-data');}catch(e){}}
+    if(raw){const s=JSON.parse(raw);
+      if(s.leads){s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
+        state={settings:{...DEFAULTS,...s.settings},leads:s.leads};}}
+  }catch(e){/* first run — nothing saved yet */}
+  rescoreAll();render();
+}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
+let _cfResolve=null;
+function appConfirm(msg,title){return new Promise(res=>{_cfResolve=res;
+  document.getElementById('cfTitle').textContent=title||'Confirm';
+  document.getElementById('cfMsg').textContent=msg;
+  document.getElementById('mConfirm').classList.add('open');});}
+function cfDone(v){document.getElementById('mConfirm').classList.remove('open');if(_cfResolve){_cfResolve(v);_cfResolve=null;}}
 
+/* =============== scoring =============== */
+function parseStart(v){
+  if(!v)return null;v=(''+v).trim();if(!v)return null;
+  let d=new Date(v); if(!isNaN(d)&&d.getFullYear()>1950)return d;
+  let m=v.match(/(\d{1,2})[\/\-](\d{4})/); if(m)return new Date(+m[2],+m[1]-1,1);
+  m=v.match(/([A-Za-z]{3,})\s+(\d{4})/); if(m){d=new Date(m[1]+' 1, '+m[2]);if(!isNaN(d))return d;}
+  m=v.match(/^(\d{4})$/); if(m)return new Date(+m[1],0,1);
+  return null;
+}
+function monthsSince(d){if(!d)return null;const n=new Date();return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth());}
+function truthy(v){return /^(true|yes|y|1)$/i.test((''+(v||'')).trim());}
+
+function scoreLead(L){
+  const s=state.settings, sig=[];
+  const exSt=s.exStates.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const st=(L.state||'').trim().toLowerCase();
+  if(st&&exSt.includes(st)){L.score=0;L.tier='X';L.signals=[{k:'G',label:'Excluded state: '+L.state,hit:false,neg:true,pts:0}];return L;}
+
+  let score=0;
+  // R — recent job change (orphaned 401k)
+  const mo=monthsSince(parseStart(L.jobStartDate));
+  if(mo!==null&&mo>=s.tenMin&&mo<=s.tenMax){score+=+s.wRecent;sig.push({k:'R',label:`Recent job change (${mo} mo in role)`,hit:true,conf:true,pts:+s.wRecent});}
+  else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — outside ${s.tenMin}–${s.tenMax} window`,hit:false,pts:0});}
+  else sig.push({k:'R',label:'Start date unknown',hit:false,pts:0});
+  // T — senior title
+  const tt=(L.title||'').toLowerCase();
+  const kw=s.titles.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const ex=s.exTitles.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const tHit=tt&&kw.some(k=>tt.includes(k))&&!ex.some(k=>tt.includes(k));
+  if(tHit){score+=+s.wTitle;sig.push({k:'T',label:'Senior title (income proxy): '+L.title,hit:true,conf:false,pts:+s.wTitle});}
+  else sig.push({k:'T',label:'Title not on senior keyword list',hit:false,pts:0});
+  // M — management level
+  const ml=(L.mgmtLevel||'').toLowerCase();
+  if(/c[\s-]?level|vp|executive|director/.test(ml)){score+=+s.wMgmt;sig.push({k:'M',label:'Mgmt level: '+L.mgmtLevel,hit:true,conf:true,pts:+s.wMgmt});}
+  else sig.push({k:'M',label:'Mgmt level not C/VP/Dir',hit:false,pts:0});
+  // S — company size
+  const emp=parseInt((''+(L.employees||'')).replace(/[^\d]/g,''),10);
+  if(emp&&emp>=+s.empMin){score+=+s.wSize;sig.push({k:'S',label:`Company size ${emp.toLocaleString()} employees`,hit:true,conf:true,pts:+s.wSize});}
+  else sig.push({k:'S',label:'Company size below threshold / unknown',hit:false,pts:0});
+  // A — age proxy
+  const gy=parseInt(L.gradYear,10);
+  if(L.ageVerified){score+=+s.wAge;sig.push({k:'A',label:'Age verified manually (LinkedIn)',hit:true,conf:true,pts:+s.wAge});}
+  else if(gy&&gy>=+s.gradMin&&gy<=+s.gradMax){score+=+s.wAge;sig.push({k:'A',label:'Grad year '+gy+' in range (inferred)',hit:true,conf:false,pts:+s.wAge});}
+  else sig.push({k:'A',label:'Age unverified — check LinkedIn',hit:false,pts:0});
+  // C — contact completeness
+  if(L.email&&L.mobilePhone){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile on file',hit:true,conf:true,pts:+s.wContact});}
+  else if(L.enriched===false&&truthy(L.hasEmail)&&truthy(L.hasMobile)){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile confirmed by ZoomInfo — enrich to reveal',hit:true,conf:false,pts:+s.wContact});}
+  else sig.push({k:'C',label:'Missing email or mobile',hit:false,pts:0});
+  // H — job hopper penalty (manual flag)
+  if(L.jobHopper){score-=+s.wHop;sig.push({k:'H',label:'Job hopper — likely unvested matches',hit:false,neg:true,pts:-s.wHop});}
+
+  L.score=Math.max(0,Math.min(100,score));
+  L.tier=L.score>=+s.tierA?'A':L.score>=+s.tierB?'B':'C';
+  L.signals=sig;
+  return L;
+}
+function rescoreAll(){state.leads.forEach(scoreLead);save();}
+
+/* =============== CSV parse / import =============== */
 function parseCSV(text){
-  const rows=[]; let row=[], field='', q=false;
-  for(let i=0;i<text.length;i++){
-    const ch=text[i];
-    if(q){
-      if(ch==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; }
-      else field+=ch;
-    } else if(ch==='"') q=true;
-    else if(ch===','){ row.push(field); field=''; }
-    else if(ch==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
-    else if(ch!=='\r') field+=ch;
-  }
-  if(field!=='' || row.length){ row.push(field); rows.push(row); }
+  const rows=[];let row=[],cur='',inQ=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(inQ){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else inQ=false; } else cur+=c; }
+    else{ if(c==='"')inQ=true;
+      else if(c===','){row.push(cur);cur='';}
+      else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cur);cur=''; if(row.some(x=>x.trim()!==''))rows.push(row); row=[]; }
+      else cur+=c; } }
+  if(cur!==''||row.length){row.push(cur);if(row.some(x=>x.trim()!==''))rows.push(row);}
   return rows;
 }
-const blank = v => v===undefined || v===null || String(v).trim()==='';
-const num = v => { const n=parseFloat(v); return Number.isFinite(n)?Math.trunc(n):null; };
-
-function smartRead(text){
-  let rows = parseCSV(text).filter(r => r.some(c => !blank(c)));
-  if(!rows.length) throw new Error('The file appears to be empty.');
-  // Junk "Column1,Column2,..." placeholder header row → real headers on row 2
-  const ph = rows[0].slice(0,20).filter(c => String(c).trim().toLowerCase().startsWith('column')).length;
-  if(ph >= 10) rows = rows.slice(1);
-  let headers = rows[0].map(h => String(h).trim().toLowerCase().replace(/ /g,'_'));
-  const body = rows.slice(1);
-  // Drop unnamed + fully-empty columns
-  const keep = headers.map((h,i) =>
-    h && !h.startsWith('unnamed') && body.some(r => !blank(r[i])));
-  headers = headers.filter((_,i)=>keep[i]);
-  const data = body.map(r => {
-    const o={};
-    let k=0;
-    keep.forEach((ok,i)=>{ if(ok) o[headers[k++]] = r[i]!==undefined?String(r[i]).trim():''; });
-    return o;
-  }).filter(o => Object.values(o).some(v=>!blank(v)));
-  // Alias → standard names (first match wins, only if std absent)
-  const present = new Set(headers);
-  const ren = {};
-  for(const [std,opts] of Object.entries(ALIASES)){
-    if(present.has(std)) continue;
-    for(const opt of opts){ if(present.has(opt)){ ren[opt]=std; break; } }
-  }
-  if(Object.keys(ren).length){
-    for(const o of data) for(const [from,to] of Object.entries(ren)){ o[to]=o[from]; delete o[from]; }
-    headers = headers.map(h => ren[h]||h);
-  }
-  // Mobile numbers take priority: per lead, the primary phone is the mobile
-  // when one exists; a direct line fills in only when there is no mobile.
-  for(const o of data){
-    if(!blank(o.mobile_phone)) o.phone=o.mobile_phone;
-    else if(blank(o.phone)){
-      const fb=[o.direct_phone_number,o.direct_phone].find(v=>!blank(v));
-      if(fb!==undefined) o.phone=fb;
-    }
-  }
-  return {headers, data};
-}
-
-function qualify(rows){
-  const YEAR = new Date().getFullYear();
-  for(const r of rows){
-    let s=0; const why=[];
-    const gy = blank(r.graduation_year)?null:num(r.graduation_year);
-    if(gy!==null){ const age=YEAR-(gy-22); if(age>=50&&age<=65){s+=25; why.push(`Age ~${age} (ideal)`);} }
-    const yoe = blank(r.years_of_experience)?null:num(r.years_of_experience);
-    if(yoe!==null && yoe>=28 && yoe<=43){ s+=20; why.push(`YOE ${yoe} (ideal range)`); }
-    if(!blank(r.job_title)){
-      const t=r.job_title.toLowerCase();
-      if(['ceo','cfo','coo','cto','chief','svp','evp','vice president','vp','partner','principal',
-          'owner','managing director','executive','director','president','head of'].some(k=>t.includes(k)))
-        { s+=20; why.push('Senior title (likely $250K+ income)'); }
-    }
-    if(!blank(r.company_size)){
-      const z=r.company_size.toLowerCase();
-      if(['large','5000+','1000-5000','enterprise'].some(k=>z.includes(k)))
-        { s+=10; why.push('Large company (asset potential)'); }
-    }
-    const yace = blank(r.years_at_current_employer)?null:num(r.years_at_current_employer);
-    if(yace!==null){
-      if(yoe!==null && yace>=1 && yace<=5 && (yoe-yace)>=10){ s+=25; why.push(`Recent move (${yace}yr) after long prior role`); }
-      else if(yace>5){ s-=5; why.push(`Long tenure (${yace}yr) - less orphaned 401K potential`); }
-    }
-    const nc = blank(r.number_of_companies)?null:num(r.number_of_companies);
-    if(nc!==null && nc>5 && yoe!==null && yoe/nc<3){ s-=15; why.push('Frequent job hopper - deprioritize'); }
-    if(!blank(r.retirement_intent)){
-      const it=r.retirement_intent.toLowerCase();
-      if(['yes','true','interested','retirement'].some(k=>it.includes(k)))
-        { s+=20; why.push('Retirement planning intent confirmed'); }
-    }
-    const hasPhone=!blank(r.phone), hasMobile=!blank(r.mobile_phone), hasEmail=!blank(r.email);
-    if(hasPhone||hasMobile){ s+=5; why.push('Phone on file'); }
-    if(hasEmail){ s+=5; why.push('Email on file'); }
-    if(!hasPhone&&!hasMobile&&!hasEmail){ s-=20; why.push('No contact info - cannot reach'); }
-    if(!blank(r.state)){
-      const st=r.state.trim().toUpperCase();
-      if(['CT','MA','CONNECTICUT','MASSACHUSETTS'].includes(st)){ s-=100; why.push('EXCLUDED: CT or MA'); }
-    }
-    r.qualification_score=Math.max(0,s);
-    r.score_breakdown=why.length?why.join('; '):'No qualifying signals';
-    r.bucket = r.qualification_score<=14?'Not Good':r.qualification_score<=29?'Maybe':r.qualification_score<=44?'Good':'Ideal Client';
-  }
-  return rows.slice().sort((a,b)=>b.qualification_score-a.qualification_score);
-}
-
-const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let RESULT=null, HEADERS=null, ACTIVE='Ideal Client';
-
-function render(){
-  const out=document.getElementById('out');
-  if(!RESULT) return;
-  const counts=Object.fromEntries(BUCKETS.map(b=>[b,RESULT.filter(r=>r.bucket===b).length]));
-  const cols=['first_name','last_name','employer','job_title','state','phone','email'].filter(c=>HEADERS.includes(c));
-  const label={first_name:'First',last_name:'Last',employer:'Employer',job_title:'Title',state:'State',phone:'Phone',email:'Email'};
-  const rows=RESULT.filter(r=>r.bucket===ACTIVE);
-  const shown=rows.slice(0,MAX_ROWS);
-  out.querySelector('#results').innerHTML = `
-    <div class="metrics">${BUCKETS.map(b=>`
-      <div class="metric ${MCLASS[b]}"><div class="n">${counts[b]}</div><div class="l">${b}</div></div>`).join('')}
-    </div>
-    <div class="bar"><h2>Results by tier</h2>
-      <button class="btn" id="dl">Download qualified leads (CSV)</button></div>
-    <div class="tabs" role="tablist">${BUCKETS.map(b=>`
-      <button class="tab" role="tab" aria-selected="${b===ACTIVE}" data-b="${b}">${b} <span class="c">· ${counts[b]}</span></button>`).join('')}
-    </div>
-    <div class="tablewrap">
-      ${rows.length?`<table><thead><tr>
-        ${cols.map(c=>`<th>${label[c]}</th>`).join('')}<th style="text-align:right">Score</th><th>Tier</th><th>Why</th><th>Actions</th>
-      </tr></thead><tbody>
-        ${shown.map(r=>`<tr>
-          ${cols.map(c=>`<td>${esc(r[c]??'')}</td>`).join('')}
-          <td class="score">${r.qualification_score}</td>
-          <td><span class="pill ${PILL[r.bucket]}">${r.bucket}</span></td>
-          <td class="why">${esc(r.score_breakdown)}</td>
-          <td>${r.email?`<button class="mini act" data-a="email" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#9993; Email</button><button class="mini act" data-a="invite" data-e="${esc(r.email)}" data-n="${esc(r.first_name??'')}">&#128197; Invite</button>`:''}${r.phone?(r._pv?` <span class="pill ${r._pv.cls}">${esc(r._pv.label)}</span>`:` <button class="mini pv" data-id="${r._id}">&#128222; Verify</button>`):''}</td>
-        </tr>`).join('')}
-      </tbody></table>
-      ${rows.length>MAX_ROWS?`<div class="truncnote">Showing first ${MAX_ROWS} of ${rows.length} — the CSV download includes every lead.</div>`:''}`
-      :`<div class="empty">No leads in the ${ACTIVE} tier</div>`}
-    </div>`;
-  out.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{ACTIVE=t.dataset.b;render();}));
-  out.querySelectorAll('.act').forEach(b=>b.addEventListener('click',()=>openCompose(b.dataset.a,b.dataset.e,b.dataset.n)));
-  out.querySelectorAll('.pv').forEach(b=>b.addEventListener('click',()=>verifyPhone(b.dataset.id,b)));
-  out.querySelector('#dl').addEventListener('click',()=>{
-    const allCols=[...HEADERS.filter(h=>!['qualification_score','score_breakdown','bucket'].includes(h)),'qualification_score','score_breakdown','bucket'];
-    const q=v=>{v=v??'';v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-    const csv=[allCols.map(q).join(',')].concat(RESULT.map(r=>allCols.map(c=>q(r[c])).join(','))).join('\n');
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download='qualified_leads.csv'; a.click(); URL.revokeObjectURL(a.href);
+const FIELDS=[
+  ['firstName','First Name',['first name','firstname']],
+  ['lastName','Last Name',['last name','lastname']],
+  ['email','Email Address',['email address','email','work email']],
+  ['directPhone','Business Phone',['direct phone number','direct phone','business phone','phone number','phone','work phone','company phone']],
+  ['mobilePhone','Mobile Phone',['mobile phone','mobile','cell phone','mobile phone number']],
+  ['title','Job Title',['job title','title']],
+  ['mgmtLevel','Management Level',['management level','job function level','seniority']],
+  ['employer','Employer / Company',['company name','company','employer','account name']],
+  ['state','State/Province',['person state','state','contact state','state/province','person location state']],
+  ['street','Street Address',['person street','street address','street','address','person address']],
+  ['city','City',['person city','city']],
+  ['zip','Zip',['person zip code','zip','zip code','postal code']],
+  ['jobStartDate','Job Start Date',['job start date','position start date','start date','hire date']],
+  ['gradYear','Grad Year (age proxy)',['graduation year','grad year','college graduation year']],
+  ['linkedinUrl','LinkedIn URL',['linkedin contact profile url','linkedin url','linkedin','person linkedin url','linkedin profile']],
+  ['contactId','ZoomInfo Contact ID',['zoominfo contact id','contact id','person id','id']],
+  ['employees','Company Employees',['number of employees','employees','company employees','employee count','company size']],
+  ['hasEmail','ZI: email available',['has email','hasemail']],
+  ['hasMobile','ZI: mobile available',['has mobile phone','has mobile','hasmobilephone']],
+  ['mobileDnc','Mobile DNC flag',['mobile phone do not call','mobilephonedonotcall','mobile dnc']],
+  ['directDnc','Direct DNC flag',['direct phone do not call','directphonedonotcall','direct dnc']]
+];
+let pending=null;
+document.getElementById('csvFile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ const rows=parseCSV(r.result); e.target.value='';
+    if(rows.length<2){toast('CSV needs a header row plus at least one lead.');return;}
+    pending={headers:rows[0].map(h=>h.trim()),data:rows.slice(1)};
+    openMapper(f.name); };
+  r.readAsText(f);
+});
+function openMapper(fname){
+  document.getElementById('impInfo').textContent=`${pending.data.length} rows found in ${fname}. Check the mapping, then import.`;
+  document.getElementById('impBatch').value=fname.replace(/\.csv$/i,'');
+  const low=pending.headers.map(h=>h.toLowerCase());
+  const body=document.getElementById('mapRows');body.innerHTML='';
+  FIELDS.forEach(([key,label,syn])=>{
+    let idx=-1;
+    for(const s of syn){const i=low.indexOf(s);if(i>-1){idx=i;break;}}
+    if(idx===-1)for(const s of syn){const i=low.findIndex(h=>h.includes(s));if(i>-1){idx=i;break;}}
+    const opts=['<option value="-1">— skip —</option>'].concat(pending.headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${esc(h)}</option>`)).join('');
+    body.insertAdjacentHTML('beforeend',`<tr><td>${label}</td><td><select data-key="${key}">${opts}</select></td></tr>`);
   });
+  openModal('mImport');
 }
+document.getElementById('btnDoImport').addEventListener('click',()=>{
+  const map={};document.querySelectorAll('#mapRows select').forEach(s=>map[s.dataset.key]=+s.value);
+  const batch=document.getElementById('impBatch').value.trim()||'Import';
+  const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
+  let added=0,dup=0;
+  pending.data.forEach(row=>{
+    const L={id:'L'+Date.now()+Math.random().toString(36).slice(2,7),batch,status:'New',notes:'',jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now()};
+    FIELDS.forEach(([key])=>{const i=map[key];L[key]=(i>-1&&row[i]!==undefined)?(''+row[i]).trim():'';});
+    L.enriched=!!(L.email||L.mobilePhone);
+    const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
+    if((L.contactId||L.email)&&seen.has(dk)){dup++;return;}
+    seen.add(dk); scoreLead(L); state.leads.push(L); added++;
+  });
+  save(); pending=null; closeModal('mImport'); render();
+  toast(`Imported ${added} leads${dup?` — skipped ${dup} duplicates`:''}.`);
+});
 
-function handle(file){
-  const out=document.getElementById('out');
-  const reader=new FileReader();
-  reader.onload=()=>{
-    try{
-      const {headers,data}=smartRead(reader.result);
-      const missing=['first_name','last_name'].filter(c=>!headers.includes(c));
-      let html=`<p class="filemeta"><b>${esc(file.name)}</b> — loaded ${data.length} leads. Columns: ${headers.slice(0,12).map(esc).join(', ')}${headers.length>12?'…':''}</p>`;
-      if(missing.length){
-        html+=`<div class="notice err">Missing required columns: ${missing.join(', ')}. Check that your export includes contact names.</div>`;
-        out.innerHTML=html; return;
-      }
-      const absent=['employer','phone','email','job_title','state'].filter(c=>!headers.includes(c));
-      if(absent.length) html+=`<div class="notice info">Optional columns not found (scoring will adapt): ${absent.join(', ')}</div>`;
-      RESULT=qualify(data);
-      RESULT.forEach((r,i)=>r._id=String(i));
-      HEADERS=[...headers];
-      ACTIVE='Ideal Client';
-      out.innerHTML=html+`<div id="results"></div>`;
-      render();
-    }catch(e){
-      out.innerHTML=`<div class="notice err">Could not read that file: ${esc(e.message)}</div>`;
-    }
-  };
-  reader.readAsText(file);
-}
-
-const drop=document.getElementById('drop'), fi=document.getElementById('file');
-drop.addEventListener('click',()=>fi.click());
-drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click();}});
-fi.addEventListener('change',()=>{if(fi.files[0])handle(fi.files[0]);});
-['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
-['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handle(f);});
-
-// ---- Phone verification (WhitePages / Trestle) ----
-async function verifyPhone(id,btn){
-  const r=RESULT.find(x=>x._id===id);
-  if(!r) return;
-  if(!(window.ME&&window.ME.signed_in)){ alert('Sign in first — phone lookups use your WhitePages credits.'); return; }
-  btn.disabled=true; btn.textContent='Checking…';
-  try{
-    const resp=await fetch('/api/verify-phone',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({phone:r.phone,first_name:r.first_name||'',last_name:r.last_name||''})});
-    const d=await resp.json();
-    if(!resp.ok) throw new Error(d.detail||('HTTP '+resp.status));
-    let label,cls;
-    if(d.valid===false){ label='Invalid number'; cls='bad'; }
-    else{
-      const bits=[d.line_type||'Unknown type'];
-      if(d.carrier) bits.push(d.carrier);
-      if(d.name_match===true) bits.push('name match');
-      else if(d.name_match===false&&d.owner) bits.push('owner: '+d.owner);
-      label=bits.join(' · ');
-      cls=(d.line_type||'').toLowerCase().includes('mobile')?'good':'maybe';
-    }
-    r._pv={label,cls};
-    r.phone_valid=d.valid===false?'no':'yes';
-    r.phone_line_type=d.line_type||'';
-    r.phone_owner=d.owner||'';
-    ['phone_valid','phone_line_type','phone_owner'].forEach(c=>{if(!HEADERS.includes(c))HEADERS.push(c);});
-    render();
-  }catch(e){
-    btn.disabled=false; btn.innerHTML='&#128222; Verify';
-    alert('Verify failed: '+e.message);
+/* =============== ZoomInfo list builder =============== */
+function pick(c,...keys){
+  for(const k of keys){
+    const v=k.split('.').reduce((a,p)=>a&&typeof a==='object'?a[p]:undefined,c);
+    if(v===undefined||v===null||v==='')continue;
+    if(Array.isArray(v))return v.map(x=>typeof x==='object'?(x.name||''):x).filter(Boolean).join(', ');
+    if(typeof v==='object')continue;
+    return ''+v;
   }
+  return '';
+}
+function deepParse(text){
+  let v=text;
+  for(let i=0;i<3&&typeof v==='string';i++){try{v=JSON.parse(v);}catch(e){break;}}
+  return v;
+}
+function flat(o){ /* ZoomInfo wraps contacts as {attributes:{...},id} */
+  if(o&&typeof o==='object'&&o.attributes&&typeof o.attributes==='object')return {...o.attributes,id:o.id??o.attributes.id};
+  return o;
+}
+function looksContact(o){return o&&typeof o==='object'&&(('firstName'in o)||('first_name'in o)||('lastName'in o));}
+function harvest(o,out,depth){
+  if(depth>8||!o)return;
+  if(Array.isArray(o)){
+    const f=o.map(flat);
+    if(f.length&&f.some(looksContact))out.push(...f.filter(looksContact));
+    else o.forEach(x=>harvest(x,out,depth+1));
+  }else if(typeof o==='object'){const g=flat(o);if(looksContact(g)&&(g.id||g.personId)){out.push(g);return;}Object.values(o).forEach(v=>harvest(v,out,depth+1));}
+}
+function ziNormalize(c,batch,ctx){
+  return {id:'L'+Date.now()+Math.random().toString(36).slice(2,7),batch,status:'New',notes:'',jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now(),
+    enriched:false,
+    firstName:pick(c,'firstName','first_name'),
+    lastName:pick(c,'lastName','last_name'),
+    email:pick(c,'email','emailAddress','workEmail'),
+    directPhone:pick(c,'phone','directPhoneNumber','directPhone'),
+    mobilePhone:pick(c,'mobilePhone','mobilePhoneNumber','mobile'),
+    title:pick(c,'jobTitle','title'),
+    mgmtLevel:pick(c,'managementLevel')||(ctx&&ctx.mgmt)||'',
+    employer:pick(c,'company.name','companyName','organizationName','employer'),
+    state:pick(c,'state','personState')||(ctx&&ctx.state)||'',
+    street:pick(c,'street','personStreet'),
+    city:pick(c,'city','personCity'),
+    zip:pick(c,'zipCode','zip'),
+    jobStartDate:pick(c,'positionStartDate','jobStartDate','startDate'),
+    gradYear:pick(c,'graduationYear','gradYear'),
+    linkedinUrl:pick(c,'linkedInUrl','linkedinUrl','externalUrls.linkedin','linkedin'),
+    contactId:pick(c,'id','personId','contactId'),
+    companyId:pick(c,'company.id','companyId','zoominfoCompanyId'),
+    employees:pick(c,'company.employeeCount','employeeCount'),
+    accuracy:pick(c,'contactAccuracyScore'),
+    hasEmail:pick(c,'hasEmail'),hasMobile:pick(c,'hasMobilePhone'),hasDirect:pick(c,'hasDirectPhone'),
+    mobileDnc:pick(c,'mobilePhoneDoNotCall','mobileDoNotCall'),
+    directDnc:pick(c,'directPhoneDoNotCall','doNotCall')};
+}
+const OUTSIDE_MSG='ZoomInfo build & enrich only work while this app is running inside Claude (open it from the chat or the published artifact link — do not download the file and open it in a browser). Everything else — CSV import, scoring, calling, export — works anywhere.';
+async function callClaude(prompt){
+  let r;
+  try{
+    r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+      messages:[{role:'user',content:prompt}],
+      mcp_servers:[{type:'url',url:'https://mcp.zoominfo.com/mcp',name:'zoominfo'}]})});
+  }catch(e){throw new Error(OUTSIDE_MSG);}
+  const data=await r.json();
+  if(data.error)throw new Error(data.error.message||'API error');
+  const results=(data.content||[]).filter(b=>b.type==='mcp_tool_result');
+  if(!results.length){
+    const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join(' ').slice(0,220);
+    throw new Error(txt||'ZoomInfo returned nothing. Check that the ZoomInfo connector is enabled in your Claude settings (Settings → Connectors), then retry.');
+  }
+  const payloads=[];
+  results.forEach(b=>(b.content||[]).forEach(c=>{if(c.text)payloads.push(deepParse(c.text));}));
+  return payloads;
+}
+document.getElementById('btnBuild').addEventListener('click',async()=>{
+  const btn=document.getElementById('btnBuild'),st=document.getElementById('bStatus');
+  const g=id=>document.getElementById(id).value.trim();
+  const win=+g('bWindow')||18;const d=new Date();d.setMonth(d.getMonth()-win);
+  const minDate=d.toISOString().slice(0,10);
+  const prompt=`Call the ZoomInfo tool named search_contacts (NOT search_contacts_v2 — v2 lacks excludedRegions) exactly ONCE with exactly these parameters:
+locationSearchType: "Person"
+state: "${g('bStates')}"
+excludedRegions: "${g('bExStates')}"
+managementLevel: "${g('bMgmt')}"
+positionStartDateMin: "${minDate}"
+requiredFields: "email,mobilePhone"
+excludeJobTitle: "${g('bExT')}"
+contactAccuracyScoreMin: "${g('bAcc')||'85'}"
+sort: "-contactAccuracyScore"
+pageSize: ${+g('bN')||50}
+page: ${+g('bPage')||1}
+userIntent: "Building a qualified prospect call list for a financial advisory team"
+Note: managementLevel must be passed verbatim as given above — it is an exact enum value. Do NOT call any enrich tool (enrichment spends credits; search is free). After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`;
+  btn.disabled=true;st.classList.remove('err');st.textContent='Searching ZoomInfo… (10\u201330 seconds)';
+  try{
+    const payloads=await callClaude(prompt);
+    const contacts=[];payloads.forEach(pl=>harvest(pl,contacts,0));
+    if(!contacts.length)throw new Error('The search ran but returned no contacts — widen the filters (longer window, lower accuracy score) and retry.');
+    let total='';payloads.forEach(pl=>{try{if(pl&&pl.meta&&pl.meta.totalResults)total=pl.meta.totalResults.toLocaleString();}catch(e){}});
+    const ctx={mgmt:g('bMgmt'),state:g('bStates').split(',')[0].trim()};
+    const batch='ZoomInfo '+new Date().toLocaleDateString()+' \u00b7 '+g('bMgmt')+' p'+g('bPage');
+    const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
+    let added=0,dup=0;
+    contacts.forEach(c=>{
+      const L=ziNormalize(c,batch,ctx);
+      if(!L.firstName&&!L.lastName)return;
+      const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
+      if(L.contactId&&seen.has(dk)){dup++;return;}
+      seen.add(dk);scoreLead(L);state.leads.push(L);added++;
+    });
+    save();render();
+    st.textContent=`Added ${added} leads${dup?`, skipped ${dup} duplicates`:''}${total?` — ${total} total match your filters`:''}. Scores marked ~ until enriched. Next: select and enrich, or bump the page number for more.`;
+  }catch(e){st.classList.add('err');st.textContent='Problem: '+e.message;}
+  finally{btn.disabled=false;}
+});
+
+/* =============== enrichment (uses credits) =============== */
+function extractGradYear(edu){
+  try{const m=JSON.stringify(edu).match(/\b(19[5-9]\d|20[0-1]\d)\b/g);
+    if(m&&m.length)return Math.min(...m.map(Number)).toString();}catch(e){}
+  return '';
+}
+function detectHopper(hist){
+  try{if(!Array.isArray(hist))return false;let short=0;
+    hist.forEach(h=>{const a=new Date(h.fromDate||h.startDate||''),b=new Date(h.toDate||h.endDate||'');
+      if(!isNaN(a)&&!isNaN(b)){const mo=(b-a)/2629800000;if(mo>0&&mo<24)short++;}});
+    return short>=3;}catch(e){return false;}
+}
+function looksEnriched(o){return o&&typeof o==='object'&&(
+  ((o.id||o.personId)&&(('email'in o)||('mobilePhone'in o)||('positionStartDate'in o)||('phone'in o)))||
+  (('matchStatus'in o)&&('firstName'in o)));}
+function harvestEnriched(o,out,depth){
+  if(depth>8||!o)return;
+  if(Array.isArray(o)){o.forEach(x=>harvestEnriched(x,out,depth+1));return;}
+  if(typeof o==='object'){const g=flat(o);if(looksEnriched(g)){out.push(g);return;}Object.values(o).forEach(v=>harvestEnriched(v,out,depth+1));}
+}
+async function enrichLeads(list){
+  const st=document.getElementById('bStatus'),btn=document.getElementById('btnEnrich');
+  btn.disabled=true;st.classList.remove('err');
+  const batches=[];for(let i=0;i<list.length;i+=10)batches.push(list.slice(i,i+10));
+  let done=0,failed=0,lastErr='';
+  try{
+    for(let bi=0;bi<batches.length;bi++){
+      st.textContent=`Enriching batch ${bi+1} of ${batches.length}\u2026`;
+      const ids=batches[bi].map(L=>L.contactId).filter(Boolean);
+      if(!ids.length)continue;
+      const prompt=`Call the ZoomInfo tool named enrich_contacts exactly ONCE with:
+contacts: ${JSON.stringify(ids.map(id=>({personId:''+id})))}
+requiredFields: ["firstName","lastName","email","phone","mobilePhone","mobilePhoneDoNotCall","directPhoneDoNotCall","jobTitle","managementLevel","companyName","positionStartDate","externalUrls","education","employmentHistory","contactAccuracyScore"]
+userIntent: "Enriching qualified prospects for a financial advisory call list"
+Every personId value must be passed as a string, exactly as given. Make exactly ONE call to enrich_contacts with the full contacts array — do not split it into multiple calls. After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`;
+      try{
+        const payloads=await callClaude(prompt);
+        const recs=[];payloads.forEach(pl=>harvestEnriched(pl,recs,0));
+        window.__lastEnrich=payloads;
+        if(!recs.length){
+          const snippet=payloads.map(x=>typeof x==='string'?x:JSON.stringify(x)).join(' ').replace(/\s+/g,' ').slice(0,280);
+          throw new Error('ZoomInfo replied but no contact records were found. Raw reply: "'+snippet+'"');
+        }
+        let matchedInBatch=0;
+        recs.forEach(rec=>{
+          const rid=''+(rec.id||rec.personId||'');
+          let L=state.leads.find(x=>''+x.contactId===rid);
+          if(!L&&rec.firstName&&rec.lastName)
+            L=state.leads.find(x=>!x.enriched&&(x.firstName||'').toLowerCase()===(''+rec.firstName).toLowerCase()&&(x.lastName||'').toLowerCase()===(''+rec.lastName).toLowerCase());
+          if(!L)return;
+          matchedInBatch++;
+          if(rec.email)L.email=''+rec.email;
+          if(rec.phone)L.directPhone=''+rec.phone;
+          if(rec.mobilePhone)L.mobilePhone=''+rec.mobilePhone;
+          if(rec.jobTitle)L.title=''+rec.jobTitle;
+          if(rec.managementLevel)L.mgmtLevel=Array.isArray(rec.managementLevel)?rec.managementLevel.join(', '):''+rec.managementLevel;
+          if(rec.companyName)L.employer=''+rec.companyName;
+          if(rec.positionStartDate)L.jobStartDate=''+rec.positionStartDate;
+          if(rec.mobilePhoneDoNotCall!==undefined)L.mobileDnc=''+rec.mobilePhoneDoNotCall;
+          if(rec.directPhoneDoNotCall!==undefined)L.directDnc=''+rec.directPhoneDoNotCall;
+          if(rec.contactAccuracyScore)L.accuracy=''+rec.contactAccuracyScore;
+          const li=pick(rec,'externalUrls.linkedin','linkedInUrl','linkedinUrl')||
+            (Array.isArray(rec.externalUrls)?(rec.externalUrls.find(u=>(''+(u.url||u)).includes('linkedin'))||{}).url||'':'');
+          if(li)L.linkedinUrl=''+li;
+          const gy=extractGradYear(rec.education);if(gy)L.gradYear=gy;
+          if(detectHopper(rec.employmentHistory))L.jobHopper=true;
+          L.enriched=true;L.updatedAt=Date.now();scoreLead(L);done++;
+        });
+        if(!matchedInBatch){
+          const snippet=JSON.stringify(recs[0]).slice(0,200);
+          throw new Error('Got '+recs.length+' records back but none matched your leads by ID or name. First record: '+snippet);
+        }
+        save();render();
+      }catch(e){failed+=ids.length;lastErr=e.message;console.error(e);}
+    }
+    st.textContent=done
+      ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}. Emails, phones and start dates are live; scores are now firm.`
+      :`Enriched 0 leads. ${lastErr||'ZoomInfo returned nothing usable.'}`;
+    if(!done)st.classList.add('err');
+  }finally{btn.disabled=false;}
+}
+document.getElementById('btnEnrich').addEventListener('click',async()=>{
+  const targets=filtered().filter(L=>!L.enriched&&L.contactId);
+  if(!targets.length){toast('No unenriched leads in the current view. (Leads imported from CSV without a ZoomInfo Contact ID can\u2019t be enriched \u2014 only leads pulled by Build list.)');return;}
+  if(!await appConfirm(`Enrich ${targets.length} lead${targets.length>1?'s':''}? Uses up to ${targets.length} ZoomInfo credit${targets.length>1?'s':''}. Re-enriching the same contact within a year is free. Tip: filter to Tier A first to spend credits only on the best leads.`,'Enrich leads'))return;
+  enrichLeads(targets);
+});
+window.enrichOne=async id=>{const L=byId(id);if(!L||!L.contactId)return;
+  if(!await appConfirm(`Enrich ${L.firstName} ${L.lastName}? Uses 1 ZoomInfo credit.`,'Enrich lead'))return;
+  enrichLeads([L]);};
+
+/* =============== rendering =============== */
+let filterTier='',expanded=null;
+const esc=s=>(''+(s??'')).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function filtered(){
+  const q=document.getElementById('q').value.trim().toLowerCase();
+  const st=document.getElementById('fStatus').value;
+  const ef=document.getElementById('fEmailFirst').checked;
+  let out=state.leads.filter(L=>
+    (!filterTier||L.tier===filterTier)&&
+    (!st||L.status===st)&&
+    (!ef||truthy(L.mobileDnc))&&
+    (!q||[L.firstName,L.lastName,L.employer,L.title,L.state].join(' ').toLowerCase().includes(q)));
+  const s=document.getElementById('fSort').value;
+  out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
+    :s==='state'?(a.state||'').localeCompare(b.state||'')
+    :s==='updated'?b.updatedAt-a.updatedAt
+    :b.score-a.score);
+  return out;
+}
+function render(){
+  const counts={A:0,B:0,C:0,X:0};state.leads.forEach(L=>counts[L.tier]=(counts[L.tier]||0)+1);
+  const set=state.leads.filter(L=>L.status==='Set').length;
+  document.getElementById('summary').innerHTML=[
+    ['','tAll','All leads',state.leads.length],['A','tA','Tier A — call first',counts.A],
+    ['B','tB','Tier B — nurture',counts.B],['C','tC','Tier C — low signal',counts.C],
+    ['X','tX','Excluded (CT/MA)',counts.X]
+  ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('')
+  +`<div class="card" style="cursor:default;border-top-color:var(--set)"><div class="n" style="color:var(--set)">${set}</div><div class="l">Meetings set</div></div>`;
+
+  const list=filtered();
+  document.getElementById('tbl').hidden=state.leads.length===0;
+  document.getElementById('empty').style.display=state.leads.length?'none':'block';
+  const rows=document.getElementById('rows');
+  rows.innerHTML=list.map(L=>{
+    const tape=(L.signals||[]).filter(s=>'RTMSAC'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('')
+      +((L.signals||[]).some(s=>s.k==='H')?'<span class="sig neg" title="Job hopper penalty">H</span>':'');
+    const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
+    const inv=L.email?'' :'disabled title="No email on file"';
+    return `<tr class="lead">
+      <td><span class="tierchip ${L.tier}" title="${L.enriched===false?'Provisional — enrich to firm up':''}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
+      <td><span class="tape">${tape}</span></td>
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}</td>
+      <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
+      <td>${esc(L.state)}</td>
+      <td>${phBtn(L,'directPhone')}</td>
+      <td>${phBtn(L,'mobilePhone')}${L.pv?`<div class="subline" style="color:${L.pv.ok?'var(--tierA)':'var(--tierX)'};white-space:nowrap">${esc(L.pv.label)}</div>`:''}</td>
+      <td class="mono" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${L.email?esc(L.email):(L.enriched===false&&truthy(L.hasEmail)?'<span class="subline">\u2713 available \u2014 enrich</span>':'')}</td>
+      <td><select class="status s${L.status.replace(/\s/g,'')}" onchange="setStatus('${L.id}',this.value)">
+        ${['New','Called','Call Back','Not Interested','Has Advisor','Set'].map(s=>`<option ${s===L.status?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td><div class="act">
+        ${L.enriched===false&&L.contactId&&window.__inClaude?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
+        ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
+        <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
+        <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
+        <button class="abtn" onclick="toggleDetail('${L.id}')">${expanded===L.id?'Close':'More'}</button>
+      </div></td></tr>`
+      +(expanded===L.id?detailRow(L):'');
+  }).join('');
+  renderStats();
+}
+function detailRow(L){
+  const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
+  return `<tr class="detail"><td colspan="10"><div class="detail-grid">
+    <div class="dsec"><h4>Why this score</h4>${sigs}
+      ${L.qc?`<h4 style="margin-top:12px">AI quality control &mdash; grade ${L.qc.grade}</h4>
+      <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
+      ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
+      ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
+      <div class="manualtoggles">
+        <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
+        <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (deprioritize)</label>
+      </div>
+      <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
+      <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
+    </div>
+    <div class="dsec"><h4>CRM export fields</h4>
+      <div class="fieldgrid">
+        <label>Street Address<input value="${esc(L.street)}" onchange="setField('${L.id}','street',this.value)"></label>
+        <label>City<input value="${esc(L.city)}" onchange="setField('${L.id}','city',this.value)"></label>
+        <label>State/Province<input value="${esc(L.state)}" onchange="setField('${L.id}','state',this.value)"></label>
+        <label>Business Phone<input value="${esc(L.directPhone)}" onchange="setField('${L.id}','directPhone',this.value)"></label>
+        <label>Mobile Phone<input value="${esc(L.mobilePhone)}" onchange="setField('${L.id}','mobilePhone',this.value)"></label>
+        <label>Email<input value="${esc(L.email)}" onchange="setField('${L.id}','email',this.value)"></label>
+        <label>Lead External ID<input value="${esc(L.contactId)}" onchange="setField('${L.id}','contactId',this.value)"></label>
+        <label>Batch / source<input value="${esc(L.batch)}" onchange="setField('${L.id}','batch',this.value)"></label>
+        <label>Assigned to<select onchange="setField('${L.id}','assignedTo',this.value)"><option value="">&mdash;</option>${advisorList().map(a=>`<option ${L.assignedTo===a?'selected':''}>${esc(a)}</option>`).join('')}</select></label>
+      </div>
+      <p class="hint" style="margin-top:8px">${L.accuracy?'ZoomInfo accuracy score: '+esc(L.accuracy)+'. ':''}${L.enriched===false?'Not yet enriched — email/phones/start date hidden until you spend the credit. ':''}Lead Other 2 exports as "Tier ${L.tier} (${L.score}/100)". Lead Source Detail exports as "${esc(state.settings.source)} — ${esc(L.batch)}".${truthy(L.directDnc)?' Direct line is DNC-flagged.':''}</p>
+      <h4 style="margin-top:12px">Activity</h4>
+      <div class="actlog">${(L.activity&&L.activity.length)?L.activity.slice().reverse().map(a=>`<div><time>${new Date(a.t).toLocaleString([],{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</time><strong>${ACT_LABEL[a.k]||a.k}</strong> ${esc(a.d)}</div>`).join(''):'<div style="color:var(--ink-faint)">No activity yet.</div>'}</div>
+      <div style="margin-top:6px"><button class="abtn" onclick="quickNote('${L.id}')">+ Log note</button></div>
+    </div>
+  </div></td></tr>`;
+}
+window.setTier=t=>{filterTier=(filterTier===t?'':t);render();};
+window.toggleDetail=id=>{expanded=(expanded===id?null:id);render();};
+window.setStatus=(id,v)=>{const L=byId(id);const was=L.status;L.status=v;L.updatedAt=Date.now();
+  if(v==='Set'&&was!=='Set')L.activity.push({t:Date.now(),k:'set',d:'Meeting set'});
+  save();render();if(v==='Set'&&was!=='Set'&&L.email)openInvite(id);};
+window.setFlag=(id,k,v)=>{const L=byId(id);L[k]=v;L.updatedAt=Date.now();scoreLead(L);save();render();};
+window.setNote=(id,v)=>{const L=byId(id);L.notes=v;L.updatedAt=Date.now();save();};
+window.setField=(id,k,v)=>{const L=byId(id);L[k]=v.trim();L.updatedAt=Date.now();scoreLead(L);save();render();};
+const byId=id=>state.leads.find(L=>L.id===id);
+
+/* =============== activity log & counters =============== */
+function logAct(id,k,d){const L=byId(id);if(!L)return;L.activity.push({t:Date.now(),k,d:d||''});L.updatedAt=Date.now();save();
+  if(expanded===id)render();else renderStats();}
+window.quickNote=id=>{noteFor=id;document.getElementById('noteText').value='';openModal('mNote');};
+const ACT_LABEL={call:'Call',email:'Email',li:'LinkedIn',invite:'Invite',set:'Meeting set',note:'Note'};
+function advisorList(){return (state.settings.advisors||'').split(',').map(x=>x.trim()).filter(Boolean);}
+function funnelStats(){
+  const s=state.settings;const conv=(+s.contact/100)*(+s.meetRate/100);
+  const per=conv>0?Math.ceil(+s.meet/conv):0;const adv=advisorList().length||1;
+  const c={A:0,B:0,C:0};state.leads.forEach(L=>{if(c[L.tier]!==undefined)c[L.tier]++;});
+  const val=c.A*(+s.priceA||0)+c.B*(+s.priceB||0)+c.C*(+s.priceC||0);
+  return `<span class="statdiv">|</span><span class="stat"><b>${per*adv}</b> leads/day needed <span class="per">${+s.meet} mtgs/adv \u00b7 ${adv} advisor${adv>1?'s':''}</span></span><span class="stat"><b>$${val.toLocaleString()}</b> inventory <span class="per">at tier pricing</span></span>`;
+}
+function renderStats(){
+  const d=new Date();d.setHours(0,0,0,0);const d0=d.getTime(),w0=d0-6*86400000;
+  let cT=0,cW=0,eT=0,sT=0,sW=0;const calledIds=new Set();
+  state.leads.forEach(L=>(L.activity||[]).forEach(a=>{
+    if(a.k==='call'){calledIds.add(L.id);if(a.t>=d0)cT++;if(a.t>=w0)cW++;}
+    if(a.k==='email'&&a.t>=d0)eT++;
+    if(a.k==='set'){if(a.t>=d0)sT++;if(a.t>=w0)sW++;}
+  }));
+  const setAll=state.leads.filter(L=>L.status==='Set').length;
+  document.getElementById('stats').innerHTML=
+    `<span class="stat"><b>${calledIds.size}</b> leads called</span>
+     <span class="stat hot"><b>${setAll}</b> meetings set</span>
+     <span class="statdiv">|</span>
+     <span class="stat"><b>${cT}</b> calls <span class="per">today</span></span>
+     <span class="stat"><b>${eT}</b> emails <span class="per">today</span></span>
+     <span class="stat hot"><b>${sT}</b> set <span class="per">today</span></span>
+     <span class="statdiv">|</span>
+     <span class="stat"><b>${cW}</b> calls <span class="per">last 7 days</span></span>
+     <span class="stat hot"><b>${sW}</b> set <span class="per">last 7 days</span></span>`+funnelStats();
 }
 
-// ---- Microsoft 365 (sign-in, email, calendar invite) ----
-let MODE='email';
-window.ME={signed_in:false};
+/* =============== click-to-call (RingCentral) =============== */
+function normPhone(v){let d=(''+(v||'')).replace(/[^\d+]/g,'');
+  if(/^\+/.test(d))return d; d=d.replace(/\D/g,'');
+  if(d.length===10)return '+1'+d; if(d.length===11&&d[0]==='1')return '+'+d; return d?'+'+d:'';}
+function phBtn(L,f){const v=L[f];if(!v)return '';
+  return `<button class="phbtn" onclick="callLead('${L.id}','${f}')" title="Click to call via ${state.settings.callVia==='tel'?'system dialer':'RingCentral'}">${esc(v)}</button>`;}
+window.callLead=async(id,f)=>{const L=byId(id);const n=normPhone(L[f]);
+  if(!n){toast('No usable number on file.');return;}
+  if(f==='mobilePhone'&&truthy(L.mobileDnc)&&!await appConfirm('This mobile is DNC-flagged. Route to email-first unless there is an established business relationship. Call anyway?','DNC warning'))return;
+  const v=state.settings.callVia;
+  if(v==='rcweb')window.open('https://app.ringcentral.com/r/call?number='+encodeURIComponent(n),'_blank');
+  else if(v==='tel')window.open('tel:'+n,'_blank');
+  else window.open('rcapp://r/call?number='+encodeURIComponent(n),'_blank');
+  logAct(id,'call',(f==='mobilePhone'?'Mobile ':'Direct ')+L[f]);
+  toast('Dialing '+L.firstName+' — log the outcome with the status dropdown.');};
+
+/* =============== marketing email (O365) =============== */
+function merge(t,L){const s=state.settings;
+  return (''+(t||'')).split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName)
+    .split('{employer}').join(L.employer).split('{yourName}').join(s.orgName||'');}
+let emailFor=null;
+window.emailLead=id=>{emailFor=id;const L=byId(id);
+  document.getElementById('emWho').textContent=`${L.firstName} ${L.lastName} — ${L.email}`;
+  const sel=document.getElementById('emSel');
+  sel.innerHTML=[1,2,3].map(i=>`<option value="${i}">${esc(state.settings['e'+i+'n']||('Template '+i))}</option>`).join('');
+  emPrev();openModal('mEmail');};
+function emPrev(){const L=byId(emailFor);if(!L)return;const i=document.getElementById('emSel').value;
+  document.getElementById('emPrev').textContent='Subject: '+merge(state.settings['e'+i+'s'],L)+'\n\n'+merge(state.settings['e'+i+'b'],L);}
+document.getElementById('emSel').addEventListener('change',emPrev);
+document.getElementById('btnSendEmail').addEventListener('click',async()=>{
+  const L=byId(emailFor);if(!L)return;const s=state.settings;const i=document.getElementById('emSel').value;
+  const subj=merge(s['e'+i+'s'],L),body=merge(s['e'+i+'b'],L);
+  if(window.ME&&ME.signed_in){
+    try{await api('/api/send-email',{to:L.email,subject:subj,body:body});
+      logAct(emailFor,'email','Sent: '+(s['e'+i+'n']||('Template '+i)));
+      closeModal('mEmail');toast('Email sent from your connected account.');
+    }catch(e){toast('Send failed: '+e.message);}
+    return;
+  }
+  if(s.emailVia==='owa')window.open('https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(L.email)+'&subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body),'_blank');
+  else window.open('mailto:'+L.email+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body),'_blank');
+  logAct(emailFor,'email',s['e'+i+'n']||('Template '+i));
+  closeModal('mEmail');toast('Draft opened in Outlook — review and send.');});
+
+/* =============== LinkedIn connect =============== */
+function copyText(t){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(()=>fallbackCopy(t));}
+  else fallbackCopy(t);}
+function fallbackCopy(t){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);}
+window.openLI=id=>{const L=byId(id);
+  let u=(L.linkedinUrl||'').trim();
+  if(u&&!/^https?:/i.test(u))u='https://'+u;
+  if(!u)u='https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(`${L.firstName} ${L.lastName} ${L.employer}`);
+  copyText(merge(state.settings.liNote,L));
+  window.open(u,'_blank');
+  logAct(id,'li','Profile opened, connect note copied');
+  toast('Connection note copied — paste it when you hit Connect.');};
+
+/* =============== Outlook invite (.ics) =============== */
+let inviteFor=null;
+window.openInvite=id=>{inviteFor=id;const L=byId(id);
+  document.getElementById('invWho').textContent=`${L.firstName} ${L.lastName} — ${L.email}`;
+  const d=new Date(Date.now()+86400000);
+  document.getElementById('invDate').value=d.toISOString().slice(0,10);
+  document.getElementById('invDur').value=state.settings.dur;
+  openModal('mInvite');};
+document.getElementById('btnMakeIcs').addEventListener('click',async()=>{
+  const L=byId(inviteFor);if(!L)return;
+  const s=state.settings;
+  const dt=new Date(document.getElementById('invDate').value+'T'+document.getElementById('invTime').value);
+  if(isNaN(dt)){toast('Pick a date and time.');return;}
+  const dur=+document.getElementById('invDur').value||30;
+  const end=new Date(dt.getTime()+dur*60000);
+  if(window.ME&&ME.signed_in){
+    const fl=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':00';
+    const mg=str=>(''+str).split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName).split('{yourName}').join(s.orgName||'your advisor');
+    try{await api('/api/create-event',{attendee:L.email,subject:mg(s.subj),body:mg(s.body),start:fl(dt),end:fl(end),timezone:'America/New_York'});
+      logAct(inviteFor,'invite','Sent for '+dt.toLocaleString());
+      closeModal('mInvite');toast('Invite sent \u2014 on your calendar and in their inbox.');
+    }catch(e){toast('Invite failed: '+e.message);}
+    return;
+  }
+  const fmt=d=>d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+'00';
+  const sub=(k,str)=>str.split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName).split('{yourName}').join(s.orgName||'your advisor');
+  const escI=t=>(''+t).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//LeadQualifier//EN','METHOD:REQUEST','BEGIN:VEVENT',
+    'UID:'+L.id+'-'+Date.now()+'@leadqualifier',
+    'DTSTAMP:'+fmt(new Date()),'DTSTART:'+fmt(dt),'DTEND:'+fmt(end),
+    'SUMMARY:'+escI(sub(0,s.subj)),
+    'DESCRIPTION:'+escI(sub(0,s.body)),
+    (s.orgEmail?'ORGANIZER;CN='+escI(s.orgName||s.orgEmail)+':mailto:'+s.orgEmail:''),
+    'ATTENDEE;CN='+escI(L.firstName+' '+L.lastName)+';RSVP=TRUE:mailto:'+L.email,
+    'STATUS:CONFIRMED','END:VEVENT','END:VCALENDAR'].filter(Boolean).join('\r\n');
+  dl(new Blob([ics],{type:'text/calendar'}),`Invite - ${L.firstName} ${L.lastName}.ics`);
+  logAct(inviteFor,'invite','Invite for '+dt.toLocaleString());
+  closeModal('mInvite');toast('Invite created — open the .ics file and Outlook will take it from there.');});
+const pad=n=>(''+n).padStart(2,'0');
+
+/* =============== CSV export =============== */
+document.getElementById('btnExport').addEventListener('click',()=>{
+  const list=filtered();
+  if(!list.length){toast('Nothing to export with current filters.');return;}
+  const H=['First Name','Last Name','Email Address','Business Phone','Mobile phone','Street Address','Comments','Employer','State/Province','Address Type','Lead Other 2','Lead Source Detail','Lead External ID'];
+  const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const lines=[H.join(',')].concat(list.map(L=>{
+    const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
+    const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
+    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+    return [L.firstName,L.lastName,L.email,L.directPhone,L.mobilePhone,L.street,comments,L.employer,L.state,state.settings.addrType,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
+  }));
+  dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
+  toast(`Exported ${list.length} leads (current filter).`);});
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
+
+/* =============== backup / restore =============== */
+document.getElementById('btnBackup').addEventListener('click',()=>{
+  dl(new Blob([JSON.stringify(state,null,1)],{type:'application/json'}),'lead-qualifier-backup-'+new Date().toISOString().slice(0,10)+'.json');
+  toast('Backup saved. Restore it on any machine running this file.');});
+document.getElementById('jsonFile').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=async()=>{try{const s=JSON.parse(r.result);
+    if(!s.leads||!s.settings)throw 0;
+    if(!await appConfirm(`Restore ${s.leads.length} leads? This replaces what's currently loaded.`,'Restore backup'))return;
+    s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
+    state={settings:{...DEFAULTS,...s.settings},leads:s.leads};rescoreAll();save();render();toast('Backup restored.');
+  }catch(x){toast('That file is not a valid Lead Qualifier backup.');}finally{e.target.value='';}};
+  r.readAsText(f);});
+
+/* =============== settings modal =============== */
+const SFIELDS=[['sGradMin','gradMin'],['sGradMax','gradMax'],['sTenMin','tenMin'],['sTenMax','tenMax'],['sTitles','titles'],['sExTitles','exTitles'],['sEmpMin','empMin'],['sExStates','exStates'],['wRecent','wRecent'],['wTitle','wTitle'],['wMgmt','wMgmt'],['wSize','wSize'],['wAge','wAge'],['wContact','wContact'],['wHop','wHop'],['sTierA','tierA'],['sTierB','tierB'],['sSource','source'],['sAddrType','addrType'],['sOrgName','orgName'],['sOrgEmail','orgEmail'],['sDur','dur'],['sSubj','subj'],['sBody','body'],['sCallVia','callVia'],['sEmailVia','emailVia'],['sLiNote','liNote'],['sRecipe','recipe'],['sE1n','e1n'],['sE1s','e1s'],['sE1b','e1b'],['sE2n','e2n'],['sE2s','e2s'],['sE2b','e2b'],['sE3n','e3n'],['sE3s','e3s'],['sE3b','e3b'],['sMeet','meet'],['sContact','contact'],['sMeetRate','meetRate'],['sAdvisors','advisors'],['sPriceA','priceA'],['sPriceB','priceB'],['sPriceC','priceC']];
+document.getElementById('btnRecipe').addEventListener('click',()=>{
+  document.getElementById('recipeText').textContent=state.settings.recipe;openModal('mRecipe');});
+document.getElementById('btnSettings').addEventListener('click',()=>{
+  SFIELDS.forEach(([el,key])=>document.getElementById(el).value=state.settings[key]);
+  openModal('mSettings');});
+document.getElementById('btnSaveSettings').addEventListener('click',()=>{
+  SFIELDS.forEach(([el,key])=>state.settings[key]=document.getElementById(el).value);
+  rescoreAll();closeModal('mSettings');render();toast('Settings saved — all leads re-scored.');});
+
+/* =============== modal & filter plumbing =============== */
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
+['q','fStatus','fSort','fEmailFirst'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+
+if(!HAS_WS){
+  document.getElementById('btnBuild').style.display='none';
+  document.getElementById('btnEnrich').style.display='none';
+  document.getElementById('bStatus').textContent='';
+}
+document.getElementById('cfYes').addEventListener('click',()=>cfDone(true));
+document.getElementById('cfNo').addEventListener('click',()=>cfDone(false));
+document.getElementById('btnPaste').addEventListener('click',()=>{document.getElementById('pasteText').value='';openModal('mPaste');});
+document.getElementById('pasteGo').addEventListener('click',()=>{
+  const rows=parseCSV(document.getElementById('pasteText').value);
+  if(rows.length<2){toast('Need a header row plus at least one lead.');return;}
+  pending={headers:rows[0].map(h=>h.trim()),data:rows.slice(1)};
+  closeModal('mPaste');openMapper('Pasted list');
+});
+let noteFor=null;
+document.getElementById('noteSave').addEventListener('click',()=>{
+  const v=document.getElementById('noteText').value.trim();
+  if(v&&noteFor){logAct(noteFor,'note',v);render();}
+  closeModal('mNote');});
+(function(){try{if(!HAS_WS)document.getElementById('envWarn').style.display='block';}catch(e){}})();
+/* =============== unified backend (sign-in, real send, verify, AI QC, assign) =============== */
+window.ME={signed_in:false,features:{},providers:{}};
+async function api(url,payload){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+  return d;
+}
 async function loadMe(){
-  try{
-    const r=await fetch('/api/me');
-    if(!r.ok) return;
-    window.ME=await r.json();
-  }catch(e){ return; } // static hosting — no backend available
-  const bar=document.getElementById('authbar');
-  if(window.ME.signed_in){
-    const prov=window.ME.provider==='google'?'Google':'Microsoft';
-    bar.innerHTML=`Signed in as <b>${esc(window.ME.name||window.ME.email)}</b> (${prov}) &middot; <a href="/auth/logout">Sign out</a>`;
+  try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
+  const bar=document.getElementById('authbar');bar.style.display='block';
+  const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
+  if(ME.signed_in){
+    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
-    const p=window.ME.providers||{};
-    const links=[];
-    if(p.google) links.push('<a href="/auth/google/login">Sign in with Google</a>');
-    if(p.microsoft) links.push('<a href="/auth/login">Sign in with Microsoft</a>');
-    if(!links.length) links.push('<a href="/auth/google/login">Sign in with Google</a>','<a href="/auth/login">Sign in with Microsoft</a>');
-    bar.innerHTML=links.join(' &middot; ')+'&nbsp;&mdash; email &amp; invites send from whichever account you connect';
+    const l=[];const pr=ME.providers||{};
+    if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);
+    if(pr.microsoft)l.push(`<a href="/auth/login" ${A}>Sign in with Microsoft</a>`);
+    bar.innerHTML=l.length?l.join(' \u00b7 ')+' \u2014 sign in to send email, invites & verify phones':'';
   }
+  if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
+  if(advisorList().length)document.getElementById('btnAssign').style.display='';
+  render();
 }
-const pad2=n=>String(n).padStart(2,'0');
-function localStamp(d){
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-function openCompose(mode,email,first){
-  MODE=mode;
-  document.getElementById('m_title').textContent=mode==='email'?'Send email':'Send calendar invite';
-  document.getElementById('m_when').hidden=mode!=='invite';
-  document.getElementById('m_to').value=email;
-  document.getElementById('m_subject').value=mode==='email'
-    ?'Introduction — Financial Planners of America'
-    :'Retirement planning conversation — Financial Planners of America';
-  document.getElementById('m_body').value=`Hi ${first||'there'},\n\n`+(mode==='email'
-    ?'I work with professionals approaching retirement on 401(k) rollovers and retirement income planning. I\'d welcome a brief conversation to see whether we can be helpful.\n\nBest regards,\nDan Treacy\nFinancial Planners of America'
-    :'Looking forward to speaking with you.\n\nDan Treacy\nFinancial Planners of America');
-  if(mode==='invite'){
-    const d=new Date(Date.now()+26*3600*1000); d.setMinutes(0,0,0);
-    document.getElementById('m_start').value=localStamp(d);
-  }
-  document.getElementById('m_status').hidden=true;
-  document.getElementById('modalbg').classList.add('open');
-}
-document.getElementById('m_cancel').addEventListener('click',()=>document.getElementById('modalbg').classList.remove('open'));
-document.getElementById('m_send').addEventListener('click',async()=>{
-  const st=document.getElementById('m_status');
-  const show=(msg,cls)=>{st.textContent=msg; st.className='notice '+(cls||''); st.hidden=false;};
-  if(!window.ME.signed_in){ show('Sign in with Microsoft first (link at the top of the page).','err'); return; }
-  const to=document.getElementById('m_to').value.trim();
-  const subject=document.getElementById('m_subject').value;
-  const body=document.getElementById('m_body').value;
-  let url,payload;
-  if(MODE==='email'){
-    url='/api/send-email'; payload={to,subject,body};
-  }else{
-    const start=document.getElementById('m_start').value;
-    if(!start){ show('Pick a start time.','err'); return; }
-    const dur=parseInt(document.getElementById('m_dur').value,10);
-    const end=new Date(new Date(start).getTime()+dur*60000);
-    url='/api/create-event';
-    payload={attendee:to,subject,body,start:start+':00',end:localStamp(end)+':00',timezone:'America/New_York'};
-  }
-  show('Sending…','info');
+ACT_LABEL.verify='Verified';
+window.verifyLead=async id=>{
+  const L=byId(id);if(!L)return;
+  if(!(window.ME&&ME.signed_in)){toast('Sign in first \u2014 phone lookups use your WhitePages credits.');return;}
+  const phone=L.mobilePhone||L.directPhone;
+  toast('Checking '+phone+'\u2026');
   try{
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(r.ok){
-      show(MODE==='email'?'Email sent from your connected account.':'Invite sent — it\'s on your calendar and in their inbox.');
-      setTimeout(()=>document.getElementById('modalbg').classList.remove('open'),1400);
-    }else{
-      const d=await r.json().catch(()=>({}));
-      show('Failed: '+(d.detail||('HTTP '+r.status)),'err');
+    const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||''});
+    const mob=(d.line_type||'').toLowerCase().includes('mobile');
+    const bits=[];
+    if(d.valid===false)bits.push('INVALID');else bits.push(d.line_type||'unknown type');
+    if(d.carrier)bits.push(d.carrier);
+    if(d.name_match===true)bits.push('name \u2713');
+    else if(d.name_match===false&&d.owner)bits.push('owner: '+d.owner);
+    L.pv={label:bits.join(' \u00b7 '),ok:d.valid!==false&&mob&&d.name_match!==false};
+    L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
+  }catch(e){toast('Verify failed: '+e.message);}
+};
+document.getElementById('btnQC').addEventListener('click',async()=>{
+  if(!(window.ME&&ME.signed_in)){toast('Sign in to run AI quality control.');return;}
+  const pend=filtered().filter(L=>!L.qc&&L.tier!=='X');
+  if(!pend.length){toast('Every visible lead already has an AI grade.');return;}
+  const btn=document.getElementById('btnQC');btn.disabled=true;
+  let doneN=0;
+  try{
+    for(let i=0;i<pend.length;i+=10){
+      const batch=pend.slice(i,i+10);
+      btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
+      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes}))});
+      (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
+      doneN+=batch.length;save();render();
     }
-  }catch(e){ show('Network error: '+e.message,'err'); }
+    toast('AI QC complete \u2014 grades, gate evidence and first-call checklists attached.');
+  }catch(e){toast(doneN?('AI QC stopped after '+doneN+' leads: '+e.message):('AI QC failed: '+e.message));}
+  finally{btn.disabled=false;btn.textContent='AI quality control';}
+});
+document.getElementById('btnAssign').addEventListener('click',()=>{
+  const advs=advisorList();if(!advs.length){toast('Add advisors in ICP settings first.');return;}
+  const load={};advs.forEach(a=>load[a]=state.leads.filter(L=>L.assignedTo===a).length);
+  let n=0;
+  ['A','B','C'].forEach(t=>state.leads.forEach(L=>{
+    if(L.assignedTo||L.tier!==t)return;
+    const best=advs.reduce((b,a)=>load[a]<load[b]?a:b,advs[0]);
+    L.assignedTo=best;load[best]++;n++;
+  }));
+  save();render();toast(n+' leads auto-assigned \u2014 A-tier first, balanced across '+advs.length+' advisor'+(advs.length>1?'s':'')+'.');
 });
 loadMe();
+boot();
 </script>
-
 </body>
 </html>
