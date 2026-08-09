@@ -785,6 +785,35 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
     }
 
 
+@app.get("/api/wp-debug")
+async def wp_debug(request: Request, phone: str = "", name: str = "", path: str = ""):
+    """Raw WhitePages round-trip, for diagnosing an integration that returns
+    nothing. Shows the exact URL called, the status, and the untouched body.
+
+    Signed-in only, same as every other lookup — it spends a credit when the
+    call actually lands. Visit /api/wp-debug?phone=6313121293 in the browser.
+    """
+    await _active_token(request)
+    if not WHITEPAGES_API_KEY:
+        return {"error": "WHITEPAGES_API_KEY is not set on this service."}
+    params = {}
+    if phone:
+        params["phone"] = _digits(phone)
+    if name:
+        params["name"] = name
+    if not params:
+        return {"error": "Pass ?phone= or ?name="}
+    url = WHITEPAGES_BASE_URL + ("/" + path.lstrip("/") if path else _wp_path("phone"))
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
+        r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
+    return {
+        "url": str(r.url),
+        "status": r.status_code,
+        "key_len": len(WHITEPAGES_API_KEY),      # confirms a key is present, not its value
+        "body": r.text[:4000],
+    }
+
+
 class EnrichRequest(BaseModel):
     first_name: str = ""
     last_name: str = ""
