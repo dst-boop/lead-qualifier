@@ -52,6 +52,10 @@ GOOGLE_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events"
 )
 
+# --- WhitePages / Trestle (phone verification) ---
+WHITEPAGES_API_KEY = os.environ.get("WHITEPAGES_API_KEY", "")
+WHITEPAGES_BASE_URL = os.environ.get("WHITEPAGES_BASE_URL", "https://api.trestleiq.com").rstrip("/")
+
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 STATIC_DIR = Path(__file__).parent / "static"
 SESSION_COOKIE = "lq_session"
@@ -364,6 +368,55 @@ async def create_event(req: EventRequest, request: Request):
     if not ok:
         raise HTTPException(status_code=502, detail=f"{provider} calendar error {r.status_code}: {r.text[:300]}")
     return {"ok": True, "provider": provider}
+
+
+class VerifyPhoneRequest(BaseModel):
+    phone: str
+    first_name: str = ""
+    last_name: str = ""
+
+
+@app.post("/api/verify-phone")
+async def verify_phone(req: VerifyPhoneRequest, request: Request):
+    # Lookups cost money per call — signed-in users only.
+    await _active_token(request)
+    if not WHITEPAGES_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="WhitePages not configured — set WHITEPAGES_API_KEY "
+                   "(see SETUP-whitepages.md).",
+        )
+    async with httpx.AsyncClient(timeout=30) as cx:
+        r = await cx.get(
+            f"{WHITEPAGES_BASE_URL}/3.1/phone",
+            params={"phone": req.phone},
+            headers={"x-api-key": WHITEPAGES_API_KEY},
+        )
+    if r.status_code in (401, 403):
+        raise HTTPException(status_code=502, detail="WhitePages rejected the API key — check WHITEPAGES_API_KEY.")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"WhitePages error {r.status_code}: {r.text[:300]}")
+    d = r.json()
+
+    owner = ""
+    belongs_to = d.get("belongs_to")
+    if isinstance(belongs_to, dict):
+        owner = belongs_to.get("name") or ""
+    elif isinstance(belongs_to, list) and belongs_to:
+        owner = (belongs_to[0] or {}).get("name") or ""
+
+    name_match = None
+    if owner and req.last_name.strip():
+        name_match = req.last_name.strip().lower() in owner.lower()
+
+    return {
+        "valid": d.get("is_valid"),
+        "line_type": d.get("line_type"),
+        "carrier": d.get("carrier"),
+        "prepaid": d.get("is_prepaid"),
+        "owner": owner,
+        "name_match": name_match,
+    }
 
 
 # ------------------------- Pages -------------------------
