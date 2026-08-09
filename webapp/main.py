@@ -82,6 +82,29 @@ app = FastAPI(title="Lead Qualifier")
 
 
 @app.middleware("http")
+async def https_middleware(request: Request, call_next):
+    """Send plain-HTTP visitors to HTTPS, and keep them there.
+
+    Cloud Run terminates TLS and passes the original scheme in
+    X-Forwarded-Proto. The header is absent for local runs and for the
+    platform's own container probes, so only an explicit "http" redirects.
+    """
+    if not BASE_URL.startswith("https"):
+        return await call_next(request)
+
+    if request.headers.get("x-forwarded-proto") == "http":
+        return RedirectResponse(
+            str(request.url.replace(scheme="https")), status_code=301
+        )
+
+    response = await call_next(request)
+    # Without this, a browser that has once reached the site over HTTP will
+    # keep guessing HTTP from its own autocomplete.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+@app.middleware("http")
 async def session_middleware(request: Request, call_next):
     sid = request.cookies.get(SESSION_COOKIE)
     is_new = sid is None or sid not in SESSIONS
@@ -724,11 +747,11 @@ async def qc(req: QCRequest, request: Request):
 
 # ------------------------- Pages -------------------------
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 async def healthz():
     return {"ok": True}
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
