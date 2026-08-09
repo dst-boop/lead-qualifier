@@ -14,6 +14,7 @@ Environment variables:
   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET          (see SETUP-google.md)
   WHITEPAGES_API_KEY [/ WHITEPAGES_BASE_URL]       (see SETUP-whitepages.md)
   ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
+  USE_FIRESTORE=0                                  force memory mode (see SETUP-firestore.md)
   APP_BASE_URL   Public URL of this app, no trailing slash
 """
 
@@ -74,9 +75,101 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 STATIC_DIR = Path(__file__).parent / "static"
 SESSION_COOKIE = "lq_session"
+SESSION_TTL = 8 * 3600
 
-# Single-replica in-memory session store.
-SESSIONS: dict[str, dict] = {}
+# ------------------------- Storage -------------------------
+# Sessions and saved lead lists live in Firestore so they survive the container.
+# Cloud Run load-balances across instances and recycles them freely, so an
+# in-process dict means sign-in breaks the moment a second instance appears.
+# Falls back to memory when Firestore is unreachable — fine for local runs,
+# and /api/me reports which backend is live so a misconfigured deploy is
+# visible rather than silently ephemeral.
+
+USE_FIRESTORE = os.environ.get("USE_FIRESTORE", "1") != "0"
+FS_SESSIONS = os.environ.get("FIRESTORE_SESSIONS_COLLECTION", "sessions")
+FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
+
+_MEM_SESSIONS: dict[str, dict] = {}
+_MEM_STATE: dict[str, dict] = {}
+_fs_client = None
+_fs_failed = False
+
+
+def _firestore():
+    """Async Firestore client, or None when unavailable."""
+    global _fs_client, _fs_failed
+    if not USE_FIRESTORE or _fs_failed:
+        return None
+    if _fs_client is None:
+        try:
+            from google.cloud import firestore
+            _fs_client = firestore.AsyncClient()
+        except Exception as e:            # no SDK, no credentials, no project
+            print(f"[storage] Firestore unavailable, using memory: {e}")
+            _fs_failed = True
+            return None
+    return _fs_client
+
+
+def storage_backend() -> str:
+    return "firestore" if _firestore() is not None else "memory"
+
+
+async def _fs_get(collection: str, key: str) -> Optional[dict]:
+    global _fs_failed
+    db = _firestore()
+    if db is None:
+        return None
+    try:
+        snap = await db.collection(collection).document(key).get()
+        return snap.to_dict() if snap.exists else None
+    except Exception as e:
+        print(f"[storage] Firestore read failed, using memory: {e}")
+        _fs_failed = True
+        return None
+
+
+async def _fs_set(collection: str, key: str, value: dict) -> bool:
+    global _fs_failed
+    db = _firestore()
+    if db is None:
+        return False
+    try:
+        await db.collection(collection).document(key).set(value)
+        return True
+    except Exception as e:
+        print(f"[storage] Firestore write failed, using memory: {e}")
+        _fs_failed = True
+        return False
+
+
+async def load_session(sid: str) -> Optional[dict]:
+    doc = await _fs_get(FS_SESSIONS, sid)
+    if doc is not None:
+        if doc.get("expires_at", 0) < time.time():
+            return None
+        try:
+            return json.loads(doc.get("data") or "{}")
+        except ValueError:
+            return None
+    return _MEM_SESSIONS.get(sid)
+
+
+async def save_session(sid: str, session: dict) -> None:
+    payload = {"data": json.dumps(session), "expires_at": time.time() + SESSION_TTL}
+    if not await _fs_set(FS_SESSIONS, sid, payload):
+        _MEM_SESSIONS[sid] = session
+
+
+async def drop_session(sid: str) -> None:
+    _MEM_SESSIONS.pop(sid, None)
+    db = _firestore()
+    if db is not None:
+        try:
+            await db.collection(FS_SESSIONS).document(sid).delete()
+        except Exception as e:
+            print(f"[storage] Firestore delete failed: {e}")
+
 
 app = FastAPI(title="Lead Qualifier")
 
@@ -107,19 +200,28 @@ async def https_middleware(request: Request, call_next):
 @app.middleware("http")
 async def session_middleware(request: Request, call_next):
     sid = request.cookies.get(SESSION_COOKIE)
-    is_new = sid is None or sid not in SESSIONS
+    session = await load_session(sid) if sid else None
+    is_new = session is None
     if is_new:
         sid = secrets.token_urlsafe(32)
-        SESSIONS[sid] = {}
+        session = {}
     request.state.sid = sid
-    request.state.session = SESSIONS[sid]
+    request.state.session = session
+
+    # Handlers mutate the session dict in place, so compare against a snapshot
+    # rather than writing on every request — most requests change nothing.
+    before = json.dumps(session, sort_keys=True)
     response = await call_next(request)
+    if not getattr(request.state, "session_dropped", False):
+        if is_new or json.dumps(session, sort_keys=True) != before:
+            await save_session(sid, session)
+
     if is_new:
         response.set_cookie(
             SESSION_COOKIE, sid,
             httponly=True, samesite="lax",
             secure=BASE_URL.startswith("https"),
-            max_age=8 * 3600,
+            max_age=SESSION_TTL,
         )
     return response
 
@@ -275,13 +377,34 @@ async def google_callback(request: Request):
 
 @app.get("/auth/logout")
 async def logout(request: Request):
-    SESSIONS.pop(request.state.sid, None)
+    await drop_session(request.state.sid)
+    request.state.session_dropped = True     # stop the middleware re-saving it
     response = RedirectResponse("/")
     response.delete_cookie(SESSION_COOKIE)
     return response
 
 
 # ------------------------- Shared helpers -------------------------
+
+async def _signed_in_email(request: Request) -> str:
+    """Email of the signed-in user — the key their saved list is stored under."""
+    session = request.state.session
+    if session.get("provider") == "google":
+        token = await _google_token(session)
+        if token:
+            async with httpx.AsyncClient(timeout=15) as cx:
+                r = await cx.get(GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {token}"})
+            if r.status_code == 200:
+                return (r.json().get("email") or "").lower()
+    token = _ms_token(session)
+    if token:
+        async with httpx.AsyncClient(timeout=15) as cx:
+            r = await cx.get(f"{GRAPH}/me", headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 200:
+            d = r.json()
+            return ((d.get("mail") or d.get("userPrincipalName")) or "").lower()
+    return ""
+
 
 async def _active_token(request: Request) -> tuple[str, str]:
     """Return (provider, access_token) for the signed-in account, else 401."""
@@ -316,7 +439,9 @@ async def me(request: Request):
     features = {
         "whitepages": bool(WHITEPAGES_API_KEY),
         "ai_qc": bool(ANTHROPIC_API_KEY),
+        "server_state": storage_backend() == "firestore",
     }
+    storage = storage_backend()
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -326,7 +451,8 @@ async def me(request: Request):
                 d = r.json()
                 return {"signed_in": True, "provider": "google",
                         "name": d.get("name"), "email": d.get("email"),
-                        "providers": providers, "features": features}
+                        "providers": providers, "features": features,
+                        "storage": storage}
     token = _ms_token(session)
     if token:
         async with httpx.AsyncClient(timeout=15) as cx:
@@ -336,8 +462,10 @@ async def me(request: Request):
             return {"signed_in": True, "provider": "microsoft",
                     "name": d.get("displayName"),
                     "email": d.get("mail") or d.get("userPrincipalName"),
-                    "providers": providers, "features": features}
-    return JSONResponse({"signed_in": False, "providers": providers, "features": features})
+                    "providers": providers, "features": features,
+                    "storage": storage}
+    return JSONResponse({"signed_in": False, "providers": providers,
+                         "features": features, "storage": storage})
 
 
 class EmailRequest(BaseModel):
@@ -733,6 +861,41 @@ async def enrich(req: EnrichRequest, request: Request):
         "emails": [_first_str(e, "email") for e in (person.get("emails") or [])
                    if isinstance(e, dict) and _first_str(e, "email")],
     }
+
+
+class LeadState(BaseModel):
+    settings: dict = {}
+    leads: list = []
+
+
+@app.get("/api/state")
+async def get_state(request: Request):
+    """The signed-in user's saved list. 401 keeps the browser on localStorage."""
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    doc = await _fs_get(FS_STATE, email) or _MEM_STATE.get(email)
+    if not doc:
+        return {"found": False, "settings": {}, "leads": [], "backend": storage_backend()}
+    try:
+        payload = json.loads(doc.get("data") or "{}")
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Saved list is corrupt.")
+    return {"found": True, "settings": payload.get("settings") or {},
+            "leads": payload.get("leads") or [], "saved_at": doc.get("saved_at"),
+            "backend": storage_backend()}
+
+
+@app.put("/api/state")
+async def put_state(body: LeadState, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    payload = {"data": json.dumps({"settings": body.settings, "leads": body.leads}),
+               "saved_at": time.time(), "lead_count": len(body.leads)}
+    if not await _fs_set(FS_STATE, email, payload):
+        _MEM_STATE[email] = payload
+    return {"ok": True, "leads": len(body.leads), "backend": storage_backend()}
 
 
 # ------------------------- AI lead QC (Claude) -------------------------
