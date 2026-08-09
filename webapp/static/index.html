@@ -398,9 +398,15 @@ async function loadMe(){
   }catch(e){ return; } // static hosting — no backend available
   const bar=document.getElementById('authbar');
   if(window.ME.signed_in){
-    bar.innerHTML=`Signed in as <b>${esc(window.ME.name||window.ME.email)}</b> &middot; <a href="/auth/logout">Sign out</a>`;
+    const prov=window.ME.provider==='google'?'Google':'Microsoft';
+    bar.innerHTML=`Signed in as <b>${esc(window.ME.name||window.ME.email)}</b> (${prov}) &middot; <a href="/auth/logout">Sign out</a>`;
   }else{
-    bar.innerHTML=`<a href="/auth/login">Sign in with Microsoft</a>&nbsp;to send email &amp; calendar invites`;
+    const p=window.ME.providers||{};
+    const links=[];
+    if(p.google) links.push('<a href="/auth/google/login">Sign in with Google</a>');
+    if(p.microsoft) links.push('<a href="/auth/login">Sign in with Microsoft</a>');
+    if(!links.length) links.push('<a href="/auth/google/login">Sign in with Google</a>','<a href="/auth/login">Sign in with Microsoft</a>');
+    bar.innerHTML=links.join(' &middot; ')+'&nbsp;&mdash; email &amp; invites send from whichever account you connect';
   }
 }
 const pad2=n=>String(n).padStart(2,'0');
@@ -448,7 +454,7 @@ document.getElementById('m_send').addEventListener('click',async()=>{
   try{
     const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(r.ok){
-      show(MODE==='email'?'Email sent from your O365 account.':'Invite sent — it\'s on your calendar and in their inbox.');
+      show(MODE==='email'?'Email sent from your connected account.':'Invite sent — it\'s on your calendar and in their inbox.');
       setTimeout(()=>document.getElementById('modalbg').classList.remove('open'),1400);
     }else{
       const d=await r.json().catch(()=>({}));
