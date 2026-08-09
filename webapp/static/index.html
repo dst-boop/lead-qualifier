@@ -456,27 +456,66 @@ const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='fu
 window.__inClaude=HAS_WS;
 let state={settings:{...DEFAULTS},leads:[]};
 let _pt=null;
+/* Server-side state is used when signed in AND the backend has Firestore.
+   Otherwise the browser keeps the list, exactly as before. */
+function serverState(){return !!(window.ME&&ME.signed_in&&ME.features&&ME.features.server_state);}
+/* Only write to the server once we have successfully read from it. If the read
+   failed we are holding the browser copy, which may be empty or stale — saving
+   that would overwrite the account's real list with it. */
+let serverOk=false;
+function localSave(payload){
+  if(HAS_WS)return window.storage.set('lq-data',payload);
+  return Promise.resolve(localStorage.setItem('lq-data',payload));
+}
+async function localLoad(){
+  if(HAS_WS){const r=await window.storage.get('lq-data');return r&&r.value;}
+  try{return localStorage.getItem('lq-data');}catch(e){return null;}
+}
 function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
   const payload=JSON.stringify({settings:state.settings,leads:state.leads});
-  try{
-    if(HAS_WS)await window.storage.set('lq-data',payload);
-    else localStorage.setItem('lq-data',payload);
-  }catch(e){console.error('save failed',e);}},400);}
+  // Always keep the local copy — it is the offline fallback and the thing that
+  // survives a sign-out.
+  try{await localSave(payload);}catch(e){console.error('local save failed',e);}
+  if(serverState()&&serverOk){
+    try{await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');}
+    catch(e){console.error('server save failed',e);setSync('local only — '+e.message);}
+  }},400);}
+function adoptSaved(s){
+  if(!s||!s.leads)return false;
+  s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
+  const saved={...(s.settings||{})};
+  // Saved settings win over defaults, which would otherwise pin an old
+  // scoring model in place forever. Drop just the scoring keys when the
+  // model changes; keep templates, org details and pricing.
+  if((saved.modelVersion||1)<DEFAULTS.modelVersion)
+    SCORING_KEYS.forEach(k=>delete saved[k]);
+  state={settings:{...DEFAULTS,...saved,modelVersion:DEFAULTS.modelVersion},leads:s.leads};
+  return true;
+}
+function setSync(msg){const el=document.getElementById('syncNote');if(el)el.textContent=msg?' · '+msg:'';}
 async function boot(){
-  try{
-    let raw=null;
-    if(HAS_WS){const r=await window.storage.get('lq-data');raw=r&&r.value;}
-    else{try{raw=localStorage.getItem('lq-data');}catch(e){}}
-    if(raw){const s=JSON.parse(raw);
-      if(s.leads){s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
-        const saved={...(s.settings||{})};
-        // Saved settings win over defaults, which would otherwise pin an old
-        // scoring model in place forever. Drop just the scoring keys when the
-        // model changes; keep templates, org details and pricing.
-        if((saved.modelVersion||1)<DEFAULTS.modelVersion)
-          SCORING_KEYS.forEach(k=>delete saved[k]);
-        state={settings:{...DEFAULTS,...saved,modelVersion:DEFAULTS.modelVersion},leads:s.leads};}}
-  }catch(e){/* first run — nothing saved yet */}
+  let loaded=false;
+  if(serverState()){
+    try{
+      const d=await api('/api/state',null,'GET');
+      serverOk=true;
+      if(d.found&&(d.leads||[]).length){loaded=adoptSaved(d);setSync('synced to your account');}
+      else{
+        // First sign-in on this account: lift whatever is in the browser up to
+        // the server rather than starting empty.
+        const raw=await localLoad();
+        if(raw&&adoptSaved(JSON.parse(raw))){
+          loaded=true;
+          await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');
+          setSync('browser list moved to your account');
+        }else setSync('synced to your account');
+      }
+    }catch(e){console.error('server load failed',e);setSync('local only — '+e.message);}
+  }
+  if(!loaded){
+    try{const raw=await localLoad();if(raw)adoptSaved(JSON.parse(raw));}
+    catch(e){/* first run — nothing saved yet */}
+  }
   rescoreAll();render();
 }
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
@@ -1153,8 +1192,10 @@ document.getElementById('noteSave').addEventListener('click',()=>{
 (function(){try{if(!HAS_WS)document.getElementById('envWarn').style.display='block';}catch(e){}})();
 /* =============== unified backend (sign-in, real send, verify, AI QC, assign) =============== */
 window.ME={signed_in:false,features:{},providers:{}};
-async function api(url,payload){
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+async function api(url,payload,method){
+  const opt={method:method||'POST',headers:{}};
+  if(payload!==null&&payload!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(payload);}
+  const r=await fetch(url,opt);
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
   return d;
@@ -1164,7 +1205,7 @@ async function loadMe(){
   const bar=document.getElementById('authbar');bar.style.display='block';
   const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
   if(ME.signed_in){
-    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
+    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account<span id="syncNote"></span> \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
     const l=[];const pr=ME.providers||{};
     if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);
@@ -1245,8 +1286,9 @@ document.getElementById('btnAssign').addEventListener('click',()=>{
   }));
   save();render();toast(n+' leads auto-assigned \u2014 A-tier first, balanced across '+advs.length+' advisor'+(advs.length>1?'s':'')+'.');
 });
-loadMe();
-boot();
+// boot() needs to know whether the user is signed in before it decides
+// between server state and the browser copy, so loadMe() has to finish first.
+(async()=>{await loadMe();await boot();})();
 </script>
 </body>
 </html>
