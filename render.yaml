@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lead-qualifier
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m webapp
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_BASE_URL
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_TENANT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false

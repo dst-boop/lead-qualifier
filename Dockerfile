@@ -10,15 +10,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Cloud Run injects $PORT at runtime (defaults to 8080). Streamlit MUST bind to
-# it and to 0.0.0.0 or the platform's proxy can't reach the container.
+# Cloud Run injects $PORT at runtime (defaults to 8080). The webapp entrypoint
+# reads it from the environment itself, so no shell expansion is needed.
 ENV PORT=8080
 EXPOSE 8080
 
-# Shell form so $PORT expands at container start.
-CMD streamlit run app.py \
-    --server.port=$PORT \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    --server.enableCORS=false \
-    --server.enableXsrfProtection=true
+CMD ["python", "-m", "webapp"]

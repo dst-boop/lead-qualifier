@@ -186,7 +186,7 @@ const ALIASES = {
   first_name:['first_name','firstname','contact_first_name'],
   last_name:['last_name','lastname','contact_last_name'],
   employer:['employer','company_name','company','account_name'],
-  phone:['phone','direct_phone_number','direct_phone','mobile_phone','phone_number','contact_phone'],
+  phone:['phone','mobile_phone','direct_phone_number','direct_phone','phone_number','contact_phone'],
   email:['email','email_address','contact_email'],
   job_title:['job_title','title'],
   state:['state','person_state','contact_state','person_state/province'],
@@ -247,6 +247,15 @@ function smartRead(text){
   if(Object.keys(ren).length){
     for(const o of data) for(const [from,to] of Object.entries(ren)){ o[to]=o[from]; delete o[from]; }
     headers = headers.map(h => ren[h]||h);
+  }
+  // Mobile numbers take priority: per lead, the primary phone is the mobile
+  // when one exists; a direct line fills in only when there is no mobile.
+  for(const o of data){
+    if(!blank(o.mobile_phone)) o.phone=o.mobile_phone;
+    else if(blank(o.phone)){
+      const fb=[o.direct_phone_number,o.direct_phone].find(v=>!blank(v));
+      if(fb!==undefined) o.phone=fb;
+    }
   }
   return {headers, data};
 }
