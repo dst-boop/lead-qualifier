@@ -889,10 +889,14 @@ function detailRow(L){
       ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
       ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
       ${L.hd?`<h4 style="margin-top:12px">Household &mdash; WhitePages</h4>
-      <div class="sigrow ${L.hd.value?'hit':'miss'}"><span>Home value</span><span class="pts">${L.hd.value?'$'+L.hd.value.toLocaleString():'unknown'}</span></div>
+      <div class="sigrow ${L.hd.age?'hit':'miss'}"><span>Age (confirmed)</span><span class="pts">${L.hd.age||'unknown'}</span></div>
       <div class="sigrow ${L.hd.city?'hit':'miss'}"><span>Lives in</span><span class="pts">${L.hd.city?esc(L.hd.city+', '+L.hd.state):'unknown'}</span></div>
-      <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}</span></div>
+      <div class="sigrow ${L.hd.ownsHome?'hit':(L.hd.ownsHome===false?'miss':'')}"><span>Owns their home</span><span class="pts">${L.hd.ownsHome===true?'yes':(L.hd.ownsHome===false?'not in their name':'unknown')}</span></div>
+      ${L.hd.ownerType?`<div class="sigrow hit"><span>Deed held by</span><span class="pts">${esc(L.hd.ownerType)}</span></div>`:''}
+      <div class="sigrow ${L.hd.props?'hit':'miss'}"><span>Properties owned</span><span class="pts">${L.hd.props||0}</span></div>
+      <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}${L.hd.phonesTotal?' of '+L.hd.phonesTotal+' phones':''}</span></div>
       ${(L.hd.mobiles&&L.hd.mobiles.length)?`<div class="hint mono" style="margin-top:3px">${L.hd.mobiles.map(esc).join(' &middot; ')}</div>`:''}
+      ${(L.hd.coOwners&&L.hd.coOwners.length)?`<div class="hint" style="margin-top:3px">Deed names: ${esc(L.hd.coOwners.join(' · '))}</div>`:''}
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}</div>`:''}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
@@ -1179,14 +1183,19 @@ window.enrichHome=async id=>{
   toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+'…');
   try{
     const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||''});
-    if(!d.found){toast('No WhitePages record found.');L.hd={value:null,city:'',state:'',mobiles:[],owner:''};save();render();return;}
-    L.hd={value:d.home_value||null,city:d.home_city||'',state:d.home_state||'',zip:d.home_zip||'',mobiles:d.mobiles||[],owner:d.owner||''};
+    if(!d.found){toast('No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:''};save();render();return;}
+    L.hd={age:d.age||null,city:d.home_city||'',state:d.home_state||'',zip:d.home_zip||'',
+          mobiles:d.mobiles||[],phonesTotal:d.phones_total||0,props:d.properties_owned||0,
+          ownsHome:(d.owns_home===undefined?null:d.owns_home),ownerType:d.owner_type||'',
+          coOwners:d.co_owners||[],owner:d.owner||''};
     if(!L.street&&d.home_street)L.street=d.home_street;
     if(!L.city&&d.home_city)L.city=d.home_city;
     if(!L.zip&&d.home_zip)L.zip=d.home_zip;
+    if(!L.email&&d.emails&&d.emails.length)L.email=d.emails[0];
+    if(!L.linkedinUrl&&d.linkedin_url)L.linkedinUrl=d.linkedin_url;
     if(!L.mobilePhone&&d.mobiles&&d.mobiles.length)L.mobilePhone=d.mobiles[0];
     L.updatedAt=Date.now();
-    logAct(id,'enrichHome',(d.home_value?'$'+d.home_value.toLocaleString():'no value')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile');
+    logAct(id,'enrichHome',(d.age?'age '+d.age:'age unknown')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':''));
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
 };
@@ -1200,7 +1209,7 @@ document.getElementById('btnQC').addEventListener('click',async()=>{
     for(let i=0;i<pend.length;i+=10){
       const batch=pend.slice(i,i+10);
       btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
-      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes}))});
+      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
       (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
       doneN+=batch.length;save();render();
     }
