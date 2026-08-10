@@ -544,6 +544,12 @@ class VerifyPhoneRequest(BaseModel):
     phone: str
     first_name: str = ""
     last_name: str = ""
+    # The lead's address, so a different owner at the same address can be told
+    # apart from a wrong number. One is a spouse; the other is bad data.
+    street: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
 
 
 def _wp_path(kind: str) -> str:
@@ -808,6 +814,7 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
     if owner and req.last_name.strip():
         name_match = req.last_name.strip().lower() in owner.lower()
 
+    owner_addr = _home_address(person)
     return {
         "valid": True if hit else None,
         "line_type": (hit or {}).get("type", ""),
@@ -815,7 +822,57 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
         "prepaid": None,
         "owner": owner,
         "name_match": name_match,
+        "owner_city": owner_addr["city"],
+        "owner_state": owner_addr["state"],
+        "owner_street": owner_addr["street"],
+        "owner_zip": owner_addr["zip"],
+        "same_household": _same_household(owner_addr, req),
     }
+
+
+def _same_household(addr: dict, req: "VerifyPhoneRequest") -> Optional[bool]:
+    """Whether the number's owner lives at the lead's address.
+
+    A different name at the same address is usually a spouse — often the
+    better prospect for a retirement conversation. A different name at a
+    different address is a wrong number. Unknown when we have nothing to
+    compare against.
+    """
+    lead_zip = "".join(c for c in req.zip if c.isdigit())[:5]
+    got_zip = "".join(c for c in addr["zip"] if c.isdigit())[:5]
+    if req.street and addr["street"]:
+        same_street = _norm_street(req.street) == _norm_street(addr["street"])
+        if lead_zip and got_zip:
+            return same_street and lead_zip == got_zip
+        return same_street
+    if lead_zip and got_zip:
+        return lead_zip == got_zip
+    return None
+
+
+UNIT_WORDS = {"apt", "apartment", "unit", "suite", "ste", "fl", "floor", "rm", "room"}
+STREET_WORDS = {"street", "st", "avenue", "ave", "road", "rd", "drive", "dr",
+                "lane", "ln", "court", "ct", "boulevard", "blvd", "place", "pl",
+                "terrace", "ter", "circle", "cir", "highway", "hwy", "way",
+                "north", "south", "east", "west", "n", "s", "e", "w"}
+
+
+def _norm_street(s: str) -> str:
+    """Loose street comparison: case, punctuation, suffixes and unit numbers.
+
+    Two people in the same building are not the same household, but "14
+    Alexander Ave Apt B" and "14 Alexander Avenue" are the same record written
+    two ways — the unit is dropped by one source, not by the resident. Cut at
+    the unit designator so the comparison is house number plus street name.
+    """
+    s = "".join(c.lower() if c.isalnum() else " " for c in s).split()
+    out = []
+    for w in s:
+        if w in UNIT_WORDS:
+            break               # everything after this is a unit, not a street
+        if w not in STREET_WORDS:
+            out.append(w)
+    return " ".join(out)
 
 
 @app.get("/api/wp-debug")
