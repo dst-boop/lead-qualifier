@@ -15,6 +15,7 @@ Environment variables:
   WHITEPAGES_API_KEY [/ WHITEPAGES_BASE_URL]       (see SETUP-whitepages.md)
   ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
   USE_FIRESTORE=0                                  force memory mode (see SETUP-firestore.md)
+  KMS_KEY_NAME                                     envelope-encrypt stored tokens (see SETUP-firestore.md)
   APP_BASE_URL   Public URL of this app, no trailing slash
 """
 
@@ -94,6 +95,79 @@ _MEM_STATE: dict[str, dict] = {}
 _fs_client = None
 _fs_failed = False
 
+# ------------------------- Token encryption -------------------------
+# Session documents hold OAuth refresh tokens. Firestore encrypts at rest with
+# Google-managed keys, but anyone who can read the database can read those
+# tokens and use them. Envelope encryption puts a second lock on: a random
+# data key per write encrypts the payload, KMS wraps the data key, and only
+# the ciphertext and the wrapped key are stored. A Firestore reader without
+# KMS decrypt permission then holds nothing usable.
+#
+# Unset KMS_KEY_NAME keeps the previous behaviour, so this is opt-in and the
+# app still runs locally and in any deploy that has not configured a key.
+# /api/me reports which is live.
+
+KMS_KEY_NAME = os.environ.get("KMS_KEY_NAME", "")
+_kms_client = None
+_kms_failed = False
+
+
+def _kms():
+    global _kms_client, _kms_failed
+    if not KMS_KEY_NAME or _kms_failed:
+        return None
+    if _kms_client is None:
+        try:
+            from google.cloud import kms
+            _kms_client = kms.KeyManagementServiceClient()
+        except Exception as e:
+            print(f"[crypto] KMS unavailable, storing tokens unwrapped: {e}")
+            _kms_failed = True
+            return None
+    return _kms_client
+
+
+def encryption_backend() -> str:
+    return "kms" if _kms() is not None else "google-managed"
+
+
+def _seal(plaintext: str) -> dict:
+    """{'data': ...} unwrapped, or {'ct','dek'} envelope-encrypted."""
+    client = _kms()
+    if client is None:
+        return {"data": plaintext}
+    try:
+        from cryptography.fernet import Fernet
+        dek = Fernet.generate_key()
+        ct = Fernet(dek).encrypt(plaintext.encode()).decode()
+        wrapped = client.encrypt(request={"name": KMS_KEY_NAME, "plaintext": dek})
+        return {"ct": ct, "dek": base64.b64encode(wrapped.ciphertext).decode()}
+    except Exception as e:
+        # Never lose a session because encryption broke.
+        print(f"[crypto] seal failed, storing unwrapped: {e}")
+        return {"data": plaintext}
+
+
+def _unseal(doc: dict) -> Optional[str]:
+    """Read either shape, so existing documents keep working."""
+    if doc.get("data") is not None:
+        return doc["data"]
+    if not doc.get("ct") or not doc.get("dek"):
+        return None
+    client = _kms()
+    if client is None:
+        print("[crypto] document is sealed but KMS is unavailable")
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        unwrapped = client.decrypt(
+            request={"name": KMS_KEY_NAME,
+                     "ciphertext": base64.b64decode(doc["dek"])})
+        return Fernet(unwrapped.plaintext).decrypt(doc["ct"].encode()).decode()
+    except Exception as e:
+        print(f"[crypto] unseal failed: {e}")
+        return None
+
 
 def _firestore():
     """Async Firestore client, or None when unavailable."""
@@ -148,15 +222,19 @@ async def load_session(sid: str) -> Optional[dict]:
     if doc is not None:
         if doc.get("expires_at", 0) < time.time():
             return None
+        raw = _unseal(doc)
+        if raw is None:
+            return None
         try:
-            return json.loads(doc.get("data") or "{}")
+            return json.loads(raw)
         except ValueError:
             return None
     return _MEM_SESSIONS.get(sid)
 
 
 async def save_session(sid: str, session: dict) -> None:
-    payload = {"data": json.dumps(session), "expires_at": time.time() + SESSION_TTL}
+    payload = _seal(json.dumps(session))
+    payload["expires_at"] = time.time() + SESSION_TTL
     if not await _fs_set(FS_SESSIONS, sid, payload):
         _MEM_SESSIONS[sid] = session
 
@@ -441,6 +519,7 @@ async def me(request: Request):
         "ai_qc": bool(ANTHROPIC_API_KEY),
         "server_state": storage_backend() == "firestore",
     }
+    encryption = encryption_backend()
     storage = storage_backend()
     if session.get("provider") == "google":
         token = await _google_token(session)
@@ -452,7 +531,7 @@ async def me(request: Request):
                 return {"signed_in": True, "provider": "google",
                         "name": d.get("name"), "email": d.get("email"),
                         "providers": providers, "features": features,
-                        "storage": storage}
+                        "storage": storage, "encryption": encryption}
     token = _ms_token(session)
     if token:
         async with httpx.AsyncClient(timeout=15) as cx:
@@ -463,9 +542,10 @@ async def me(request: Request):
                     "name": d.get("displayName"),
                     "email": d.get("mail") or d.get("userPrincipalName"),
                     "providers": providers, "features": features,
-                    "storage": storage}
+                    "storage": storage, "encryption": encryption}
     return JSONResponse({"signed_in": False, "providers": providers,
-                         "features": features, "storage": storage})
+                         "features": features, "storage": storage,
+                         "encryption": encryption})
 
 
 class EmailRequest(BaseModel):

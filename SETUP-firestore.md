@@ -60,13 +60,53 @@ it is copied up to your account and the bar says **"browser list moved to your
 account"**. If a list already exists on the account, that one wins and the
 browser copy is left alone.
 
-## Note on token storage
+## Encrypting the stored tokens
 
 Session documents hold OAuth refresh tokens. Firestore encrypts everything at
-rest with Google-managed keys, so they are not sitting in plaintext on disk —
-but anyone with read access to the database can read them.
+rest with Google-managed keys, so nothing is plaintext on disk — but anyone
+who can *read the database* can read those tokens and use them.
 
-The architecture calls for KMS envelope encryption on top, so that a Firestore
-reader alone can't use the tokens. **That is not built yet.** Until it is,
-treat Firestore read access as equivalent to access to the connected Google
-and Microsoft accounts, and keep the IAM role list short.
+Setting `KMS_KEY_NAME` puts a second lock on. Each write generates a random
+data key, encrypts the session with it, and stores the payload alongside a
+KMS-wrapped copy of the data key. Reading requires KMS decrypt permission, so
+database read access on its own yields nothing usable.
+
+**This is optional.** Leave `KMS_KEY_NAME` unset and behaviour is unchanged.
+
+### Setup — about three minutes
+
+1. Cloud Console → **Security → Key Management** → **Create key ring**.
+   Name it `lead-qualifier`, location **us-east1** (match the service).
+2. **Create key** inside it. Name it `sessions`, purpose
+   **Symmetric encrypt/decrypt**, rotation every 90 days is fine.
+3. Copy the key's **Resource name** — it looks like:
+
+   ```
+   projects/YOUR-PROJECT/locations/us-east1/keyRings/lead-qualifier/cryptoKeys/sessions
+   ```
+
+4. Grant the Cloud Run service account **Cloud KMS CryptoKey
+   Encrypter/Decrypter** (`roles/cloudkms.cryptoKeyEncrypterDecrypter`) on that
+   key. Do it on the key itself, not project-wide.
+5. Cloud Run → **Edit & deploy new revision → Variables & Secrets** → set
+   `KMS_KEY_NAME` to the resource name. Deploy.
+
+`GET /api/me` then reports `"encryption": "kms"` instead of
+`"google-managed"`.
+
+### What happens to existing sessions
+
+They keep working. Documents written before the key existed are stored under a
+`data` field and are still read; new writes use the encrypted form. Everyone is
+migrated within one session lifetime, with no cutover.
+
+### If the key becomes unreachable
+
+Sealed sessions cannot be read and everyone is signed out — they sign back in
+and carry on. Saved lead lists are unaffected. Encryption failures fall back to
+writing unwrapped rather than losing the session, so a KMS outage degrades
+instead of breaking.
+
+**Do not destroy or disable the key** while sessions reference it, and keep the
+IAM grant on it narrow — it is the thing standing between database read access
+and the connected Google and Microsoft accounts.
