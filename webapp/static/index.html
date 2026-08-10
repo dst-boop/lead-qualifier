@@ -1004,6 +1004,17 @@ function detailRow(L){
       ${(L.hd.coOwners&&L.hd.coOwners.length)?`<div class="hint" style="margin-top:3px">Deed names: ${esc(L.hd.coOwners.join(' · '))}</div>`:''}
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}${L.hd.matchedBy?' — matched on '+esc(L.hd.matchedBy)+(L.hd.matchedBy==='name'?' only, confirm it is the right person':''):''}${L.hd.matchScore?' ('+L.hd.matchScore+'/100)':''}</div>`:''}
       ${L.hd.rejected?`<div class="hint" style="margin-top:3px;color:var(--tierX)">No record attached — ${esc(L.hd.rejected)}</div>`:''}`:''}
+      ${(L.pv&&L.pv.household)?`<h4 style="margin-top:12px">Household member</h4>
+      <p class="hint">${esc(L.pv.household.name)} holds ${esc(L.pv.household.phone)} at this address — likely a spouse, and often the other half of a retirement decision.</p>
+      <button class="mbtn" style="margin-top:4px" onclick="addHousehold('${L.id}')">Add ${esc(L.pv.household.name)} as a lead</button>`:''}
+      ${(L.pv&&L.pv.wrong)?`<p class="hint" style="margin-top:8px;color:var(--tierX)"><strong>Wrong number.</strong> Registered to ${esc(L.pv.household?L.pv.household.name:'someone else')} at a different address — treat the imported number as bad and reach them by email.</p>`:''}
+      ${homeAddr(L)?`<h4 style="margin-top:12px">Property</h4>
+      <p class="hint">No valuation in the WhitePages data. Open the address to read an estimate yourself:</p>
+      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+        <a class="mbtn" target="_blank" rel="noopener" href="https://www.zillow.com/homes/${encodeURIComponent(homeAddr(L))}_rb/">Zillow</a>
+        <a class="mbtn" target="_blank" rel="noopener" href="https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(homeAddr(L))}&v=2">Redfin</a>
+        <a class="mbtn" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(homeAddr(L)+' home value')}">Google</a>
+      </div>`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
@@ -1083,6 +1094,12 @@ function phBtn(L,f){const v=L[f];if(!v)return '';
   return `<button class="phbtn" onclick="callLead('${L.id}','${f}')" title="Click to call via ${state.settings.callVia==='tel'?'system dialer':'RingCentral'}">${esc(v)}</button>`;}
 window.callLead=async(id,f)=>{const L=byId(id);const n=normPhone(L[f]);
   if(!n){toast('No usable number on file.');return;}
+  // Verified as belonging to someone else at another address. Dialling it
+  // reaches a stranger who never opted in, on a number that is usually a
+  // mobile — the TCPA exposure is the advisor's, so make it a deliberate act.
+  if(L.pv&&L.pv.wrong&&L.pv.field===f&&!await appConfirm(
+      `This number is registered to ${L.pv.household?L.pv.household.name:'someone else'}, not ${L.firstName||'this lead'} — it looks like bad data from the import, not their line. Calling it reaches a stranger. Call anyway?`,
+      'Wrong number'))return;
   if(f==='mobilePhone'&&truthy(L.mobileDnc)&&!await appConfirm('This mobile is DNC-flagged. Route to email-first unless there is an established business relationship. Call anyway?','DNC warning'))return;
   const v=state.settings.callVia;
   if(v==='rcweb')window.open('https://app.ringcentral.com/r/call?number='+encodeURIComponent(n),'_blank');
@@ -1294,7 +1311,9 @@ window.verifyLead=async id=>{
   const phone=L.mobilePhone||L.directPhone;
   toast('Checking '+phone+'\u2026');
   try{
-    const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||''});
+    const ha=(L.hd&&L.hd.city)?L.hd:{street:L.street,city:L.city,state:L.state,zip:L.zip};
+    const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||'',
+      street:ha.street||'',city:ha.city||'',state:ha.state||'',zip:ha.zip||''});
     const mob=(d.line_type||'').toLowerCase().includes('mobile');
     const bits=[];
     if(d.valid===false)bits.push('INVALID');
@@ -1303,11 +1322,52 @@ window.verifyLead=async id=>{
     if(d.carrier)bits.push(d.carrier);
     if(d.name_match===true)bits.push('name \u2713');
     else if(d.name_match===false&&d.owner)bits.push('owner: '+d.owner);
-    L.pv={label:bits.join(' \u00b7 '),ok:d.valid!==false&&mob&&d.name_match!==false};
+    // A different owner elsewhere is a wrong number; the same address is a
+    // household member. Only the first should stop anyone dialling.
+    const wrong=d.name_match===false&&d.same_household!==true;
+    L.pv={label:bits.join(' \u00b7 '),ok:d.valid!==false&&mob&&d.name_match!==false,
+          field:(L.mobilePhone&&normPhone(L.mobilePhone)===normPhone(phone))?'mobilePhone':'directPhone',
+          wrong:wrong,
+          household:(d.name_match===false&&d.same_household===true)?
+            {name:d.owner,street:d.owner_street||'',city:d.owner_city||'',state:d.owner_state||'',zip:d.owner_zip||'',phone:phone}:null};
+    if(wrong)bits.push('wrong number');
     L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
   }catch(e){toast('Verify failed: '+e.message);}
 };
 ACT_LABEL.enrichHome='Home data';
+ACT_LABEL.household='Household lead';
+/* Full home address, preferring the WhitePages record over the office one. */
+function homeAddr(L){
+  const h=L.hd||{};
+  const a=(h.city&&(h.street||L.street))
+    ?{street:h.street||L.street,city:h.city,state:h.state,zip:h.zip}
+    :{street:L.street,city:L.city,state:L.state,zip:L.zip};
+  if(!a.street||!a.city)return '';
+  return [a.street,a.city,a.state,a.zip].filter(Boolean).join(', ');
+}
+/* Add the household member as their own lead. Deliberate, never automatic:
+   they are a real prospect but they did not come from the ICP pull, so they
+   start unscored and unqualified rather than inheriting the lead's grade. */
+window.addHousehold=id=>{
+  const L=byId(id);if(!L||!L.pv||!L.pv.household)return;
+  const h=L.pv.household;
+  // "Robert Holloway Sr" — the surname is Holloway, not Sr.
+  const SUFFIX=/^(jr|sr|ii|iii|iv|v|md|phd|esq|cpa)\.?$/i;
+  const parts=h.name.trim().split(/\s+/).filter(w=>!SUFFIX.test(w));
+  const first=parts[0]||'', last=parts.length>1?parts[parts.length-1]:'';
+  if(state.leads.some(x=>(x.firstName+' '+x.lastName).trim().toLowerCase()===h.name.trim().toLowerCase()
+       &&normPhone(x.mobilePhone||'')===normPhone(h.phone))){toast('Already on the list.');return;}
+  const N={id:'L'+Date.now()+Math.random().toString(36).slice(2,7),
+    batch:'Household — '+(L.firstName+' '+L.lastName).trim(),
+    firstName:first,lastName:last,mobilePhone:h.phone,
+    street:h.street||'',city:h.city||'',state:h.state||'',zip:h.zip||'',
+    title:'',employer:'',email:'',status:'New',
+    notes:`Household member of ${(L.firstName+' '+L.lastName).trim()} — holds ${h.phone}. Not from the ICP pull; qualify before calling.`,
+    jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now()};
+  scoreLead(N);state.leads.push(N);
+  logAct(id,'household',h.name+' added as a lead');
+  save();render();toast(h.name+' added — unscored until you fill in their details.');
+};
 window.enrichHome=async id=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
