@@ -680,6 +680,42 @@ def _state_code(s: str) -> str:
     return US_STATES.get(s.lower(), "")
 
 
+def _results(payload) -> list:
+    """Candidate records out of a search response, whatever the envelope."""
+    if isinstance(payload, dict):
+        for key in ("results", "result"):
+            v = payload.get(key)
+            if isinstance(v, list):
+                return [p for p in v if isinstance(p, dict)]
+            if isinstance(v, dict):
+                return [v]
+        return [payload] if "name" in payload else []
+    if isinstance(payload, list):
+        return [p for p in payload if isinstance(p, dict)]
+    return []
+
+
+def _phone_owner(payload, want: str) -> tuple:
+    """(record, phone_entry) for whoever actually holds this number.
+
+    A reverse-phone search returns everyone associated with the number —
+    current holder, prior holder, household. Ranking by match_score picks the
+    strongest name match, which is not the same question. Rank by the API's
+    own confidence in the phone-to-person link instead, and ignore records
+    that do not list the queried number at all.
+    """
+    best = (None, None, -1)
+    for person in _results(payload):
+        for p in _phone_list(person):
+            if _digits(p["number"]) != want:
+                continue
+            score = p.get("score")
+            score = score if isinstance(score, (int, float)) else -1
+            if score > best[2]:
+                best = (person, p, score)
+    return best[0], best[1]
+
+
 def _phone_list(person: dict) -> list:
     out = []
     for p in person.get("phones") or []:
@@ -760,15 +796,12 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
     on the matching phone entry and whether the owner is the lead.
     """
     await _active_token(request)
-    person = _best_person(await _wp_get("phone", {"phone": _digits(req.phone)}))
-    if not person:
+    want = _digits(req.phone)
+    payload = await _wp_get("phone", {"phone": want})
+    person, hit = _phone_owner(payload, want)
+    if not person or not hit:
         return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
                 "owner": "", "name_match": None, "note": "no record found"}
-
-    # Match the queried number inside the record rather than taking the first.
-    want = _digits(req.phone)
-    phones = _phone_list(person)
-    hit = next((p for p in phones if _digits(p["number"]) == want), None)
 
     owner = _first_str(person, "name", "full_name")
     name_match = None
@@ -820,6 +853,7 @@ class EnrichRequest(BaseModel):
     city: str = ""
     state: str = ""
     street: str = ""
+    phone: str = ""
 
 
 @app.post("/api/enrich")
@@ -834,18 +868,41 @@ async def enrich(req: EnrichRequest, request: Request):
     if not name:
         raise HTTPException(status_code=400, detail="A name is required to enrich a lead.")
 
-    # strict_match suppresses the server-side fuzzy fallback; the surname check
-    # in _best_person catches anything that slips through anyway.
-    params = {"name": name, "strict_match": "true"}
-    if req.city:
-        params["city"] = req.city
-    if _state_code(req.state):
-        params["state_code"] = _state_code(req.state)
-    if req.street:
-        params["street"] = req.street
-    person = _best_person(await _wp_get("person", params), require_last=req.last_name)
+    want_state = _state_code(req.state)
+    person, matched_by = {}, ""
+
+    # A phone number identifies a person; a name does not. "Daniel Treacy"
+    # returns a 30-year-old in Kansas City and a realtor in Portland, and the
+    # highest match_score is the realtor. Search the known number first.
+    if req.phone:
+        p, hit = _phone_owner(await _wp_get("phone", {"phone": _digits(req.phone)}),
+                              _digits(req.phone))
+        last = req.last_name.strip().lower()
+        if p and (not last or last in (_first_str(p, "name") or "").lower()):
+            person, matched_by = p, "phone"
+
+    if not person:
+        # strict_match suppresses the server-side fuzzy fallback; the surname
+        # check in _best_person catches anything that slips through.
+        params = {"name": name, "strict_match": "true"}
+        if req.city:
+            params["city"] = req.city
+        if want_state:
+            params["state_code"] = want_state
+        if req.street:
+            params["street"] = req.street
+        person = _best_person(await _wp_get("person", params), require_last=req.last_name)
+        matched_by = "name"
+
     if not person:
         return {"found": False}
+
+    # Namesakes are the failure mode here, so a record from a different state
+    # than the lead is refused rather than silently attributed to them.
+    got_state = _state_code(_home_address(person).get("state", ""))
+    if matched_by == "name" and want_state and got_state and got_state != want_state:
+        return {"found": False,
+                "rejected": f"closest match lives in {got_state}, lead is in {want_state}"}
 
     addr = _home_address(person)
     mobiles = _mobiles(person)
@@ -881,6 +938,8 @@ async def enrich(req: EnrichRequest, request: Request):
 
     return {
         "found": True,
+        "matched_by": matched_by,
+        "match_score": person.get("match_score"),
         "owner": _first_str(person, "name", "full_name"),
         "age": person.get("age"),
         "dob": _first_str(person, "date_of_birth"),
