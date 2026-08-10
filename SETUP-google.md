@@ -10,7 +10,7 @@ account is required for this part.
 1. Go to https://console.cloud.google.com (sign in with the Google account you'll send from).
 2. Create/select a project (e.g. `lead-qualifier`).
 3. **APIs & Services → Enabled APIs & services → + Enable APIs**: enable
-   **Gmail API** and **Google Calendar API**.
+   **Gmail API**, **Google Calendar API** and **Google Drive API**.
 4. **APIs & Services → OAuth consent screen**:
    - User type: **External** (unless the sending account is on Google Workspace — then **Internal**)
    - App name `FPA Lead Qualifier`, your email for the contact fields → Save
@@ -32,8 +32,43 @@ account is required for this part.
 Microsoft variables (`MS_*`) are optional — configure one provider or both;
 the sign-in bar only shows the providers that are configured.
 
+## 3. Pull from Drive
+
+Export a lead list from ZoomInfo into Drive and the app reads it directly —
+no download, no upload. Click **Pull from Drive**, and it lists spreadsheets
+matching the name (default `401(k) Rollover Leads`), newest first. Google
+Sheets, `.xlsx` and `.csv` all work; the file goes straight into the same
+column mapper as a manual import.
+
+Set `DRIVE_LEADS_FILE` to change the default name it looks for.
+
+### The scope, and why it is this one
+
+Drive access uses **`drive.readonly`** — the app can read any file in the
+signed-in account's Drive, though it only ever searches by filename and never
+lists everything.
+
+`drive.file` would be narrower, limiting access to files picked through
+Google's own dialog. It is not used because that dialog runs **in the browser
+with the access token**, and this app deliberately keeps every third-party
+token server-side. Trading that boundary for a narrower scope is the wrong
+trade in a tool holding client prospect data.
+
+If read access to the whole Drive is more than you want, the mitigation is a
+separate Google account that holds only the exports, connected in place of a
+personal one.
+
+### Re-consent
+
+Adding Drive changes the permissions the app asks for, so **sign out and sign
+back in once** after deploying. Until then Drive calls return a clear message
+saying exactly that rather than failing obscurely — an existing session simply
+does not carry the new permission.
+
 ## Notes
 
+- **Pull from Drive** appears only when signed in with Google; Microsoft
+  sign-in does not grant Drive access.
 - Email goes out via the Gmail API from the signed-in account and appears in
   its Sent folder. Calendar invites are created on that account's primary
   calendar with `sendUpdates=all`, so Google emails the lead the invitation.

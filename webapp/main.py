@@ -16,6 +16,7 @@ Environment variables:
   ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
   USE_FIRESTORE=0                                  force memory mode (see SETUP-firestore.md)
   KMS_KEY_NAME                                     envelope-encrypt stored tokens (see SETUP-firestore.md)
+  DRIVE_LEADS_FILE                                 default Drive filename to look for
   APP_BASE_URL   Public URL of this app, no trailing slash
 """
 
@@ -55,8 +56,15 @@ GCAL_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/even
 GOOGLE_SCOPES = (
     "openid email profile "
     "https://www.googleapis.com/auth/gmail.send "
-    "https://www.googleapis.com/auth/calendar.events"
+    "https://www.googleapis.com/auth/calendar.events "
+    # Read-only, and used only to fetch a named export by filename. drive.file
+    # would be narrower but requires running Google's Picker in the browser
+    # with the access token, which would put a third-party token in the page.
+    "https://www.googleapis.com/auth/drive.readonly"
 )
+DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # --- WhitePages (phone verification) ---
 # Two flavours of this API exist and they are not compatible:
@@ -518,6 +526,7 @@ async def me(request: Request):
         "whitepages": bool(WHITEPAGES_API_KEY),
         "ai_qc": bool(ANTHROPIC_API_KEY),
         "server_state": storage_backend() == "firestore",
+        "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
     storage = storage_backend()
@@ -528,6 +537,7 @@ async def me(request: Request):
                 r = await cx.get(GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {token}"})
             if r.status_code == 200:
                 d = r.json()
+                features["drive"] = True
                 return {"signed_in": True, "provider": "google",
                         "name": d.get("name"), "email": d.get("email"),
                         "providers": providers, "features": features,
@@ -1130,6 +1140,111 @@ async def put_state(body: LeadState, request: Request):
     if not await _fs_set(FS_STATE, email, payload):
         _MEM_STATE[email] = payload
     return {"ok": True, "leads": len(body.leads), "backend": storage_backend()}
+
+
+# ------------------------- Google Drive import -------------------------
+
+DRIVE_DEFAULT_NAME = os.environ.get("DRIVE_LEADS_FILE", "401(k) Rollover Leads")
+
+
+async def _google_only(request: Request) -> str:
+    """Drive needs the Google token specifically, not whichever is signed in."""
+    provider, token = await _active_token(request)
+    if provider != "google":
+        raise HTTPException(
+            status_code=400,
+            detail="Drive import needs a Google sign-in. Sign out and sign in with Google.",
+        )
+    return token
+
+
+def _rows_from_csv(text: str) -> list:
+    import csv, io
+    return [r for r in csv.reader(io.StringIO(text))]
+
+
+def _rows_from_xlsx(blob: bytes) -> list:
+    """First worksheet, as a list of string rows.
+
+    read_only keeps a large export from being held in memory twice, and
+    data_only takes computed values rather than formula text.
+    """
+    import io
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+    try:
+        ws = wb[wb.sheetnames[0]]
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            if row is None:
+                continue
+            cells = ["" if c is None else str(c).strip() for c in row]
+            if any(cells):
+                rows.append(cells)
+        return rows
+    finally:
+        wb.close()
+
+
+@app.get("/api/drive/find")
+async def drive_find(request: Request, name: str = ""):
+    """Spreadsheets in the user's Drive matching a name. Newest first."""
+    token = await _google_only(request)
+    wanted = (name or DRIVE_DEFAULT_NAME).replace("'", "\\'")
+    query = (
+        f"name contains '{wanted}' and trashed = false and ("
+        f"mimeType = '{SHEET_MIME}' or mimeType = '{XLSX_MIME}' or mimeType = 'text/csv')"
+    )
+    async with httpx.AsyncClient(timeout=30) as cx:
+        r = await cx.get(DRIVE_FILES_URL, headers={"Authorization": f"Bearer {token}"},
+                         params={"q": query, "orderBy": "modifiedTime desc", "pageSize": 20,
+                                 "fields": "files(id,name,mimeType,modifiedTime,size)",
+                                 "supportsAllDrives": "true",
+                                 "includeItemsFromAllDrives": "true"})
+    if r.status_code == 403:
+        raise HTTPException(
+            status_code=502,
+            detail="Google refused the Drive request. Sign out and back in to grant "
+                   "Drive access — the permission was added after your last sign-in.",
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Drive error {r.status_code}: {r.text[:300]}")
+    return {"files": r.json().get("files", []), "searched": name or DRIVE_DEFAULT_NAME}
+
+
+@app.get("/api/drive/rows")
+async def drive_rows(request: Request, id: str):
+    """A Drive spreadsheet as raw rows, for the existing column mapper."""
+    token = await _google_only(request)
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as cx:
+        meta = await cx.get(f"{DRIVE_FILES_URL}/{id}", headers=headers,
+                            params={"fields": "id,name,mimeType", "supportsAllDrives": "true"})
+        if meta.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Drive error {meta.status_code}: {meta.text[:200]}")
+        info = meta.json()
+        mime = info.get("mimeType", "")
+
+        if mime == SHEET_MIME:      # native Sheets must be exported, not downloaded
+            resp = await cx.get(f"{DRIVE_FILES_URL}/{id}/export", headers=headers,
+                                params={"mimeType": "text/csv"})
+        else:
+            resp = await cx.get(f"{DRIVE_FILES_URL}/{id}", headers=headers,
+                                params={"alt": "media", "supportsAllDrives": "true"})
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Drive download failed {resp.status_code}: {resp.text[:200]}")
+
+    try:
+        if mime == XLSX_MIME or info.get("name", "").lower().endswith(".xlsx"):
+            rows = _rows_from_xlsx(resp.content)
+        else:
+            rows = _rows_from_csv(resp.text)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not read {info.get('name')}: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"{info.get('name')} is empty.")
+    return {"name": info.get("name"), "rows": rows[:5001], "truncated": len(rows) > 5001}
 
 
 # ------------------------- AI lead QC (Claude) -------------------------
