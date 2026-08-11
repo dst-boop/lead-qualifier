@@ -180,7 +180,8 @@
   </div>
   <div class="topbtns">
     <button class="tbtn" id="btnRecipe">Build list</button>
-    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn primary" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
+    <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
+    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
     <button class="tbtn" id="btnExport">Export call list (CSV)</button>
     <button class="tbtn" id="btnBackup">Backup</button>
     <label class="filelabel"><input type="file" id="jsonFile" accept=".json" hidden><button class="tbtn" onclick="document.getElementById('jsonFile').click()">Restore</button></label>
@@ -349,6 +350,18 @@
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mImport')">Cancel</button>
     <button class="mbtn save" id="btnDoImport">Import &amp; score</button>
+  </div>
+</div></div>
+
+<!-- Drive picker -->
+<div class="overlay" id="mDrive"><div class="modal" style="max-width:560px">
+  <h2>Pull from Google Drive</h2>
+  <p class="hint">Export from ZoomInfo into Drive, then pick it here &mdash; no download, no upload. Spreadsheets only, newest first.</p>
+  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">File name contains<input type="text" id="drvName" placeholder="401(k) Rollover Leads"></label>
+  <div id="drvList" style="margin-top:10px;max-height:300px;overflow:auto"></div>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mDrive')">Cancel</button>
+    <button class="mbtn save" id="drvSearch">Search Drive</button>
   </div>
 </div></div>
 
@@ -1301,6 +1314,7 @@ async function loadMe(){
     bar.innerHTML=l.length?l.join(' \u00b7 ')+' \u2014 sign in to send email, invites & verify phones':'';
   }
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
+  if(ME.features&&ME.features.drive)document.getElementById('btnDrive').style.display='';
   if(advisorList().length)document.getElementById('btnAssign').style.display='';
   render();
 }
@@ -1333,6 +1347,40 @@ window.verifyLead=async id=>{
     if(wrong)bits.push('wrong number');
     L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
   }catch(e){toast('Verify failed: '+e.message);}
+};
+/* ---- Google Drive import: same mapper, different source ---- */
+document.getElementById('btnDrive').addEventListener('click',()=>{
+  document.getElementById('drvList').innerHTML='';
+  if(!document.getElementById('drvName').value)document.getElementById('drvName').value='401(k) Rollover Leads';
+  openModal('mDrive');driveSearch();
+});
+document.getElementById('drvSearch').addEventListener('click',()=>driveSearch());
+async function driveSearch(){
+  const box=document.getElementById('drvList');
+  box.innerHTML='<p class="hint">Searching…</p>';
+  try{
+    const d=await api('/api/drive/find?name='+encodeURIComponent(document.getElementById('drvName').value||''),null,'GET');
+    if(!d.files.length){box.innerHTML=`<p class="hint">No spreadsheet in Drive matching &ldquo;${esc(d.searched)}&rdquo;.</p>`;return;}
+    box.innerHTML=d.files.map(f=>{
+      const when=f.modifiedTime?new Date(f.modifiedTime).toLocaleString():'';
+      const kind=f.mimeType&&f.mimeType.indexOf('google-apps')>-1?'Google Sheet':(f.name.toLowerCase().endsWith('.csv')?'CSV':'Excel');
+      return `<div class="sigrow hit" style="cursor:pointer" onclick="driveLoad('${f.id}')">
+        <span><strong>${esc(f.name)}</strong><br><span class="hint">${kind} &middot; ${esc(when)}</span></span>
+        <span class="pts">Import</span></div>`;
+    }).join('');
+  }catch(e){box.innerHTML=`<p class="hint" style="color:var(--tierX)">${esc(e.message)}</p>`;}
+}
+window.driveLoad=async id=>{
+  const box=document.getElementById('drvList');
+  box.innerHTML='<p class="hint">Reading the file…</p>';
+  try{
+    const d=await api('/api/drive/rows?id='+encodeURIComponent(id),null,'GET');
+    if(d.rows.length<2){toast('That file has a header but no rows.');closeModal('mDrive');return;}
+    if(d.truncated)toast('Large file — first 5,000 rows imported.');
+    pending={headers:d.rows[0].map(h=>(h||'').trim()),data:d.rows.slice(1)};
+    closeModal('mDrive');
+    openMapper(d.name);          // straight into the existing column mapper
+  }catch(e){box.innerHTML=`<p class="hint" style="color:var(--tierX)">${esc(e.message)}</p>`;}
 };
 ACT_LABEL.enrichHome='Home data';
 ACT_LABEL.household='Household lead';
