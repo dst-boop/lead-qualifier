@@ -1436,7 +1436,11 @@ window.enrichHome=async id=>{
     if(!L.linkedinUrl&&d.linkedin_url)L.linkedinUrl=d.linkedin_url;
     if(!L.mobilePhone&&d.mobiles&&d.mobiles.length)L.mobilePhone=d.mobiles[0];
     L.updatedAt=Date.now();
-    logAct(id,'enrichHome',(d.age?'age '+d.age:'age unknown')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':''));
+    // Enrichment supplies the two facts the model weighs most — a confirmed
+    // age, and a mobile or email that completes the contact signal — so the
+    // lead has to be re-scored or the new information changes nothing.
+    scoreLead(L);
+    logAct(id,'enrichHome',(d.age?'age '+d.age:'age unknown')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score);
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
 };
