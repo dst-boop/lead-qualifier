@@ -1067,13 +1067,19 @@ function detailRow(L){
       <p class="hint">${esc(L.pv.household.name)} holds ${esc(L.pv.household.phone)} at this address — likely a spouse, and often the other half of a retirement decision.</p>
       <button class="mbtn" style="margin-top:4px" onclick="addHousehold('${L.id}')">Add ${esc(L.pv.household.name)} as a lead</button>`:''}
       ${(L.pv&&L.pv.wrong)?`<p class="hint" style="margin-top:8px;color:var(--tierX)"><strong>Wrong number.</strong> Registered to ${esc(L.pv.household?L.pv.household.name:'someone else')} at a different address — treat the imported number as bad and reach them by email.</p>`:''}
-      ${homeAddr(L)?`<h4 style="margin-top:12px">Property</h4>
-      <p class="hint">No valuation in the WhitePages data. Open the address to read an estimate yourself:</p>
-      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
-        <a class="mbtn" target="_blank" rel="noopener" href="https://www.zillow.com/homes/${encodeURIComponent(homeAddr(L))}_rb/">Zillow</a>
-        <a class="mbtn" target="_blank" rel="noopener" href="https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(homeAddr(L))}&v=2">Redfin</a>
-        <a class="mbtn" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(homeAddr(L)+' home value')}">Google</a>
-      </div>`:''}
+      ${propertyList(L).length?`<h4 style="margin-top:12px">Property</h4>
+      <p class="hint">No valuation in the WhitePages data &mdash; open an address to read an estimate yourself.</p>
+      ${propertyList(L).map(a=>`<div class="sigrow hit" style="align-items:flex-start">
+        <span>${esc(a.label)}<br><span class="hint">${esc(a.addr)}</span></span>
+        <span class="pts" style="white-space:nowrap">
+          <a target="_blank" rel="noopener" href="https://www.zillow.com/homes/${encodeURIComponent(a.addr)}_rb/">Zillow</a> &middot;
+          <a target="_blank" rel="noopener" href="https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(a.addr)}&v=2">Redfin</a> &middot;
+          <a target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(a.addr+' home value')}">Google</a>
+        </span></div>`).join('')}`:''}
+      ${(L.hd&&L.hd.relatives&&L.hd.relatives.length)?`<h4 style="margin-top:12px">Relatives on the record</h4>
+      <p class="hint">${esc(L.hd.relatives.join(' · '))}<br>A spouse is often the other half of a retirement decision.</p>`:''}
+      ${(L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length)?`<h4 style="margin-top:12px">Previously lived</h4>
+      <p class="hint">${esc(L.hd.priorPlaces.join(' · '))}</p>`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
@@ -1480,6 +1486,18 @@ window.driveLoad=async id=>{
 };
 ACT_LABEL.enrichHome='Home data';
 ACT_LABEL.household='Household lead';
+/* Addresses worth valuing: where they live, plus every deed in their name.
+   Deduplicated, because the home is usually also an owned property. */
+function propertyList(L){
+  const out=[],seen=new Set();
+  const key=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const home=homeAddr(L);
+  if(home){seen.add(key(home));out.push({label:'Home',addr:home});}
+  ((L.hd||{}).properties||[]).forEach(a=>{
+    if(a&&!seen.has(key(a))){seen.add(key(a));out.push({label:'Owned property',addr:a});}
+  });
+  return out;
+}
 /* Full home address, preferring the WhitePages record over the office one. */
 function homeAddr(L){
   const h=L.hd||{};
@@ -1520,6 +1538,7 @@ window.enrichHome=async id=>{
     const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||'',phone:L.mobilePhone||L.directPhone||''});
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||''};save();render();return;}
     L.hd={matchedBy:d.matched_by||'',matchScore:d.match_score||null,
+          properties:d.properties||[],priorPlaces:d.prior_places||[],relatives:d.relatives||[],
           age:d.age||null,dob:d.dob||'',street:d.home_street||'',city:d.home_city||'',
           state:d.home_state||'',zip:d.home_zip||'',emails:d.emails||[],
           mobiles:d.mobiles||[],phonesTotal:d.phones_total||0,props:d.properties_owned||0,

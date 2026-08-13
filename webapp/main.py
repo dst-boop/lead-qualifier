@@ -1104,7 +1104,44 @@ async def enrich(req: EnrichRequest, request: Request):
         "linkedin_url": _first_str(person, "linkedin_url"),
         "emails": [_first_str(e, "email") for e in (person.get("emails") or [])
                    if isinstance(e, dict) and _first_str(e, "email")],
+        # Already in the response and already paid for. The deeds are the
+        # useful part: each address is a property to value, and a second one
+        # says more about net worth than any title ever will.
+        "properties": _property_addresses(person),
+        "prior_places": _prior_places(person),
+        "relatives": [_first_str(r, "name") for r in (person.get("relatives") or [])
+                      if isinstance(r, dict) and _first_str(r, "name")][:8],
     }
+
+
+def _property_addresses(person: dict) -> list:
+    out = []
+    for p in person.get("owned_properties") or []:
+        if not isinstance(p, dict):
+            continue
+        a = _first_str(p, "address", "full_address")
+        if not a:
+            a = ", ".join(x for x in _addr(p).values() if x)
+        if a and a not in out:
+            out.append(a)
+    return out[:6]
+
+
+def _prior_places(person: dict) -> list:
+    """Previous cities, deduplicated — a mobility picture, not a mailing list.
+
+    Deliberately not used to widen matching: the Portland namesake in the live
+    data had a historic address in the same state as the real lead, so a
+    "lived there once" rule would have accepted exactly the record the
+    current-state check exists to reject.
+    """
+    out = []
+    for a in person.get("historic_addresses") or []:
+        parts = _addr(a)
+        place = ", ".join(x for x in (parts["city"], parts["state"]) if x)
+        if place and place not in out:
+            out.append(place)
+    return out[:6]
 
 
 class LeadState(BaseModel):
