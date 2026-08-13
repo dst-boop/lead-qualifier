@@ -571,9 +571,43 @@ function hasConcurrentRole(L){
   if(L.concurrentRole===true)return true;
   if(L.concurrentRole===false)return false;
   const t=(''+(L.concurrentRoles||'')).trim();
-  if(!t)return false;
-  if(/^(no|none|n|0|false)$/i.test(t))return false;
-  return truthy(t)||/present|current/i.test(t)||t.length>2;
+  if(t&&!/^(no|none|n|0|false)$/i.test(t))
+    return truthy(t)||/present|current/i.test(t)||t.length>2;
+  return !!dualTitle(L.title);
+}
+/* Two senior roles inside one title string. ZoomInfo packs them there —
+   "Senior Director, Information Technology & Chief Information Security
+   Officer" is two seats, and there is no separate column that says so.
+   Returns the two roles, or '' when the title names a single position. */
+/* Coarse weights mean ties are the normal case, so equal scores need an order
+   or "call first" is whatever the import happened to produce. Rank on how much
+   of the score is confirmed rather than inferred, then on reachability, then
+   on how recent the move is — the freshest orphaned 401(k) first. */
+function callFirst(L){
+  let n=0;
+  (L.signals||[]).forEach(s=>{if(s.hit&&s.conf)n+=2;});      // confirmed beats inferred
+  if(L.hd&&L.hd.age)n+=3;                                     // age from public record
+  if(L.pv&&L.pv.ok)n+=3;                                      // number verified as theirs
+  if(L.pv&&L.pv.wrong)n-=6;                                   // verified as someone else's
+  if(L.mobilePhone&&!truthy(L.mobileDnc))n+=1;
+  if(L.qc&&L.qc.grade==='A')n+=2;
+  const mo=monthsSince(parseStart(L.jobStartDate));
+  if(mo!==null)n+=Math.max(0,(60-mo))/60;                     // fresher move ranks higher
+  return n;
+}
+const ROLE_SPLIT=/\s*(?:&|\+|\/|\band\b)\s*/i;
+const ROLE_WORDS=/\b(chief|c[efiotm]o|president|vp|vice president|svp|evp|director|partner|principal|owner|founder|co-?founder|managing director|head of|board member|board of directors|trustee|advisor|adviser|chairman|chairwoman|chair)\b/i;
+/* One position written with two titles, not two positions. */
+const SAME_SEAT=/^(president|chairman|chairwoman|chair|owner|founder|co-?founder)$/i;
+function dualTitle(title){
+  const parts=(''+(title||'')).split(ROLE_SPLIT).map(s=>s.trim()).filter(Boolean);
+  if(parts.length<2)return '';
+  const roles=parts.filter(p=>ROLE_WORDS.test(p));
+  if(roles.length<2)return '';
+  // "President & CEO" is one seat with two names; "Partner & Board Member" is two.
+  const bare=roles.map(r=>r.replace(/[^a-z\- ]/gi,'').trim());
+  if(bare.length===2&&bare.every(r=>SAME_SEAT.test(r)||/^(c[efiotm]o|chief [a-z ]+officer)$/i.test(r)))return '';
+  return roles.join(' + ');
 }
 
 function scoreLead(L){
@@ -597,7 +631,10 @@ function scoreLead(L){
   // (board, advisory, own business) from an ordinary job change.
   const mo=monthsSince(parseStart(L.jobStartDate));
   const conc=hasConcurrentRole(L);
-  if(mo!==null&&mo<+s.tenMax&&conc){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo and holds another current role${L.concurrentRoles?': '+L.concurrentRoles:''}`,hit:true,conf:true,pts:+s.wRecent});}
+  // A second role read out of the title is an inference; a mapped column or a
+  // ticked box is not. Show the difference rather than presenting both as fact.
+  const dual=(L.concurrentRole===undefined&&!L.concurrentRoles)?dualTitle(L.title):'';
+  if(mo!==null&&mo<+s.tenMax&&conc){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo and holds another current role${L.concurrentRoles?': '+L.concurrentRoles:(dual?': '+dual:'')}`,hit:true,conf:!dual,pts:+s.wRecent});}
   else if(mo!==null&&mo<+s.tenMax){sig.push({k:'R',label:`In role ${mo} mo, but no second current role`,hit:false,pts:0});}
   else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — ${s.tenMax}+`,hit:false,pts:0});}
   else sig.push({k:'R',label:'Start date unknown',hit:false,pts:0});
@@ -954,7 +991,7 @@ function filtered(){
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
     :s==='state'?(a.state||'').localeCompare(b.state||'')
     :s==='updated'?b.updatedAt-a.updatedAt
-    :b.score-a.score);
+    :(b.score-a.score)||callFirst(b)-callFirst(a));
   return out;
 }
 function render(){
