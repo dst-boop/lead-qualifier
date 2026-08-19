@@ -1,4 +1,4 @@
-# Web app (FastAPI backend — webapp/)
+# Lead Qualifier — FastAPI backend (webapp/)
 fastapi>=0.110
 uvicorn>=0.29
 msal>=1.28
@@ -9,7 +9,3 @@ google-cloud-firestore>=2.16
 google-cloud-kms>=2.21
 cryptography>=42.0
 openpyxl>=3.1
-
-# Legacy Streamlit app (app.py) — kept for reference
-streamlit==1.60.0
-pandas==3.0.5

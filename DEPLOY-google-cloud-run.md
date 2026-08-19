@@ -66,15 +66,16 @@ always a single CNAME:
 |-------|-------------|-----------------------|
 | CNAME | `leads`     | `ghs.googlehosted.com.` |
 
-## 3. Update DNS (important — you already have a record here)
+## 3. Update DNS
 
-`leads.financialplannersofamerica.com` currently points at Railway
-(`CNAME leads -> mkzaixnn.up.railway.app`). A hostname can only point one place,
-so **edit that existing record** to the value Cloud Run gave you
-(`ghs.googlehosted.com.`) rather than adding a second one.
+`leads.financialplannersofamerica.com` already points at Cloud Run and serves
+the app over HTTPS. This section is here for setting up a new hostname.
+
+A hostname can only point one place, so **edit any existing record** for the
+subdomain rather than adding a second one.
 
 - **Google Domains / Squarespace:** DNS panel → edit the `leads` CNAME.
-- **Google Cloud DNS:** edit the record set for `leads.financialplannersofamerica.com.`.
+- **Google Cloud DNS:** edit the record set for the subdomain.
 
 Google auto-provisions the managed TLS certificate once the record resolves
 (usually 15 min – a few hours). Until then a cert warning is normal.
