@@ -1327,6 +1327,10 @@ if(!HAS_WS){
   document.getElementById('btnBuild').style.display='none';
   document.getElementById('btnEnrich').style.display='none';
   document.getElementById('bStatus').textContent='';
+  // Live pull needs the ZoomInfo connector, so on the deployed site this panel
+  // only composes a search recipe. Useful, but not worth half the screen above
+  // the call list — collapse it and let it be opened when wanted.
+  document.querySelector('details.buildpanel').removeAttribute('open');
 }
 document.getElementById('cfYes').addEventListener('click',()=>cfDone(true));
 document.getElementById('cfNo').addEventListener('click',()=>cfDone(false));

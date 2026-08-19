@@ -6,6 +6,5 @@ __pycache__/
 .venv/
 venv/
 .streamlit/secrets.toml
-railway.json
 README.md
 DEPLOY-google-cloud-run.md

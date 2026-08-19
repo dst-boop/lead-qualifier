@@ -1,5 +1,5 @@
-# Container image for the Streamlit lead-qualifier app.
-# Works on any container host (Google Cloud Run, App Engine flex, Fly, etc.).
+# Container image for the Lead Qualifier (FastAPI + static frontend).
+# Works on any container host; Cloud Run is what it runs on today.
 FROM python:3.13-slim
 
 WORKDIR /app
