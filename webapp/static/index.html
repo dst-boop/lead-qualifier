@@ -235,6 +235,7 @@
 </section>
 
 <section class="tablewrap">
+  <p class="hint" id="rowCap" style="margin:0 0 6px"></p>
   <table id="tbl" hidden>
     <thead><tr>
       <th>Tier / Score</th><th>Signals</th><th>Name</th><th>Title &middot; Employer</th>
@@ -474,6 +475,7 @@ const DEFAULTS={
   subj:'Retirement planning introduction — {firstName}, meet {yourName}',
   body:'Hi {firstName},\n\nLooking forward to connecting. We\'ll cover your retirement picture, any accounts left with prior employers, and whether a review makes sense.\n\nTalk soon,\n{yourName}'
 };
+const RENDER_CAP=250;   // rows drawn at once; filters reach the rest
 const SCORING_KEYS=['ageMin','gradBefore','tenMax','priorMin','titles','exTitles','wAge','wRecent','wTitle','wPrior','wContact','tierA','tierB'];
 const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='function');}catch(e){return false;}})();
 window.__inClaude=HAS_WS;
@@ -1013,7 +1015,11 @@ function render(){
   ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('')
   +`<div class="card" style="cursor:default;border-top-color:var(--set)"><div class="n" style="color:var(--set)">${set}</div><div class="l">Meetings set</div></div>`;
 
-  const list=filtered();
+  const all=filtered();
+  // Only draw the top of the list. Every edit re-renders, and at the 5,000-row
+  // import cap that cost well over a second per status change. You work the
+  // list from the top, so the rest can wait for a filter or a search.
+  const list=all.slice(0,RENDER_CAP);
   document.getElementById('tbl').hidden=state.leads.length===0;
   document.getElementById('empty').style.display=state.leads.length?'none':'block';
   const rows=document.getElementById('rows');
@@ -1042,6 +1048,10 @@ function render(){
       </div></td></tr>`
       +(expanded===L.id?detailRow(L):'');
   }).join('');
+  const more=all.length-list.length;
+  const note=document.getElementById('rowCap');
+  if(note)note.innerHTML=more>0
+    ?`Showing the top <strong>${list.length}</strong> of ${all.length} matching leads &mdash; search or filter to reach the rest. Export includes all ${all.length}.`:'';
   renderStats();
 }
 function detailRow(L){
