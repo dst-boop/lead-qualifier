@@ -1583,7 +1583,7 @@ document.getElementById('btnQC').addEventListener('click',async()=>{
     for(let i=0;i<pend.length;i+=10){
       const batch=pend.slice(i,i+10);
       btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
-      const d=await api('/api/qc',{leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
+      const d=await api('/api/qc',{base_age_min:+state.settings.ageMin||null,leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
       (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
       doneN+=batch.length;save();render();
     }
