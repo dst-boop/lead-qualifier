@@ -181,7 +181,7 @@
   <div class="topbtns">
     <button class="tbtn" id="btnRecipe">Build list</button>
     <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
-    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
+    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" id="btnCsv" data-t="Import a CSV export" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
     <button class="tbtn" id="btnExport">Export call list (CSV)</button>
     <button class="tbtn" id="btnBackup">Backup</button>
     <label class="filelabel"><input type="file" id="jsonFile" accept=".json" hidden><button class="tbtn" onclick="document.getElementById('jsonFile').click()">Restore</button></label>
@@ -244,8 +244,8 @@
     <tbody id="rows"></tbody>
   </table>
   <div class="empty" id="empty">
-    <h3>No leads yet</h3>
-    <p>Import a ZoomInfo contact export (CSV) to score and tier your list.<br>Column mapping is automatic &mdash; you can adjust it before importing.</p>
+    <h3 id="emptyH">No leads yet</h3>
+    <p id="emptyP">Import a ZoomInfo contact export (CSV) to score and tier your list.<br>Column mapping is automatic &mdash; you can adjust it before importing.</p>
   </div>
 </section>
 
@@ -488,13 +488,30 @@ function serverState(){return !!(window.ME&&ME.signed_in&&ME.features&&ME.featur
    failed we are holding the browser copy, which may be empty or stale — saving
    that would overwrite the account's real list with it. */
 let serverOk=false;
-function localSave(payload){
-  if(HAS_WS)return window.storage.set('lq-data',payload);
-  return Promise.resolve(localStorage.setItem('lq-data',payload));
+/* A lead list belongs to one account. The browser cache is therefore keyed by
+   the signed-in address, and signed out there is no key at all — nothing to
+   read, nothing to write. 'lq-data' is the old shared key, kept only long
+   enough to migrate one list onto its owner's account (see boot). */
+const LEGACY_KEY='lq-data';
+function localKey(){
+  const who=(window.ME&&ME.signed_in&&ME.email)?String(ME.email).toLowerCase():'';
+  return who?('lq-data:'+who):null;
 }
-async function localLoad(){
-  if(HAS_WS){const r=await window.storage.get('lq-data');return r&&r.value;}
-  try{return localStorage.getItem('lq-data');}catch(e){return null;}
+function localSave(payload){
+  const k=localKey();
+  if(!k)return Promise.resolve();            // signed out: keep nothing
+  if(HAS_WS)return window.storage.set(k,payload);
+  return Promise.resolve(localStorage.setItem(k,payload));
+}
+async function localLoad(key){
+  const k=key||localKey();
+  if(!k)return null;
+  if(HAS_WS){const r=await window.storage.get(k);return r&&r.value;}
+  try{return localStorage.getItem(k);}catch(e){return null;}
+}
+async function localDrop(key){
+  if(HAS_WS){try{await window.storage.delete(key);}catch(e){/* best effort */}return;}
+  try{localStorage.removeItem(key);}catch(e){/* best effort */}
 }
 function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
   const payload=JSON.stringify({settings:state.settings,leads:state.leads});
@@ -507,7 +524,14 @@ function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
   }},400);}
 function adoptSaved(s){
   if(!s||!s.leads)return false;
-  s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
+  // Restored lists can predate fields the table now assumes. status in
+  // particular is read with .replace() during render, so a list saved before it
+  // existed takes the whole table down on load rather than degrading.
+  s.leads.forEach(L=>{
+    if(!L.activity)L.activity=[];
+    if(!L.status)L.status='New';
+    if(!L.id)L.id='r'+Math.random().toString(36).slice(2,10);
+  });
   const saved={...(s.settings||{})};
   // Saved settings win over defaults, which would otherwise pin an old
   // scoring model in place forever. Drop just the scoring keys when the
@@ -519,6 +543,15 @@ function adoptSaved(s){
 }
 function setSync(msg){const el=document.getElementById('syncNote');if(el)el.textContent=msg?' · '+msg:'';}
 async function boot(){
+  // Signed out there is no owner for a list, so there is nothing to show. This
+  // is deliberate: the previous build read one shared browser key regardless of
+  // who was signed in, so a visitor saw the last user's leads and — worse — a
+  // fresh account would adopt them and push them to its own record.
+  if(!(window.ME&&ME.signed_in)){
+    state={settings:{...DEFAULTS},leads:[]};
+    render();
+    return;
+  }
   let loaded=false;
   if(serverState()){
     try{
@@ -526,20 +559,26 @@ async function boot(){
       serverOk=true;
       if(d.found&&(d.leads||[]).length){loaded=adoptSaved(d);setSync('synced to your account');}
       else{
-        // First sign-in on this account: lift whatever is in the browser up to
-        // the server rather than starting empty.
-        const raw=await localLoad();
+        // Nothing on the account yet. Prefer this account's own browser cache;
+        // fall back to the pre-namespacing shared key exactly once, then delete
+        // it so a second account signing in on this machine cannot inherit it.
+        let raw=await localLoad(), fromLegacy=false;
+        if(!raw){raw=await localLoad(LEGACY_KEY);fromLegacy=!!raw;}
         if(raw&&adoptSaved(JSON.parse(raw))){
           loaded=true;
           await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');
+          if(fromLegacy)await localDrop(LEGACY_KEY);
           setSync('browser list moved to your account');
         }else setSync('synced to your account');
       }
     }catch(e){console.error('server load failed',e);setSync('local only — '+e.message);}
   }
   if(!loaded){
-    try{const raw=await localLoad();if(raw)adoptSaved(JSON.parse(raw));}
-    catch(e){/* first run — nothing saved yet */}
+    try{
+      let raw=await localLoad();
+      if(!raw){const lg=await localLoad(LEGACY_KEY);if(lg){raw=lg;await localDrop(LEGACY_KEY);}}
+      if(raw)adoptSaved(JSON.parse(raw));
+    }catch(e){/* first run — nothing saved yet */}
   }
   rescoreAll();render();
 }
@@ -1042,6 +1081,20 @@ function render(){
   const list=all.slice(0,RENDER_CAP);
   document.getElementById('tbl').hidden=state.leads.length===0;
   document.getElementById('empty').style.display=state.leads.length?'none':'block';
+  const inAcct=!!(window.ME&&ME.signed_in);
+  const eh=document.getElementById('emptyH'),ep=document.getElementById('emptyP');
+  if(eh&&ep){
+    eh.textContent=inAcct?'No leads yet':'Sign in to see your leads';
+    ep.innerHTML=inAcct
+      ? 'Import a ZoomInfo contact export (CSV) to score and tier your list.<br>Column mapping is automatic &mdash; you can adjust it before importing.'
+      : 'Your list is tied to your account, so nothing is shown until you sign in.<br>Use the sign-in link above.';
+  }
+  // Importing while signed out would build a list with no owner.
+  ['btnDrive','btnCsv','btnPaste','btnBuild','btnQC','btnAssign'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.disabled=!inAcct;el.title=inAcct?(el.dataset.t||el.title):'Sign in first — lists are tied to your account';
+           if(inAcct&&el.dataset.t)el.title=el.dataset.t;}
+  });
   const rows=document.getElementById('rows');
   rows.innerHTML=list.map(L=>{
     const tape=(L.signals||[]).filter(s=>'ARTEC'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('');
@@ -1335,7 +1388,14 @@ document.getElementById('jsonFile').addEventListener('change',e=>{
   r.onload=async()=>{try{const s=JSON.parse(r.result);
     if(!s.leads||!s.settings)throw 0;
     if(!await appConfirm(`Restore ${s.leads.length} leads? This replaces what's currently loaded.`,'Restore backup'))return;
-    s.leads.forEach(L=>{if(!L.activity)L.activity=[];});
+    // Restored lists can predate fields the table now assumes. status in
+  // particular is read with .replace() during render, so a list saved before it
+  // existed takes the whole table down on load rather than degrading.
+  s.leads.forEach(L=>{
+    if(!L.activity)L.activity=[];
+    if(!L.status)L.status='New';
+    if(!L.id)L.id='r'+Math.random().toString(36).slice(2,10);
+  });
     state={settings:{...DEFAULTS,...s.settings},leads:s.leads};rescoreAll();save();render();toast('Backup restored.');
   }catch(x){toast('That file is not a valid Lead Qualifier backup.');}finally{e.target.value='';}};
   r.readAsText(f);});
