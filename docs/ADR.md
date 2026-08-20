@@ -400,6 +400,62 @@ strangers who never opted into anything.
 
 ---
 
+## 11a. ZoomInfo search and enrichment — what this subscription actually allows
+
+Written from live API responses on 2026-08-20, not from the vendor's docs. Three
+findings, each of which cost a wasted attempt.
+
+### `jobTitleList` combines with AND, not OR
+
+The parameter reads like a list of alternatives. It is not. A query for eleven
+senior titles returned **zero results** — no person holds all eleven at once. A
+two-title query for `["Chairman", "Chief Executive Officer"]` returned only
+people whose single title string contains both, e.g. Wells Fargo's "Chairman &
+Chief Executive Officer".
+
+This fails **silently**: an over-broad title list looks like "nobody matches your
+criteria" rather than an error, which invites the wrong conclusion about market
+size. One search per title, unioned client-side, is the working pattern.
+
+Title matching is also **substring, not exact**. `"Chief Financial Officer"`
+matched an *Executive Assistant To* a CFO. `excludeJobTitleList` is therefore not
+optional — and it needs a local backstop regex as well, since "PA To the
+Chairman" survives an `"Assistant"` exclusion and "HR Business Partner" survives
+anything aimed at ownership partners.
+
+### `yearsOfExperience` is unavailable in both directions
+
+- As a **search filter** (`yearsOfExperienceList`): rejected,
+  `Disallowed field 'yearsofexperience'`.
+- As an **enrichment return field**: also rejected — *and inconsistently*. In one
+  batch of ten, eight contacts hard-failed on the disallowed field while two
+  succeeded with it downgraded to a warning. Partial failure of a batch is a
+  normal outcome, not a transport error; the caller must reconcile per contact.
+
+### `education` carries no graduation year
+
+Enrichment returns school and degree, never a year. Combined with the absence of
+age and date of birth, **ZoomInfo cannot supply this model's primary age
+signal at all** (over 59.5, or graduated before 1990).
+
+The only proxy available is the earliest `fromDate` in `employmentHistory`, and
+it is a *lower bound* — the history is truncated to the most recent few roles, so
+career length is systematically understated and age with it.
+
+The consequence for the pipeline is structural: **ZoomInfo can source and rank a
+list, but Whitepages decides tier.** Any plan that assumes a ZoomInfo pull alone
+yields Tier A leads is wrong before it starts.
+
+### Enrichment is capped independently of search
+
+Search is free and effectively unlimited at this tier. Enrichment returned
+`Limit exceeded` — for a *single* contact, not just a batch — after two
+successful records. Search volume tells you nothing about how many contacts you
+can actually enrich, so **enrichment budget is the binding constraint on any
+list-building plan** and should be checked before a list is selected, not after.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.
