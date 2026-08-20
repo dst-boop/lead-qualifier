@@ -456,6 +456,71 @@ list-building plan** and should be checked before a list is selected, not after.
 
 ---
 
+## 11b. Scoops — the job-change signal we were inferring all along
+
+Tested live 2026-08-20. `search_scoops` is free, like all search, and returns
+something the contact endpoints do not: **a dated, sourced event**.
+
+A single result carries the person's ZoomInfo ID, an exact publication date, a
+link to the press release behind it, and a plain-English description naming both
+employers — *"has left the organization to join X as Y"*. Filtered to senior US
+executives from February 2026, there were **21,811** of them.
+
+That sentence is the orphaned 401(k). §5's model reaches the same conclusion by
+inference, from `positionStartDate` — a field one coverage test found 0%
+populated. Scoops supply it as fact with a citation.
+
+### The filters the contact search does not have
+
+`search_scoops` accepts `locationSearchType: "Person"`, so location can be
+scoped to where the *person* sits rather than the company HQ. `search_contacts_v2`
+has no such parameter, which is why a New-York-filtered contact pull returned
+people at Al Madar Holding, the University of Buenos Aires and AustralianSuper.
+It also accepts `excludedRegions`, `managementLevels` and `jobTitle`.
+
+Scoop types worth watching, from the live enum: `Executive Move`, `Left Company`,
+`New Hire`, `Promotion`, `Lateral Move` — and `Exit Investment`, which is a
+founder liquidity event rather than a rollover, but is money in motion all the
+same.
+
+### personIdList is the credit-free hop
+
+The scoop returns `contacts[].id`. Feeding those IDs to `search_contacts_v2` via
+`personIdList` (max 50) returns the full contact record — title, employer,
+accuracy score, `hasEmail` / `hasMobilePhone`, both DNC flags — for **zero
+credits**. A record checked this way had already refreshed to the person's *new*
+employer the same day the scoop published.
+
+This inverts the economics of §11a. Enrichment is the binding constraint, so the
+rule is: discover and qualify for free, and spend a credit only to reach someone
+already known to qualify.
+
+    free    search_scoops
+    free    personIdList -> title, employer, contact flags, DNC
+    free    app scoring
+    free    Whitepages -> age, home address
+    CREDIT  enrich_contacts, Tier A survivors only
+
+### Intent is a different business, not a bigger list
+
+Two relevant topics exist — `401k Retirement Plan` and `Retirement Planning` —
+and 2,255 US companies scored ≥70 on them. But both sit under ZoomInfo's
+*Human Resources → Compensation & Benefits* category. These are **employers
+evaluating their own retirement plan**, not individuals contemplating a rollover.
+
+That is a corporate plan-sponsor prospect: different buyer, larger ticket, and a
+source of rollovers for years afterwards. It should be a separate pipeline. Mixed
+into the rollover list it would corrupt every tier count in the app.
+
+### Lookalikes are persona-matching, not wealth-matching
+
+`find_similar_contacts` works, but ranks on job persona only — title, department,
+industry, revenue band, headcount. Three results came back with identical scores
+and identical profile briefs. It knows nothing about age, tenure or life stage,
+which is where this model lives, so it adds little over a title search.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.
