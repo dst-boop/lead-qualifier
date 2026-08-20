@@ -1319,7 +1319,8 @@ def qc_prompt(base_age_min: float) -> str:
     If a lead record includes an explicit "age" value, use it verbatim with ageStatus "CONFIRMED" instead of estimating.
     Status vocabulary per gate: "CONFIRMED" (record explicitly states it), "INFERRED" (strong proxy: seniority, tenure, company size, title), "UNKNOWN" (no signal), "FAIL" (evidence contradicts it).
     Inference guides: senior titles (VP/SVP/C-suite/Partner/Principal/Owner/MD) at mid-size+ companies => income likely >$250K. Long tenure in high-income roles or equity titles => higher net-worth likelihood. Many stints under 3 years => job hopper (small 401k balances, penalize).
-    "yearsExperience" is total career length and "yearsAtEmployer" is time in the current seat; the difference is years spent at previous employers, which is the tenure the 401K gate turns on. Prefer them over estimating from a start date.
+    A "netWorth" or "income" figure comes from a wealth-data vendor, not from a guess: when present, judge NW and YHE against it directly and mark them CONFIRMED rather than INFERRED. A "wealthEvent" names a money-in-motion trigger — a business sale, stock sale, inheritance, retirement or promotion — which is exactly the explicit signal the INT gate requires, and usually the reason to call now rather than later.
+"yearsExperience" is total career length and "yearsAtEmployer" is time in the current seat; the difference is years spent at previous employers, which is the tenure the 401K gate turns on. Prefer them over estimating from a start date.
     Property fields, when present, come from public records and are CONFIRMED rather than inferred: "ownsHome" true means the deed carries their name, "propertiesOwned" counts deeded properties (two or more is a strong net-worth signal), and "deedHeldBy" naming a trust or an entity means estate or entity planning has already happened — treat that as a strong NW signal and note the existing planning in the checklist.
 
     Return ONLY a JSON array, one object per lead, same order, no prose:
@@ -1348,6 +1349,9 @@ class QCLead(BaseModel):
     jobHopper: bool = False
     # Confirmed facts from a WhitePages enrichment, when one has been run.
     age: Optional[int] = None
+    netWorth: Optional[int] = None
+    income: Optional[int] = None
+    wealthEvent: str = ""
     ownsHome: Optional[bool] = None
     propertiesOwned: Optional[int] = None
     deedHeldBy: str = ""

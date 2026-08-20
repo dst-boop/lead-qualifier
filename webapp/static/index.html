@@ -563,6 +563,24 @@ function parseStart(v){
 function monthsSince(d){if(!d)return null;const n=new Date();return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth());}
 function truthy(v){return /^(true|yes|y|1)$/i.test((''+(v||'')).trim());}
 const NOW_YEAR=new Date().getFullYear();
+/* Age from the most trustworthy source available: a mapped column, then a
+   WhitePages record, then nothing. Graduation year is handled separately as
+   an explicitly inferred fallback. */
+function leadAge(L){
+  const n=parseFloat((''+(L.age||'')).replace(/[^\d.]/g,''));
+  if(n>0&&n<120)return n;
+  return (L.hd&&L.hd.age)||null;
+}
+/* Dollars out of "$2.5M", "1,200,000", "$750K", or a range like "$1M-$5M"
+   (a range takes its low end — the conservative read). */
+function money(v){
+  const t=(''+(v||'')).trim(); if(!t)return null;
+  const m=t.match(/([\d,.]+)\s*([mkb])?/i); if(!m)return null;
+  let n=parseFloat(m[1].replace(/,/g,'')); if(!(n>0))return null;
+  const suf=(m[2]||'').toLowerCase();
+  if(suf==='k')n*=1e3; else if(suf==='m')n*=1e6; else if(suf==='b')n*=1e9;
+  return Math.round(n);
+}
 /* Career length: use the stated figure, else derive it. Graduation year and
    first-job year both mark the start of working life, so either works; take
    whichever is earlier when both are present. */
@@ -629,7 +647,9 @@ function scoreLead(L){
   let score=0;
   // A — age: confirmed 59.5+, or graduated before 1990
   const gy=parseInt(L.gradYear,10);
-  const age=(L.hd&&L.hd.age)||null;
+  // An age straight from the import is as good as one from a paid lookup and
+  // better than a graduation-year guess, so prefer it and spend nothing.
+  const age=leadAge(L);
   if(age&&age>=+s.ageMin){score+=+s.wAge;sig.push({k:'A',label:`Age ${age} — over ${s.ageMin} (public record)`,hit:true,conf:true,pts:+s.wAge});}
   else if(L.ageVerified){score+=+s.wAge;sig.push({k:'A',label:'Age verified manually (LinkedIn)',hit:true,conf:true,pts:+s.wAge});}
   else if(gy&&gy<+s.gradBefore){score+=+s.wAge;sig.push({k:'A',label:`Graduated ${gy} — before ${s.gradBefore} (inferred)`,hit:true,conf:false,pts:+s.wAge});}
@@ -705,6 +725,12 @@ const FIELDS=[
   ['zip','Zip',['person zip code','zip','zip code','postal code']],
   ['jobStartDate','Job Start Date',['job start date','position start date','start date','hire date']],
   ['gradYear','Grad Year (age proxy)',['graduation year','grad year','college graduation year']],
+  // Wealth data — a vendor like WealthFeed supplies these outright, so the
+  // gates the AI otherwise infers from job titles arrive as facts.
+  ['age','Age',['age','current age','estimated age']],
+  ['netWorth','Net Worth',['net worth','estimated net worth','total net worth','wealth','estimated wealth','net worth range']],
+  ['income','Income',['income','estimated income','income range','household income','annual income']],
+  ['wealthEvent','Money-in-Motion Event',['money in motion','trigger event','life event','wealth event','event type','signal','wealth signal']],
   ['linkedinUrl','LinkedIn URL',['linkedin contact profile url','linkedin url','linkedin','person linkedin url','linkedin profile']],
   ['contactId','ZoomInfo Contact ID',['zoominfo contact id','contact id','person id','id']],
   ['employees','Company Employees',['number of employees','employees','company employees','employee count','company size']],
@@ -1062,6 +1088,11 @@ function detailRow(L){
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
       ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
       ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
+      ${(money(L.netWorth)||money(L.income)||L.wealthEvent||leadAge(L))?`<h4 style="margin-top:12px">Wealth data</h4>
+      ${leadAge(L)?`<div class="sigrow hit"><span>Age</span><span class="pts">${leadAge(L)}</span></div>`:''}
+      ${money(L.netWorth)?`<div class="sigrow hit"><span>Net worth</span><span class="pts">$${money(L.netWorth).toLocaleString()}</span></div>`:''}
+      ${money(L.income)?`<div class="sigrow hit"><span>Income</span><span class="pts">$${money(L.income).toLocaleString()}</span></div>`:''}
+      ${L.wealthEvent?`<div class="sigrow hit"><span>Money in motion</span><span class="pts">${esc(L.wealthEvent)}</span></div>`:''}`:''}
       ${L.hd?`<h4 style="margin-top:12px">Household &mdash; WhitePages</h4>
       <div class="sigrow ${L.hd.age?'hit':'miss'}"><span>Age (confirmed)</span><span class="pts">${L.hd.age||'unknown'}</span></div>
       <div class="sigrow ${L.hd.city?'hit':'miss'}"><span>Lives in</span><span class="pts">${L.hd.city?esc(L.hd.city+', '+L.hd.state):'unknown'}</span></div>
@@ -1293,7 +1324,7 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
     const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
-    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',money(L.netWorth)?`Net worth $${money(L.netWorth).toLocaleString()}`:'',L.wealthEvent?`Money in motion: ${L.wealthEvent}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
     const a=exportAddress(L), em=exportEmails(L);
     return [L.firstName,L.lastName,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
   }));
@@ -1426,7 +1457,7 @@ function coverage(){
     tiers:['A','B','C'].map(t=>({t,n:state.leads.filter(x=>x.tier===t).length})),
     rows:[
       {k:'A',label:'Age — confirmed, verified, or graduation year',
-       v:pct(x=>(x.hd&&x.hd.age)||x.ageVerified||parseInt(x.gradYear,10)>1900),
+       v:pct(x=>leadAge(x)||x.ageVerified||parseInt(x.gradYear,10)>1900),
        fix:'Map Graduation Year, or run 🏠 enrichment for a confirmed age.'},
       {k:'R',label:'Job start date',v:pct(started),
        fix:'Map Job Start Date — without it the recent-move signal cannot fire.'},
@@ -1440,6 +1471,9 @@ function coverage(){
       {k:'E',label:'Tenure at current employer',
        v:pct(x=>parseFloat((''+(x.yearsAtEmployer||'')).replace(/[^\d.]/g,''))>=0||started(x)),
        fix:'Map Years at Current Employer, or Job Start Date as a fallback.'},
+      {k:'NW',label:'Net worth on file (vendor data, not inferred)',
+       v:pct(x=>money(x.netWorth)),
+       fix:'Map a Net Worth column from a wealth-data export — the AI grades this gate by inference without it.'},
       {k:'C',label:'Email and mobile both present',v:pct(x=>x.email&&x.mobilePhone),
        fix:'Request email and mobilePhone as required fields in the ZoomInfo pull.'},
     ]};
@@ -1583,7 +1617,7 @@ document.getElementById('btnQC').addEventListener('click',async()=>{
     for(let i=0;i<pend.length;i+=10){
       const batch=pend.slice(i,i+10);
       btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
-      const d=await api('/api/qc',{base_age_min:+state.settings.ageMin||null,leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
+      const d=await api('/api/qc',{base_age_min:+state.settings.ageMin||null,leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:leadAge(L),netWorth:money(L.netWorth),income:money(L.income),wealthEvent:L.wealthEvent||'',ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
       (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
       doneN+=batch.length;save();render();
     }
