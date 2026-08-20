@@ -402,26 +402,68 @@ strangers who never opted into anything.
 
 ## 11a. ZoomInfo search and enrichment — what this subscription actually allows
 
-Written from live API responses on 2026-08-20, not from the vendor's docs. Three
-findings, each of which cost a wasted attempt.
+Written from live API responses on 2026-08-20, not from the vendor's docs. Each
+finding below cost a wasted attempt, and the first one was corrected later the
+same day after the vendor's Boolean documentation showed the recommendation was
+wrong.
 
-### `jobTitleList` combines with AND, not OR
+### `jobTitleList` array entries combine with AND — use Boolean OR instead
 
-The parameter reads like a list of alternatives. It is not. A query for eleven
-senior titles returned **zero results** — no person holds all eleven at once. A
-two-title query for `["Chairman", "Chief Executive Officer"]` returned only
-people whose single title string contains both, e.g. Wells Fargo's "Chairman &
-Chief Executive Officer".
+**Corrected 2026-08-20.** The original finding here was half right and its
+recommendation was wrong; it is kept visible because the wrong half was acted on.
 
-This fails **silently**: an over-broad title list looks like "nobody matches your
-criteria" rather than an error, which invites the wrong conclusion about market
-size. One search per title, unioned client-side, is the working pattern.
+Array *entries* do combine with AND. A query for eleven senior titles returned
+**zero results** — no person holds all eleven — and a two-entry query for
+`["Chairman", "Chief Executive Officer"]` returned only people whose single title
+string contains both, e.g. Wells Fargo's "Chairman & Chief Executive Officer".
+This fails **silently**: an over-broad list reads as "nobody matches" rather than
+as an error, inviting the wrong conclusion about market size.
 
-Title matching is also **substring, not exact**. `"Chief Financial Officer"`
-matched an *Executive Assistant To* a CFO. `excludeJobTitleList` is therefore not
-optional — and it needs a local backstop regex as well, since "PA To the
-Chairman" survives an `"Assistant"` exclusion and "HR Business Partner" survives
-anything aimed at ownership partners.
+The recommendation drawn from that — *one search per title, unioned client-side* —
+was wrong. ZoomInfo's Boolean rules explain why: keywords **inside one filter
+chip** are ANDed, and **separate chips** are ORed. The array is one chip. The
+union is expressed with an `OR` operator *inside a single string value*:
+
+    jobTitleList: ["Chairman OR Founder OR Partner OR Managing Director"]
+
+Measured against the parts: `Chairman` alone 40,639, `Founder` alone 1,318,501,
+the `OR` of the two 1,353,762 — the union less 5,378 people holding both. At
+production filter settings one `OR` call returned 354,118 against 352,373 summed
+across six separate searches. **Six calls collapse into one.**
+
+Double quotes are rejected (`Must only contain letters and spaces`), so phrases
+cannot be quoted for exactness — see `exactJobTitle` below for that.
+
+### Fuzzy vs exact title matching
+
+Default title matching is **substring and fuzzy**. `"Chief Financial Officer"`
+matched an *Executive Assistant To* a CFO; a `Partner` search returned HR
+business partners, partner-success managers and channel-partner roles. Three
+successive regex passes were written locally to clean this up.
+
+None of that is necessary. The v1 endpoint's **`exactJobTitle`** parameter takes
+the same `OR` syntax and matches exactly: the same seven-title query returned
+85,691 against 319,355 fuzzy, and the returned titles were clean — "Partner",
+"Managing Director", with no assistant or partnership-management contamination.
+
+### Location: only v1 can scope to the person
+
+`search_contacts_v2` has **no `locationSearchType` parameter at all**. It cannot
+express "where the person sits" as distinct from "where the company is
+headquartered", which is why a US-filtered v2 pull returned people at Al Madar
+Holding, the University of Buenos Aires and AustralianSuper.
+
+`search_contacts` (v1), `search_scoops` and `search_intent` all accept
+`locationSearchType`, whose `Person` value is the API name for the platform's
+**Contact's Office** setting. Measured: the same query returned 319,355 with
+`Person` scoping against 354,118 without — roughly 35,000 people, about 10%,
+whose employer is American but who personally are not.
+
+**The tension to watch:** v1 is the only contact endpoint that supports person
+scoping and exact titles, and it returns
+`search_contacts was deprecated on August 1, 2026. Use search_contacts_v2
+instead.` Until v2 gains `locationSearchType`, correctness and longevity point at
+different endpoints. Build so the endpoint can be swapped.
 
 ### `yearsOfExperience` is unavailable in both directions
 
@@ -456,6 +498,7 @@ list-building plan** and should be checked before a list is selected, not after.
 
 ---
 
+<<<<<<< Updated upstream
 ## 11b. Scoops — the job-change signal we were inferring all along
 
 Tested live 2026-08-20. `search_scoops` is free, like all search, and returns
@@ -518,6 +561,75 @@ into the rollover list it would corrupt every tier count in the app.
 industry, revenue band, headcount. Three results came back with identical scores
 and identical profile briefs. It knows nothing about age, tenure or life stage,
 which is where this model lives, so it adds little over a title search.
+=======
+## 11c. The web products — WebSights, FormComplete, Workflows
+
+Read from the vendor implementation guides, 2026-08-20. All three run off one
+shared **ZoomInfo Script** added to the site HTML, and all three spend from the
+same Bulk Credit pool that §11a found exhausted.
+
+### WebSights resolves IP addresses to companies
+
+It identifies *organisations* visiting a website, and the guide is explicit that
+"only website traffic with IP addresses successfully matched in ZoomInfo are
+shown. Anonymous web traffic is not shown."
+
+That mechanism decides its usefulness here. A pre-retiree reading about rollovers
+from a phone or a home connection resolves to a consumer ISP, not to their
+employer — the individual this model exists to find is exactly the visitor
+WebSights cannot see. Export costs one credit per record.
+
+It is, however, well matched to the **plan-sponsor line** in §11b: an HR or
+finance team researching retirement plans *is* browsing from a corporate network,
+which is precisely what IP resolution catches.
+
+### FormComplete enriches a form from a business email
+
+Enter an email, and the remaining fields fill from ZoomInfo's B2B data; the form
+can be shortened to the email field alone. Abandoned-form tracking captures
+people who type a valid email and then leave, at one credit per match.
+
+The same constraint applies: it matches **business** email addresses. A prospect
+who fills in a personal Gmail does not match unless they happen to be on a
+corporate network, where an IP fallback can be enabled.
+
+### Workflows do not bypass the credit cap
+
+Trigger → filter → action, and "your organization is charged a credit for each
+record that is exported or updated using a Workflow", drawn from the same Bulk
+Credits. Once charged, a record is free to re-export for 365 days.
+
+One line is worth chasing before assuming the seat is simply out of credits:
+"if a user reaches their **allotted credit limit**, any Workflow they have created
+will be paused until they have access to additional Bulk Credits." Admins set
+per-user Bulk Credit limits under *Admin Portal → View user Bulk Credit limits →
+Actions → Manage Limit*. The `Limit exceeded` in §11a may therefore be a per-user
+ceiling an admin can raise, not an exhausted organisation pool. **Untested — the
+Admin Portal is not reachable through the connector.**
+
+### Privacy obligations are not incidental here
+
+Both WebSights and FormComplete require consent from visitors in California and
+the EU/UK, and the guides' own suggested disclosure language says the site
+"automatically collect[s] data about you such as your email address". For a
+dually-registered advisory firm this is a Reg S-P and state-privacy question
+before it is a marketing one, and it lands on the public marketing site rather
+than on this app. Worth counsel's view before the script goes on any page.
+
+### Platform features with no API surface
+
+Two are worth knowing about because they route around the credit cap rather than
+into it:
+
+- **Tags** cost nothing and can be applied in bulk, and *Exclude my exported
+  contacts* / *Exclude org exported contacts* prevent re-pulling and re-paying for
+  records already taken.
+- **ListMatch** and **Enhance** accept a CSV upload and match it against the
+  database, with Enhance charging "only for records successfully updated". For a
+  list already holding ZoomInfo person IDs — such as the 250-row export — this is
+  the platform-side route to filling in emails and phones when the API path is
+  capped.
+>>>>>>> Stashed changes
 
 ---
 
