@@ -1297,30 +1297,39 @@ QC_RULES = {
     "intent_assets_min": 250_000,
 }
 
-QC_PROMPT = f"""You are the quality-control engine for a wealth-management lead generation company. Evaluate each lead against this qualification rule:
+def qc_prompt(base_age_min: float) -> str:
+    """The grading rule, built per request.
 
-BASE REQUIREMENT: Age between {QC_RULES['base_age_min']} and {QC_RULES['base_age_max']} (estimate age from graduation year + 22, or total career length if grad year absent).
+    The age floor comes from the caller so the AI grades against the same
+    definition of a qualified lead as the scorer does. Hard-coding it here is
+    how the two drifted apart: the app moved to a pre-retiree rule while this
+    prompt still passed anyone from 25 up.
+    """
+    return f"""You are the quality-control engine for a wealth-management lead generation company. Evaluate each lead against this qualification rule:
 
-Then at least ONE gate must hold:
-- NW: net worth > ${QC_RULES['net_worth_min']:,}
-- YHE: age < {QC_RULES['young_age_max']} AND income > ${QC_RULES['young_income_min']:,}
-- 401K: orphaned 401(k) balance > ${QC_RULES['old_401k_min']:,} (proxy: changed jobs in the last 1-5 years AFTER a long prior tenure at a company likely to offer a 401(k))
-- WL: age < {QC_RULES['wl_age_max']} AND holds whole life insurance (NEVER inferable from prospect data — always UNKNOWN unless the record explicitly confirms it)
-- INT: actively seeking financial help AND investable assets > ${QC_RULES['intent_assets_min']:,} (intent requires an explicit signal in the record)
+    BASE REQUIREMENT: Age between {base_age_min:g} and {QC_RULES['base_age_max']} (estimate age from graduation year + 22, or total career length if grad year absent).
 
-If a lead record includes an explicit "age" value, use it verbatim with ageStatus "CONFIRMED" instead of estimating.
-Status vocabulary per gate: "CONFIRMED" (record explicitly states it), "INFERRED" (strong proxy: seniority, tenure, company size, title), "UNKNOWN" (no signal), "FAIL" (evidence contradicts it).
-Inference guides: senior titles (VP/SVP/C-suite/Partner/Principal/Owner/MD) at mid-size+ companies => income likely >$250K. Long tenure in high-income roles or equity titles => higher net-worth likelihood. Many stints under 3 years => job hopper (small 401k balances, penalize).
-Property fields, when present, come from public records and are CONFIRMED rather than inferred: "ownsHome" true means the deed carries their name, "propertiesOwned" counts deeded properties (two or more is a strong net-worth signal), and "deedHeldBy" naming a trust or an entity means estate or entity planning has already happened — treat that as a strong NW signal and note the existing planning in the checklist.
+    Then at least ONE gate must hold:
+    - NW: net worth > ${QC_RULES['net_worth_min']:,}
+    - YHE: age < {QC_RULES['young_age_max']} AND income > ${QC_RULES['young_income_min']:,}
+    - 401K: orphaned 401(k) balance > ${QC_RULES['old_401k_min']:,} (proxy: changed jobs in the last 1-5 years AFTER a long prior tenure at a company likely to offer a 401(k))
+    - WL: age < {QC_RULES['wl_age_max']} AND holds whole life insurance (NEVER inferable from prospect data — always UNKNOWN unless the record explicitly confirms it)
+    - INT: actively seeking financial help AND investable assets > ${QC_RULES['intent_assets_min']:,} (intent requires an explicit signal in the record)
 
-Return ONLY a JSON array, one object per lead, same order, no prose:
-[{{"i":0,"ageEst":57,"ageStatus":"INFERRED","gates":{{"NW":{{"s":"INFERRED","ev":"short evidence"}},"YHE":{{"s":"FAIL","ev":""}},"401K":{{"s":"INFERRED","ev":""}},"WL":{{"s":"UNKNOWN","ev":""}},"INT":{{"s":"UNKNOWN","ev":""}}}},"jobHopper":false,"grade":"A","checklist":["Confirm approximate net worth","Confirm old 401(k) balance"],"note":"one-line QC summary"}}]
+    If a lead record includes an explicit "age" value, use it verbatim with ageStatus "CONFIRMED" instead of estimating.
+    Status vocabulary per gate: "CONFIRMED" (record explicitly states it), "INFERRED" (strong proxy: seniority, tenure, company size, title), "UNKNOWN" (no signal), "FAIL" (evidence contradicts it).
+    Inference guides: senior titles (VP/SVP/C-suite/Partner/Principal/Owner/MD) at mid-size+ companies => income likely >$250K. Long tenure in high-income roles or equity titles => higher net-worth likelihood. Many stints under 3 years => job hopper (small 401k balances, penalize).
+    "yearsExperience" is total career length and "yearsAtEmployer" is time in the current seat; the difference is years spent at previous employers, which is the tenure the 401K gate turns on. Prefer them over estimating from a start date.
+    Property fields, when present, come from public records and are CONFIRMED rather than inferred: "ownsHome" true means the deed carries their name, "propertiesOwned" counts deeded properties (two or more is a strong net-worth signal), and "deedHeldBy" naming a trust or an entity means estate or entity planning has already happened — treat that as a strong NW signal and note the existing planning in the checklist.
 
-Grading: A = base age passes + 2 or more gates at INFERRED-or-better, or 1 CONFIRMED gate, and not a job hopper. B = base age passes + exactly 1 INFERRED gate. C = base age passes but only UNKNOWNs, or job hopper with otherwise decent signals. If base age FAILS, grade "X".
-"checklist" = the specific facts a junior advisor must verify on the first call before this lead counts as fully qualified.
+    Return ONLY a JSON array, one object per lead, same order, no prose:
+    [{{"i":0,"ageEst":57,"ageStatus":"INFERRED","gates":{{"NW":{{"s":"INFERRED","ev":"short evidence"}},"YHE":{{"s":"FAIL","ev":""}},"401K":{{"s":"INFERRED","ev":""}},"WL":{{"s":"UNKNOWN","ev":""}},"INT":{{"s":"UNKNOWN","ev":""}}}},"jobHopper":false,"grade":"A","checklist":["Confirm approximate net worth","Confirm old 401(k) balance"],"note":"one-line QC summary"}}]
 
-LEADS:
-"""
+    Grading: A = base age passes + 2 or more gates at INFERRED-or-better, or 1 CONFIRMED gate, and not a job hopper. B = base age passes + exactly 1 INFERRED gate. C = base age passes but only UNKNOWNs, or job hopper with otherwise decent signals. If base age FAILS, grade "X".
+    "checklist" = the specific facts a junior advisor must verify on the first call before this lead counts as fully qualified.
+
+    LEADS:
+    """
 
 
 class QCLead(BaseModel):
@@ -1346,6 +1355,9 @@ class QCLead(BaseModel):
 
 class QCRequest(BaseModel):
     leads: list[QCLead]
+    # The age floor the app is currently scoring on, so the grader and the
+    # scorer agree on who is even eligible. Falls back to the stored rule.
+    base_age_min: Optional[float] = None
 
 
 @app.post("/api/qc")
@@ -1363,13 +1375,14 @@ async def qc(req: QCRequest, request: Request):
     if len(req.leads) > 12:
         raise HTTPException(status_code=400, detail="Max 12 leads per QC batch.")
 
+    age_floor = req.base_age_min if req.base_age_min else QC_RULES["base_age_min"]
     payload = json.dumps([lead.model_dump() for lead in req.leads], separators=(",", ":"))
     client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
     try:
         msg = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=4000,
-            messages=[{"role": "user", "content": QC_PROMPT + payload}],
+            messages=[{"role": "user", "content": qc_prompt(age_floor) + payload}],
         )
     except anthropic.APIStatusError as e:
         raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:300]}")
