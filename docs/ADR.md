@@ -521,6 +521,67 @@ which is where this model lives, so it adds little over a title search.
 
 ---
 
+## 11d. Per-user ZoomInfo — one seat per advisor, not one shared login
+
+Every ZoomInfo call the app has made so far has run through a single connector
+authenticating as one account. That is fine for a prototype and wrong for a
+product: it bills one seat for everyone's searches, attributes nobody's work to
+them, and hands every user of the app the credit balance of whoever wired it up.
+The connector we have been testing against authenticates as an Equitable
+address, not as the person using the app — a test account, but the shape of the
+problem is the shape it would have in production.
+
+So the app now carries an OAuth flow of its own for ZoomInfo, alongside — not
+instead of — sign-in with Google or Microsoft. You sign in to use the app, then
+connect your ZoomInfo seat to it. Searches and enrichment spend *your* credits.
+
+### Standard app, Authorization Code — the fact that decided it
+
+ZoomInfo's DevPortal distinguishes **Standard** apps (one org, self-serve) from
+**Partner** apps (many customer orgs, ZoomInfo review required). The temptation
+was to assume per-user attribution needs Partner status. It does not: a Standard
+app may use either OAuth flow, and Authorization Code exists precisely so that
+requests can be attributed to an individual user. One firm equipping its own
+advisors is a Standard app, self-serve, today.
+
+PKCE is sent regardless. A Standard app is permitted to use it and a Partner app
+is required to, so the same flow survives a later decision to sell the tool to
+other firms without a rewrite. The cost of building it in now is about six lines.
+
+### What is not verified, and why the endpoints are env vars
+
+`ZI_AUTH_URL`, `ZI_TOKEN_URL` and `ZI_API_BASE` **have not been exercised
+against a live ZoomInfo tenant.** Outbound requests to `zoominfo.com` are
+blocked from the build environment — every probe returned 403 at the proxy — so
+the real authorize and token hostnames are guesses from documentation, which
+§12 records as an unreliable source in this codebase specifically. Rather than
+bake a guess into code, all four are read from the environment: when the
+DevPortal shows the real values, they are a variable change, not a deploy.
+
+Our own half of the flow *is* tested, against a stub that validates PKCE, client
+credentials and redirect URI the way a real server would: the challenge really
+is `sha256(verifier)`, a forged `state` is rejected, an expired token refreshes
+rather than re-prompting, and a second user on the same server cannot reach the
+first user's seat.
+
+Two §12 rules were followed deliberately rather than rediscovered:
+`/api/zi/search` is **a passthrough, not a parser**, because no live response has
+been seen; and `/api/zi-debug` exists **from the first commit** rather than after
+two wrong parsers, which is what it cost with WhitePages.
+
+### Connecting requires being signed in
+
+A ZoomInfo token is never attached to an anonymous session — hitting the connect
+URL while signed out redirects to sign-in first. This is the same leak that was
+closed for lead lists when storage was namespaced per account, and worse here,
+because the thing leaking is a billable seat.
+
+**Still true, and still the blocker:** DevPortal access requires an API
+entitlement on the subscription. No amount of correct code substitutes for that,
+and it remains open question #1.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.
@@ -580,7 +641,7 @@ succeed may prove nothing. The user's browser is ground truth.
 
 | # | Question | Owner | Blocks |
 |---|---|---|---|
-| 1 | Does the ZoomInfo seat carry API entitlement? | Register a Standard App | Phase 1 |
+| 1 | Does the ZoomInfo seat carry API entitlement? | Register a Standard App | Phase 1, §11d |
 | 2 | Does Equitable journaling capture Graph-sent mail? | Equitable compliance | Phase 2 scope |
 | 3 | Is the M365 tenant Equitable-managed? | Equitable IT | Phase 2 |
 | 4 | What replaces the TCPA litigator flag? | Vendor research | §8.3 |
