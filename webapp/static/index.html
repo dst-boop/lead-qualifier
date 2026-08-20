@@ -200,7 +200,7 @@
     <div class="bp-grid">
       <label>Person state(s) <input id="bStates" value="New York"></label>
       <label>Area keyword <input id="bArea" value="Long Island" placeholder="optional"></label>
-      <label>Excluded states <input id="bExStates" value="Connecticut, Massachusetts"></label>
+      <label>Excluded states <input id="bExStates" value="" placeholder="none"></label>
       <label>Management level <select id="bMgmt"><option>C Level Exec</option><option>VP Level Exec</option><option>Director</option></select></label>
       <label>Job change within (months) <input type="number" id="bWindow" value="18" min="1"></label>
       <label>Exclude titles <input id="bExT" value="Assistant, Associate, Junior, Coordinator"></label>
@@ -450,7 +450,7 @@ const DEFAULTS={
   tenMax:60, priorMin:10,
   titles:'C Level,C-Level,Chief,CEO,CFO,COO,CIO,CTO,CMO,VP,Vice President,SVP,EVP,Director,Partner,Principal,Owner,President,Founder,Co-Founder,Managing Director',
   exTitles:'Assistant,Associate,Junior,Intern,Coordinator,Deputy Director',
-  exStates:'Connecticut,Massachusetts,CT,MA',
+  exStates:'',   // territory rule, per user — no states excluded by default
   wAge:25, wRecent:5, wTitle:20, wPrior:20, wContact:10,
   // Weights total 80 now that the recent-move signal is worth 5. Tier A needs
   // age plus level plus prior experience (65); adding contact or the second
@@ -470,7 +470,7 @@ const DEFAULTS={
   e3n:'Meeting confirm',
   e3s:'Good speaking with you',
   e3b:'Hi {firstName},\n\nGood speaking with you today. I\'ll follow with a calendar invite shortly — looking forward to it.\n\n{yourName}',
-  recipe:'STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = Connecticut, Massachusetts\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.',
+  recipe:'STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = whatever states you do not cover (leave blank for all)\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.',
   meet:5, contact:35, meetRate:12, advisors:'', priceA:45, priceB:25, priceC:10,
   subj:'Retirement planning introduction — {firstName}, meet {yourName}',
   body:'Hi {firstName},\n\nLooking forward to connecting. We\'ll cover your retirement picture, any accounts left with prior employers, and whether a review makes sense.\n\nTalk soon,\n{yourName}'
@@ -624,7 +624,10 @@ function scoreLead(L){
   const s=state.settings, sig=[];
   const exSt=s.exStates.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
   const st=(L.state||'').trim().toLowerCase();
-  if(st&&exSt.includes(st)){L.score=0;L.tier='X';L.signals=[{k:'G',label:'Excluded state: '+L.state,hit:false,neg:true,pts:0}];return L;}
+  if(st&&exSt.includes(st)){L.score=0;L.tier='X';L.exclState=true;L.wouldBeTier='';
+    L.exclReason='Excluded state: '+L.state;
+    L.signals=[{k:'G',label:'Excluded state: '+L.state,hit:false,neg:true,pts:0}];return L;}
+  L.exclState=false;
 
   let score=0;
   // A — age: confirmed 59.5+, or graduated before 1990
@@ -672,7 +675,23 @@ function scoreLead(L){
   else sig.push({k:'C',label:'Missing email or mobile',hit:false,pts:0});
 
   L.score=Math.max(0,Math.min(100,score));
-  L.tier=L.score>=+s.tierA?'A':L.score>=+s.tierB?'B':'C';
+  // Tier is a call order, so it only means something for a lead you can call.
+  // The score still gets computed and kept: a 75-point lead with no mobile is
+  // the most valuable thing in the Excluded bucket, not the least, because one
+  // WhitePages lookup turns it back into a Tier A.
+  // The would-be tier answers "what is this worth once I have the number?", so
+  // it is scored with the contact signal credited — but only where the email is
+  // already on file, because that is the half of signal C we can actually see.
+  // Without this a 55 that is really a 65 hides in the Excluded bucket as a B.
+  L.wouldBeScore=Math.min(100,L.score+((!L.mobilePhone&&L.email&&!(L.enriched===false&&truthy(L.hasEmail)&&truthy(L.hasMobile)))?+s.wContact:0));
+  L.wouldBeTier=L.wouldBeScore>=+s.tierA?'A':L.wouldBeScore>=+s.tierB?'B':'C';
+  if(L.mobilePhone){L.tier=L.wouldBeTier;L.exclReason='';}
+  else{
+    L.tier='X';
+    L.exclReason=(L.enriched===false&&truthy(L.hasMobile))
+      ? 'No mobile number yet \u2014 ZoomInfo holds one, enrich to reveal it'
+      : 'No mobile number on file \u2014 try \ud83c\udfe0 enrichment';
+  }
   L.signals=sig;
   return L;
 }
@@ -858,10 +877,11 @@ document.getElementById('btnBuild').addEventListener('click',async()=>{
   const g=id=>document.getElementById(id).value.trim();
   const win=+g('bWindow')||18;const d=new Date();d.setMonth(d.getMonth()-win);
   const minDate=d.toISOString().slice(0,10);
+  const exReg=g('bExStates');
   const prompt=`Call the ZoomInfo tool named search_contacts (NOT search_contacts_v2 — v2 lacks excludedRegions) exactly ONCE with exactly these parameters:
 locationSearchType: "Person"
-state: "${g('bStates')}"
-excludedRegions: "${g('bExStates')}"
+state: "${g('bStates')}"${exReg?`
+excludedRegions: "${exReg}"`:''}
 managementLevel: "${g('bMgmt')}"
 positionStartDateMin: "${minDate}"
 requiredFields: "email,mobilePhone"
@@ -1011,7 +1031,7 @@ function render(){
   document.getElementById('summary').innerHTML=[
     ['','tAll','All leads',state.leads.length],['A','tA','Tier A — call first',counts.A],
     ['B','tB','Tier B — nurture',counts.B],['C','tC','Tier C — low signal',counts.C],
-    ['X','tX','Excluded (CT/MA)',counts.X]
+    ['X','tX','Excluded \u2014 no mobile',counts.X]
   ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('')
   +`<div class="card" style="cursor:default;border-top-color:var(--set)"><div class="n" style="color:var(--set)">${set}</div><div class="l">Meetings set</div></div>`;
 
@@ -1028,7 +1048,12 @@ function render(){
     const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
     const inv=L.email?'' :'disabled title="No email on file"';
     return `<tr class="lead">
-      <td><span class="tierchip ${L.tier}" title="${L.enriched===false?'Provisional — enrich to firm up':''}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
+      <td><span class="tierchip ${L.tier}" title="${esc(L.tier==='X'?(L.exclReason||'Excluded'):(L.enriched===false?'Provisional — enrich to firm up':''))}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${
+        // An excluded lead still carries the tier it would hold once it has a
+        // mobile. Showing it is the whole point of the bucket — otherwise a
+        // would-be Tier A is indistinguishable from a dead record.
+        L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
+      }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
       <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
@@ -1418,11 +1443,13 @@ window.verifyLead=async id=>{
    A signal with no input scores zero on every lead, which is indistinguishable
    from a genuinely weak list unless you can see it. */
 function coverage(){
-  const L=state.leads.filter(x=>x.tier!=='X');
+  const L=state.leads.filter(x=>!x.exclState);
   if(!L.length)return null;
   const pct=f=>Math.round(100*L.filter(f).length/L.length);
   const started=x=>monthsSince(parseStart(x.jobStartDate))!==null;
   return {n:L.length,excluded:state.leads.length-L.length,
+    noMobile:L.filter(x=>!x.mobilePhone).length,
+    heldA:L.filter(x=>!x.mobilePhone&&x.wouldBeTier==='A').length,   // the ones worth chasing a number for
     tiers:['A','B','C'].map(t=>({t,n:state.leads.filter(x=>x.tier===t).length})),
     rows:[
       {k:'A',label:'Age — confirmed, verified, or graduation year',
@@ -1451,7 +1478,8 @@ function renderCoverage(){
     return `<span style="display:inline-block;width:90px;height:7px;background:#e7e2d8;border-radius:4px;overflow:hidden;vertical-align:middle">
       <span style="display:block;width:${v}%;height:100%;background:${col}"></span></span>`;};
   box.innerHTML=`<p class="hint">${c.n} scored lead${c.n===1?'':'s'}${c.excluded?` · ${c.excluded} excluded by state`:''} &mdash; `
-    +c.tiers.map(t=>`<strong>${t.n}</strong> tier ${t.t}`).join(' · ')+`</p>`
+    +c.tiers.map(t=>`<strong>${t.n}</strong> tier ${t.t}`).join(' · ')
+    +(c.noMobile?` · <strong>${c.noMobile}</strong> held out for no mobile${c.heldA?` (${c.heldA} would be tier A)`:''}`:'')+`</p>`
     +c.rows.map(r=>`<div class="sigrow ${r.v>=70?'hit':(r.v<30?'miss':'')}">
         <span><strong>${r.k}</strong> &nbsp;${esc(r.label)}${r.v<70?`<br><span class="hint">${esc(r.fix)}</span>`:''}</span>
         <span class="pts">${bar(r.v)} ${r.v}%</span></div>`).join('');
