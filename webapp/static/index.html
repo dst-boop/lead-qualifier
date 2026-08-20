@@ -892,6 +892,24 @@ function ziNormalize(c,batch,ctx){
     directDnc:pick(c,'directPhoneDoNotCall','doNotCall')};
 }
 const OUTSIDE_MSG='ZoomInfo build & enrich only work while this app is running inside Claude (open it from the chat or the published artifact link — do not download the file and open it in a browser). Everything else — CSV import, scoring, calling, export — works anywhere.';
+/* Two routes to ZoomInfo, in order of preference:
+   1. The signed-in user's own connected seat, proxied by our backend. Calls are
+      attributed and billed to them, and it works in an ordinary browser.
+   2. The in-Claude bridge below, which borrows whatever ZoomInfo connector that
+      Claude user happens to have enabled. Kept for running inside Claude. */
+function ziConnected(){return !!(window.ME&&ME.zi_connected);}
+
+async function ziSearch(path,body,method){
+  const r=await fetch('/api/zi/search',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:path,body:body||{},method:method||'POST'})});
+  if(!r.ok){
+    let d={};try{d=await r.json();}catch(e){}
+    throw new Error(d.detail||('ZoomInfo request failed ('+r.status+')'));
+  }
+  return r.json();
+}
+
 async function callClaude(prompt){
   let r;
   try{
@@ -1457,7 +1475,12 @@ async function loadMe(){
   const bar=document.getElementById('authbar');bar.style.display='block';
   const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
   if(ME.signed_in){
-    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account<span id="syncNote"></span> \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
+    const zi=(ME.features&&ME.features.zoominfo)
+      ? (ME.zi_connected
+          ? ` \u00b7 ZoomInfo connected \u00b7 <a href="/auth/zoominfo/disconnect" ${A}>Disconnect</a>`
+          : ` \u00b7 <a href="/auth/zoominfo/login" ${A}>Connect ZoomInfo</a>`)
+      : '';
+    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account<span id="syncNote"></span>${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
     const l=[];const pr=ME.providers||{};
     if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);

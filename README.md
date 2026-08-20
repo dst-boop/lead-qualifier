@@ -76,6 +76,7 @@ Pushing to `main` is the deploy.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in, Gmail send, Calendar — [setup](SETUP-google.md) |
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` / `MS_TENANT_ID` | Microsoft alternative — [setup](SETUP-microsoft.md) |
 | `WHITEPAGES_API_KEY` | Phone verification and enrichment — [setup](SETUP-whitepages.md) |
+| `ZI_CLIENT_ID` / `ZI_CLIENT_SECRET` | Each user connects their own ZoomInfo seat — [setup](SETUP-zoominfo.md) |
 | `ANTHROPIC_API_KEY` | AI quality control — [setup](SETUP-ai-qc.md) |
 | `USE_FIRESTORE=0` | Force memory mode — [setup](SETUP-firestore.md) |
 

@@ -13,6 +13,8 @@ Environment variables:
   MS_CLIENT_ID / MS_CLIENT_SECRET / MS_TENANT_ID   (see SETUP-microsoft.md)
   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET          (see SETUP-google.md)
   WHITEPAGES_API_KEY [/ WHITEPAGES_BASE_URL]       (see SETUP-whitepages.md)
+  ZI_CLIENT_ID / ZI_CLIENT_SECRET                  per-user ZoomInfo (see SETUP-zoominfo.md)
+  ZI_AUTH_URL / ZI_TOKEN_URL / ZI_API_BASE / ZI_SCOPES   override the defaults
   ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
   USE_FIRESTORE=0                                  force memory mode (see SETUP-firestore.md)
   KMS_KEY_NAME                                     envelope-encrypt stored tokens (see SETUP-firestore.md)
@@ -21,6 +23,7 @@ Environment variables:
 """
 
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -44,6 +47,21 @@ MS_TENANT_ID = os.environ.get("MS_TENANT_ID", "common")
 MS_AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 MS_SCOPES = ["User.Read", "Mail.Send", "Calendars.ReadWrite"]
 GRAPH = "https://graph.microsoft.com/v1.0"
+
+# --- ZoomInfo (per-user OAuth) ---
+# Each advisor connects their own ZoomInfo seat, so searches and enrichment are
+# attributed and billed to them rather than to one shared service account.
+# A Standard app in the ZoomInfo DevPortal covers a single org, which is what a
+# firm needs; distributing to other firms would require a Partner app instead.
+ZI_CLIENT_ID = os.environ.get("ZI_CLIENT_ID", "")
+ZI_CLIENT_SECRET = os.environ.get("ZI_CLIENT_SECRET", "")
+# Endpoints are configurable because they are the one part of this that has not
+# been exercised against a live tenant — see SETUP-zoominfo.md before trusting
+# the defaults.
+ZI_AUTH_URL = os.environ.get("ZI_AUTH_URL", "https://auth.zoominfo.com/authorize")
+ZI_TOKEN_URL = os.environ.get("ZI_TOKEN_URL", "https://auth.zoominfo.com/oauth/token")
+ZI_API_BASE = os.environ.get("ZI_API_BASE", "https://api.zoominfo.com").rstrip("/")
+ZI_SCOPES = os.environ.get("ZI_SCOPES", "openid profile email offline_access")
 
 # --- Google ---
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -461,6 +479,125 @@ async def google_callback(request: Request):
     return RedirectResponse("/")
 
 
+# ------------------------- ZoomInfo (per-user OAuth) -------------------------
+# Deliberately separate from app sign-in: a user signs in with Google or
+# Microsoft to use the app, then connects ZoomInfo on top. One app account can
+# therefore exist without a ZoomInfo seat, and the seat that is connected is
+# unambiguously that person's own.
+
+def _zi_configured() -> bool:
+    return bool(ZI_CLIENT_ID and ZI_CLIENT_SECRET)
+
+
+async def _zi_token(session: dict) -> Optional[str]:
+    """This user's ZoomInfo access token, refreshed if it has aged out."""
+    z = session.get("zoominfo")
+    if not z:
+        return None
+    if time.time() < z.get("expires_at", 0):
+        return z["access_token"]
+    if not z.get("refresh_token"):
+        session.pop("zoominfo", None)     # expired and unrenewable: reconnect
+        return None
+    async with httpx.AsyncClient(timeout=20) as cx:
+        r = await cx.post(ZI_TOKEN_URL, data={
+            "grant_type": "refresh_token",
+            "refresh_token": z["refresh_token"],
+            "client_id": ZI_CLIENT_ID,
+            "client_secret": ZI_CLIENT_SECRET,
+        })
+    if r.status_code != 200:
+        session.pop("zoominfo", None)
+        return None
+    tok = r.json()
+    z["access_token"] = tok["access_token"]
+    z["expires_at"] = time.time() + tok.get("expires_in", 3600) - 60
+    if tok.get("refresh_token"):
+        z["refresh_token"] = tok["refresh_token"]
+    session["zoominfo"] = z
+    return z["access_token"]
+
+
+@app.get("/auth/zoominfo/login")
+async def zi_login(request: Request):
+    # App sign-in first. Without this a direct hit on the URL would park a
+    # ZoomInfo token on an anonymous session — the same leak that namespacing
+    # local storage closed for lead lists, and worse: this one is a billable seat.
+    try:
+        await _active_token(request)
+    except HTTPException:
+        return RedirectResponse("/?zi=signin")
+    if not _zi_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="ZoomInfo app credentials not configured — set ZI_CLIENT_ID / "
+                   "ZI_CLIENT_SECRET (see SETUP-zoominfo.md).",
+        )
+    # PKCE throughout. A Standard app may use it and a Partner app must, so the
+    # same flow survives a later move to multi-org distribution.
+    verifier = secrets.token_urlsafe(64)[:96]
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).decode().rstrip("=")
+    state = secrets.token_urlsafe(24)
+    request.state.session["zi_state"] = state
+    request.state.session["zi_verifier"] = verifier
+    params = {
+        "client_id": ZI_CLIENT_ID,
+        "redirect_uri": BASE_URL + "/auth/zoominfo/callback",
+        "response_type": "code",
+        "scope": ZI_SCOPES,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    return RedirectResponse(f"{ZI_AUTH_URL}?{urlencode(params)}")
+
+
+@app.get("/auth/zoominfo/callback")
+async def zi_callback(request: Request):
+    try:
+        await _active_token(request)
+    except HTTPException:
+        return RedirectResponse("/?zi=signin")
+    session = request.state.session
+    state = session.pop("zi_state", None)
+    verifier = session.pop("zi_verifier", None)
+    if not state or request.query_params.get("state") != state:
+        return RedirectResponse("/?zi=state")
+    code = request.query_params.get("code")
+    if not code:
+        return RedirectResponse("/?zi=denied")
+    async with httpx.AsyncClient(timeout=20) as cx:
+        r = await cx.post(ZI_TOKEN_URL, data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": ZI_CLIENT_ID,
+            "client_secret": ZI_CLIENT_SECRET,
+            "redirect_uri": BASE_URL + "/auth/zoominfo/callback",
+            "code_verifier": verifier or "",
+        })
+    if r.status_code != 200:
+        # Surfaced rather than swallowed: a token-endpoint mismatch is the most
+        # likely first failure here, and a silent redirect hides it.
+        raise HTTPException(status_code=400,
+                            detail=f"ZoomInfo sign-in failed ({r.status_code}): {r.text[:300]}")
+    tok = r.json()
+    session["zoominfo"] = {
+        "access_token": tok["access_token"],
+        "refresh_token": tok.get("refresh_token"),
+        "expires_at": time.time() + tok.get("expires_in", 3600) - 60,
+        "connected_at": int(time.time()),
+    }
+    return RedirectResponse("/?zi=ok")
+
+
+@app.get("/auth/zoominfo/disconnect")
+async def zi_disconnect(request: Request):
+    request.state.session.pop("zoominfo", None)
+    return RedirectResponse("/")
+
+
 @app.get("/auth/logout")
 async def logout(request: Request):
     await drop_session(request.state.sid)
@@ -526,6 +663,7 @@ async def me(request: Request):
         "whitepages": bool(WHITEPAGES_API_KEY),
         "ai_qc": bool(ANTHROPIC_API_KEY),
         "server_state": storage_backend() == "firestore",
+        "zoominfo": _zi_configured(),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -541,6 +679,7 @@ async def me(request: Request):
                 return {"signed_in": True, "provider": "google",
                         "name": d.get("name"), "email": d.get("email"),
                         "providers": providers, "features": features,
+                        "zi_connected": bool(session.get("zoominfo")),
                         "storage": storage, "encryption": encryption}
     token = _ms_token(session)
     if token:
@@ -552,6 +691,7 @@ async def me(request: Request):
                     "name": d.get("displayName"),
                     "email": d.get("mail") or d.get("userPrincipalName"),
                     "providers": providers, "features": features,
+                    "zi_connected": bool(session.get("zoominfo")),
                     "storage": storage, "encryption": encryption}
     return JSONResponse({"signed_in": False, "providers": providers,
                          "features": features, "storage": storage,
@@ -963,6 +1103,64 @@ def _norm_street(s: str) -> str:
         if w not in STREET_WORDS:
             out.append(w)
     return " ".join(out)
+
+
+class ZIRequest(BaseModel):
+    path: str                       # e.g. "search/contact"
+    body: dict = {}
+    method: str = "POST"
+
+
+@app.post("/api/zi/search")
+async def zi_search(req: ZIRequest, request: Request):
+    """Thin passthrough to ZoomInfo using *this user's* token.
+
+    Deliberately not a parser. §12's rule is to see a live response before
+    writing one, and no response from this endpoint has been seen yet, so the
+    raw JSON is handed back for the client to shape. That also means a change at
+    ZoomInfo's end surfaces as odd data rather than as a silent empty list.
+    """
+    await _active_token(request)                 # app sign-in first
+    token = await _zi_token(request.state.session)
+    if not token:
+        raise HTTPException(status_code=401,
+                            detail="Connect your ZoomInfo account first.")
+    url = f"{ZI_API_BASE}/{req.path.lstrip('/')}"
+    async with httpx.AsyncClient(timeout=60) as cx:
+        if req.method.upper() == "GET":
+            r = await cx.get(url, params=req.body,
+                             headers={"Authorization": f"Bearer {token}"})
+        else:
+            r = await cx.post(url, json=req.body,
+                              headers={"Authorization": f"Bearer {token}"})
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"ZoomInfo {r.status_code}: {r.text[:300]}")
+    try:
+        return r.json()
+    except Exception:
+        raise HTTPException(status_code=502,
+                            detail=f"ZoomInfo returned non-JSON: {r.text[:200]}")
+
+
+@app.get("/api/zi-debug")
+async def zi_debug(request: Request, path: str = "lookup/inputfields/contact/search"):
+    """Raw ZoomInfo round-trip for this user's token — URL, status, body.
+
+    The same probe that eventually diagnosed WhitePages, added up front this
+    time rather than after two wrong parsers.
+    """
+    await _active_token(request)
+    if not _zi_configured():
+        return {"error": "ZI_CLIENT_ID / ZI_CLIENT_SECRET are not set on this service."}
+    token = await _zi_token(request.state.session)
+    if not token:
+        return {"error": "This account has not connected ZoomInfo.",
+                "connect": "/auth/zoominfo/login"}
+    url = f"{ZI_API_BASE}/{path.lstrip('/')}"
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
+        r = await cx.get(url, headers={"Authorization": f"Bearer {token}"})
+    return {"url": url, "status": r.status_code, "body": r.text[:4000]}
 
 
 @app.get("/api/wp-debug")
