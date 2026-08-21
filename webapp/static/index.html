@@ -162,9 +162,32 @@
   .mbtn{padding:8px 16px;border-radius:4px;border:1px solid var(--line);background:#fff;font-size:.85rem}
   .mbtn.save{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600}
   .mbtn.save:hover{background:#2a3d52}
-  .maptable{width:100%;font-size:.8rem;border-collapse:collapse;margin-top:8px}
+  /* The global table rule carries a min-width for the leads grid. Inherited
+     here it forced this table past the modal edge, taking the match column
+     with it — hence the explicit reset. */
+  .maptable{width:100%;min-width:0;font-size:.8rem;border-collapse:collapse;margin-top:8px;table-layout:fixed}
   .maptable td,.maptable th{padding:5px 8px;border-bottom:1px solid var(--line-soft);text-align:left}
+  /* Fixed layout, or the app-field column eats the row and pushes the match
+     badge outside the modal, where it is invisible without being absent. */
+  .maptable col.c-field{width:38%} .maptable col.c-col{width:42%} .maptable col.c-badge{width:20%}
+  /* min-width:0 is the part that matters: without it a <select> refuses to
+     shrink below the width of its longest option, dragging the whole table
+     wider than the modal and pushing the badge column out of sight. */
+  .maptable select{width:100%;max-width:100%;min-width:0;text-overflow:ellipsis}
+  .maptable td:last-child{text-align:right}
+  .maptable.tmpl{table-layout:auto}
+  .maptable.tmpl td:last-child{text-align:left}
   .hint{font-size:.76rem;color:var(--ink-faint);margin:6px 0}
+  .maptable tr.miss td{background:var(--tierX-bg)}
+  .maptable.tmpl code{font-family:var(--font-mono);font-size:.74rem;background:var(--line-soft);padding:1px 5px;border-radius:3px}
+  .maptable .tmplwhy{color:var(--ink-faint);font-size:.75rem}
+  .badge{font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap;border:1px solid}
+  .badge.auto{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
+  .badge.manual{background:var(--brass-soft);color:#7a5c15;border-color:#e0d2b0}
+  .badge.none{background:transparent;color:var(--ink-faint);border-color:var(--line)}
+  .mapsum{font-size:.78rem;line-height:1.55;background:var(--line-soft);border-left:3px solid var(--brass);padding:9px 12px;border-radius:0 4px 4px 0;margin:10px 0}
+  .mapsum .mapwarn{color:var(--tierX);font-weight:600}
+  .mapsum .mapunused{color:var(--ink-soft);font-family:var(--font-mono);font-size:.72rem}
   .filelabel{display:inline-block}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:5px;font-size:.85rem;z-index:99;opacity:0;transition:opacity .25s;pointer-events:none}
   .toast.show{opacity:1}
@@ -182,6 +205,7 @@
     <button class="tbtn" id="btnRecipe">Build list</button>
     <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
     <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" id="btnCsv" data-t="Import a CSV export" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
+    <button class="tbtn" id="btnTemplate" title="See the columns the app reads, or download a blank CSV to fill in">CSV template</button>
     <button class="tbtn" id="btnExport">Export call list (CSV)</button>
     <button class="tbtn" id="btnBackup">Backup</button>
     <label class="filelabel"><input type="file" id="jsonFile" accept=".json" hidden><button class="tbtn" onclick="document.getElementById('jsonFile').click()">Restore</button></label>
@@ -343,14 +367,36 @@
 </div></div>
 
 <!-- Import mapping -->
-<div class="overlay" id="mImport"><div class="modal">
-  <h2>Import &mdash; confirm column mapping</h2>
+<div class="overlay" id="mImport"><div class="modal" style="max-width:800px">
+  <h2>Import &mdash; columns mapped automatically</h2>
   <p class="hint" id="impInfo"></p>
+  <div class="mapsum" id="mapSummary"></div>
   <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Batch name (goes into Lead Source Detail)<input type="text" id="impBatch"></label>
-  <table class="maptable"><thead><tr><th>App field</th><th>CSV column</th></tr></thead><tbody id="mapRows"></tbody></table>
+  <table class="maptable"><colgroup><col class="c-field"><col class="c-col"><col class="c-badge"></colgroup><thead><tr><th>App field</th><th>CSV column</th><th style="text-align:right">Matched</th></tr></thead><tbody id="mapRows"></tbody></table>
+  <div class="mfoot" style="justify-content:space-between">
+    <div style="display:flex;gap:8px">
+      <button class="mbtn" id="btnRemap" title="Discard your edits and run the matcher again">Auto-map again</button>
+      <button class="mbtn" id="btnClearMap">Clear all</button>
+      <button class="mbtn" id="btnTemplateFromMapper">See template</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="mbtn" onclick="closeModal('mImport')">Cancel</button>
+      <button class="mbtn save" id="btnDoImport">Import &amp; score</button>
+    </div>
+  </div>
+</div></div>
+
+<!-- CSV template -->
+<div class="overlay" id="mTemplate"><div class="modal" style="max-width:760px">
+  <h2>CSV template</h2>
+  <p class="hint">Any export works &mdash; the importer matches columns by name, so a ZoomInfo, Apollo or CRM file usually needs no editing at all. This is the shape to aim for when you are building a list by hand, and it shows what each column is worth.</p>
+  <p class="hint"><b>Header names do not have to match exactly.</b> <code>First Name</code>, <code>first_name</code> and <code>FIRSTNAME</code> all land in the same place. Extra columns are ignored rather than rejected, and a single <code>Name</code> column is split into first and last on import.</p>
+  <table class="maptable tmpl"><thead><tr><th>Column</th><th>Example</th><th>What it does</th></tr></thead><tbody id="tmplRows"></tbody></table>
+  <h3>Also recognised if present</h3>
+  <p class="hint" id="tmplExtra"></p>
   <div class="mfoot">
-    <button class="mbtn" onclick="closeModal('mImport')">Cancel</button>
-    <button class="mbtn save" id="btnDoImport">Import &amp; score</button>
+    <button class="mbtn" onclick="closeModal('mTemplate')">Close</button>
+    <button class="mbtn save" id="btnDlTemplate">Download template CSV</button>
   </div>
 </div></div>
 
@@ -775,8 +821,20 @@ const FIELDS=[
   ['hasEmail','ZI: email available',['has email','hasemail']],
   ['hasMobile','ZI: mobile available',['has mobile phone','has mobile','hasmobilephone']],
   ['mobileDnc','Mobile DNC flag',['mobile phone do not call','mobilephonedonotcall','mobile dnc']],
-  ['directDnc','Direct DNC flag',['direct phone do not call','directphonedonotcall','direct dnc']]
+  ['directDnc','Direct DNC flag',['direct phone do not call','directphonedonotcall','direct dnc']],
+  /* Last on purpose. Every specific field claims its column first, so this only
+     ever picks up a list that has one name column instead of two. */
+  ['fullName','Full Name (split on import)',['full name','fullname','contact name','person name','lead name','name']]
 ];
+/* Aliases too generic to fuzzy-match. "name" inside "Company Name" or
+   "Account Name" would hand the employer column to Full Name. */
+const EXACT_ONLY=new Set(['fullName']);
+/* Without these the import produces rows nothing can address, so the mapper
+   says so before the import rather than the coverage warning after. */
+const REQUIRED=['firstName','lastName'];
+/* Not required, but its absence decides the outcome of the whole file: no
+   mobile number means every lead lands in Excluded regardless of score. */
+const TIER_GATE='mobilePhone';
 let pending=null;
 document.getElementById('csvFile').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f)return;
@@ -787,45 +845,163 @@ document.getElementById('csvFile').addEventListener('change',e=>{
     openMapper(f.name); };
   r.readAsText(f);
 });
-/* Column guessing. Two passes, and no column is ever claimed twice — without
-   that, "Email Address" satisfied the street field's loose "address" alias and
-   the email landed in Street Address. Exact header matches are resolved first
-   so a real column always beats another field's fuzzy guess. */
+/* Auto-map. Two passes, and no column is ever claimed twice — without that,
+   "Email Address" satisfied the street field's loose "address" alias and the
+   email landed in Street Address. Exact header matches are resolved first so a
+   real column always beats another field's fuzzy guess. */
+
+/* Every exporter punctuates differently: First_Name, first-name, "FIRST NAME ",
+   Person.State. Normalising both sides means one alias covers all of them
+   instead of the list growing a variant at a time. */
+function normHeader(h){
+  return (h||'').replace(/^\ufeff/,'')          // Excel writes a BOM into A1
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
+}
+/* Substring matching, but on whole words. Plain .includes() made "state" match
+   "Real Estate Holdings", quietly scoring every lead against a state list it
+   had never been given. */
+function wordMatch(header,alias){
+  if(header===alias)return true;
+  const a=alias.split(' ').filter(Boolean), h=header.split(' ').filter(Boolean);
+  if(!a.length||a.length>h.length)return false;
+  for(let i=0;i<=h.length-a.length;i++){
+    let ok=true;
+    for(let j=0;j<a.length;j++)if(h[i+j]!==a[j]){ok=false;break;}
+    if(ok)return true;
+  }
+  return false;
+}
 function guessColumns(headers){
-  const low=headers.map(h=>(h||'').toLowerCase().trim());
+  const low=headers.map(normHeader);
+  const squashed=low.map(h=>h.replace(/ /g,''));
   const used=new Set(),map={};
   FIELDS.forEach(([key,,syn])=>{
-    for(const s of syn){const i=low.indexOf(s);if(i>-1&&!used.has(i)){map[key]=i;used.add(i);return;}}
+    for(const raw of syn){
+      const a=normHeader(raw), i=low.indexOf(a);
+      if(i>-1&&!used.has(i)){map[key]=i;used.add(i);return;}
+    }
   });
+  // Second exact pass with spaces removed, so "e-mail address" and "EmailAddress"
+  // reach the same alias as "Email Address" without listing each spelling.
   FIELDS.forEach(([key,,syn])=>{
     if(map[key]!==undefined)return;
-    for(const s of syn){
-      const i=low.findIndex((h,j)=>!used.has(j)&&h.includes(s));
+    for(const raw of syn){
+      const a=normHeader(raw).replace(/ /g,''), i=squashed.indexOf(a);
+      if(i>-1&&!used.has(i)){map[key]=i;used.add(i);return;}
+    }
+  });
+  FIELDS.forEach(([key,,syn])=>{
+    if(map[key]!==undefined||EXACT_ONLY.has(key))return;
+    for(const raw of syn){
+      const a=normHeader(raw);
+      const i=low.findIndex((h,j)=>!used.has(j)&&wordMatch(h,a));
       if(i>-1){map[key]=i;used.add(i);return;}
     }
   });
   return map;
 }
-function openMapper(fname){
-  document.getElementById('impInfo').textContent=`${pending.data.length} rows found in ${fname}. Check the mapping, then import.`;
-  document.getElementById('impBatch').value=fname.replace(/\.csv$/i,'');
-  const guess=guessColumns(pending.headers);
+/* The auto-map used to run silently: 27 dropdowns appeared already filled in
+   and nothing said which the app had worked out, which it had given up on, or
+   which columns of the file it was ignoring. Same matching, now shown. */
+function renderMapRows(guess){
   const body=document.getElementById('mapRows');body.innerHTML='';
-  FIELDS.forEach(([key,label,syn])=>{
+  FIELDS.forEach(([key,label])=>{
     const idx=guess[key]===undefined?-1:guess[key];
     const opts=['<option value="-1">— skip —</option>'].concat(pending.headers.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${esc(h)}</option>`)).join('');
-    body.insertAdjacentHTML('beforeend',`<tr><td>${label}</td><td><select data-key="${key}">${opts}</select></td></tr>`);
+    body.insertAdjacentHTML('beforeend',
+      `<tr class="maprow" data-row="${key}"><td>${label}</td>`+
+      `<td><select data-key="${key}" data-auto="${idx}">${opts}</select></td>`+
+      `<td class="mapbadge"></td></tr>`);
   });
+  body.querySelectorAll('select').forEach(sel=>sel.addEventListener('change',refreshMapState));
+  refreshMapState();
+}
+function currentMap(){
+  const m={};document.querySelectorAll('#mapRows select').forEach(s=>m[s.dataset.key]=+s.value);
+  return m;
+}
+function refreshMapState(){
+  const map=currentMap();
+  let mapped=0;
+  document.querySelectorAll('#mapRows tr.maprow').forEach(tr=>{
+    const sel=tr.querySelector('select'), key=sel.dataset.key, v=+sel.value;
+    const auto=+sel.dataset.auto;
+    const cell=tr.querySelector('.mapbadge');
+    if(v>-1)mapped++;
+    cell.innerHTML = v===-1 ? '<span class="badge none">not found</span>'
+      : (v===auto ? '<span class="badge auto">auto</span>'
+                  : '<span class="badge manual">you set</span>');
+    tr.classList.remove('miss');
+  });
+  // What is missing that actually stops the app working
+  const gaps=[];
+  REQUIRED.forEach(k=>{
+    if(map[k]===-1||map[k]===undefined){
+      if(k==='firstName'||k==='lastName'){ if(map.fullName>-1)return; }   // covered by the split
+      gaps.push(k);
+      const tr=document.querySelector(`#mapRows tr[data-row="${k}"]`); if(tr)tr.classList.add('miss');
+    }
+  });
+  const noMobile=!(map[TIER_GATE]>-1);
+  if(noMobile){
+    const tr=document.querySelector(`#mapRows tr[data-row="${TIER_GATE}"]`); if(tr)tr.classList.add('miss');
+  }
+  const used=new Set(Object.values(map).filter(v=>v>-1));
+  const unused=pending.headers.filter((h,i)=>!used.has(i));
+  const lab=k=>(FIELDS.find(f=>f[0]===k)||[null,k])[1];
+  const bits=[`<b>${mapped}</b> of ${FIELDS.length} fields mapped from ${pending.headers.length} columns.`];
+  if(map.fullName>-1&&!(map.firstName>-1))bits.push(`One name column — it will be split into first and last on import.`);
+  if(gaps.length)bits.push(`<span class="mapwarn">Missing: ${gaps.map(lab).join(', ')} — leads need a name to be worth calling.</span>`);
+  if(noMobile)bits.push(`<span class="mapwarn">Missing: ${lab(TIER_GATE)} — every lead in this file will land in Excluded rather than a tier, whatever it scores.</span>`);
+  bits.push(unused.length
+    ? `Ignored ${unused.length} column${unused.length>1?'s':''}: <span class="mapunused">${unused.map(esc).join(', ')}</span>`
+    : `Every column in the file is being used.`);
+  document.getElementById('mapSummary').innerHTML=bits.join('<br>');
+}
+function openMapper(fname){
+  document.getElementById('impInfo').textContent=`${pending.data.length} rows found in ${fname}.`;
+  document.getElementById('impBatch').value=fname.replace(/\.(csv|xlsx?)$/i,'');
+  renderMapRows(guessColumns(pending.headers));
   openModal('mImport');
 }
+document.getElementById('btnRemap').addEventListener('click',()=>{
+  renderMapRows(guessColumns(pending.headers));
+  toast('Re-ran the auto-map.');
+});
+document.getElementById('btnClearMap').addEventListener('click',()=>{
+  document.querySelectorAll('#mapRows select').forEach(s=>s.value='-1');
+  refreshMapState();
+});
+/* "Smith, John" and "John Smith" are both common, and a middle name or a
+   suffix must not become the surname. Comma form is unambiguous; otherwise the
+   last word is the surname unless it is a suffix, in which case it is the one
+   before it. */
+const SUFFIXES=new Set(['jr','jr.','sr','sr.','ii','iii','iv','v','md','phd','cfp','cpa','esq','esq.','mba','cfa','clu','chfc']);
+function splitName(full){
+  const t=(full||'').trim().replace(/\s+/g,' ');
+  if(!t)return['',''];
+  if(t.includes(',')){
+    const [last,rest]=t.split(',');
+    return [(rest||'').trim(),(last||'').trim()];
+  }
+  const parts=t.split(' ');
+  if(parts.length===1)return['',parts[0]];
+  let li=parts.length-1;
+  while(li>0&&SUFFIXES.has(parts[li].toLowerCase().replace(/[^a-z.]/g,'')))li--;
+  return [parts.slice(0,li).join(' '),parts.slice(li).join(' ')];
+}
 document.getElementById('btnDoImport').addEventListener('click',()=>{
-  const map={};document.querySelectorAll('#mapRows select').forEach(s=>map[s.dataset.key]=+s.value);
+  const map=currentMap();
   const batch=document.getElementById('impBatch').value.trim()||'Import';
   const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
   let added=0,dup=0;
   pending.data.forEach(row=>{
     const L={id:'L'+Date.now()+Math.random().toString(36).slice(2,7),batch,status:'New',notes:'',jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now()};
     FIELDS.forEach(([key])=>{const i=map[key];L[key]=(i>-1&&row[i]!==undefined)?(''+row[i]).trim():'';});
+    if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
+    delete L.fullName;                       // a mapping input, not a lead field
     L.enriched=!!(L.email||L.mobilePhone);
     const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
     if((L.contactId||L.email)&&seen.has(dk)){dup++;return;}
@@ -1395,6 +1571,58 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   }));
   dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
   toast(`Exported ${list.length} leads (current filter).`);});
+/* ---- Starter template ----
+   Built from FIELDS at run time rather than kept as a file, so it cannot drift
+   from the columns the app actually reads. The template carries the ones that
+   feed scoring; TEMPLATE_EXTRA names the rest, which are recognised
+   automatically if a file happens to have them. */
+/* Headers are written out rather than derived from the alias list: deriving
+   them produced "Years Of Experience" and "Linkedin Contact Profile Url". The
+   test feeds this template back through guessColumns, so a header that stops
+   matching fails the build rather than reaching anyone. */
+const TEMPLATE_COLS=[
+  ['firstName','First Name','Ellen','needed to address the lead'],
+  ['lastName','Last Name','Whitfield','needed to address the lead'],
+  ['title','Job Title','Managing Partner','signal T — decision-maker level'],
+  ['mgmtLevel','Management Level','C Level Exec','signal T — used when the title is vague'],
+  ['employer','Company Name','Cordova Industrial Group','context on the call'],
+  ['email','Email Address','ewhitfield@cordovaig.com','signal C — half of contact completeness'],
+  ['mobilePhone','Mobile Phone','(973) 555-0148','required for any tier — no mobile means Excluded'],
+  ['directPhone','Business Phone','(973) 555-0100','fallback number, does not count for signal C'],
+  ['street','Street Address','48 Prospect Ridge Rd','used by household enrichment'],
+  ['city','City','Montclair',''],
+  ['state','State','NJ','checked against your excluded-states list'],
+  ['zip','Zip','07042',''],
+  ['jobStartDate','Job Start Date','2025-02-01','signal R — how recently they moved'],
+  ['concurrentRoles','Other Current Roles','Board Member, Ridgeline Capital','signal R — a genuine second seat'],
+  ['gradYear','Graduation Year','1986','signal A — age proxy when no confirmed age exists'],
+  ['yearsExperience','Years of Experience','34','signal E — career length'],
+  ['yearsAtEmployer','Years at Current Employer','0.5','signal E — subtracted to get prior-company years'],
+  ['linkedinUrl','LinkedIn URL','https://www.linkedin.com/in/example','for manual age verification']
+];
+const TEMPLATE_EXTRA=['Personal Email','ZoomInfo Contact ID','Number of Employees','Number of Companies',
+  'First Work Year','Has Email','Has Mobile Phone','Mobile Phone Do Not Call','Direct Phone Do Not Call'];
+function fieldLabel(k){const f=FIELDS.find(x=>x[0]===k);return f?f[1]:k;}
+function templateCSV(){
+  const q=v=>/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+  const head=TEMPLATE_COLS.map(([,h])=>h);
+  const row1=TEMPLATE_COLS.map(([,,ex])=>ex);
+  // A second row showing the thinner case: no mobile, so it lands in Excluded.
+  const row2=['Ray','Okonjo','Senior Vice President','VP Level Exec','Halstead Marine','rokonjo@halsteadmarine.com','','(207) 555-0117','','Portland','ME','','2024-09-15','','1991','29','1.0',''];
+  return [head,row1,row2].map(r=>r.map(v=>q(''+v)).join(',')).join('\r\n')+'\r\n';
+}
+function openTemplate(){
+  const rows=TEMPLATE_COLS.map(([,h,ex,why])=>
+    `<tr><td><code>${esc(h)}</code></td><td>${esc(ex)}</td><td class="tmplwhy">${esc(why)}</td></tr>`).join('');
+  document.getElementById('tmplRows').innerHTML=rows;
+  document.getElementById('tmplExtra').innerHTML=TEMPLATE_EXTRA.map(h=>`<code>${esc(h)}</code>`).join(', ');
+  openModal('mTemplate');
+}
+document.getElementById('btnTemplate').addEventListener('click',openTemplate);
+document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
+document.getElementById('btnDlTemplate').addEventListener('click',()=>{
+  dl(new Blob([templateCSV()],{type:'text/csv'}),'lead-qualifier-template.csv');
+});
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
 
 /* =============== backup / restore =============== */
