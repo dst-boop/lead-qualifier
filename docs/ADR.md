@@ -405,17 +405,33 @@ strangers who never opted into anything.
 Written from live API responses on 2026-08-20, not from the vendor's docs. Three
 findings, each of which cost a wasted attempt.
 
-### `jobTitleList` combines with AND, not OR
+### `jobTitleList` entries combine with AND — use Boolean OR inside one entry
 
-The parameter reads like a list of alternatives. It is not. A query for eleven
-senior titles returned **zero results** — no person holds all eleven at once. A
-two-title query for `["Chairman", "Chief Executive Officer"]` returned only
-people whose single title string contains both, e.g. Wells Fargo's "Chairman &
-Chief Executive Officer".
+**Corrected.** The original finding here was half right and its recommendation
+was wrong. The wrong half was acted on, so it is kept visible rather than quietly
+replaced.
 
-This fails **silently**: an over-broad title list looks like "nobody matches your
-criteria" rather than an error, which invites the wrong conclusion about market
-size. One search per title, unioned client-side, is the working pattern.
+Array *entries* do combine with AND. A query for eleven senior titles returned
+**zero results** — no person holds all eleven — and a two-entry query for
+`["Chairman", "Chief Executive Officer"]` returned only people whose single title
+string contains both, e.g. Wells Fargo's "Chairman & Chief Executive Officer".
+This fails **silently**: an over-broad list reads as "nobody matches your
+criteria" rather than as an error, inviting the wrong conclusion about market size.
+
+The recommendation drawn from that — *one search per title, unioned client-side* —
+was wrong. ZoomInfo's Boolean rules explain why: keywords **inside one filter
+chip** are ANDed, **separate chips** are ORed. The array is one chip. The union is
+expressed with an `OR` operator *inside a single string value*:
+
+    jobTitleList: ["Chairman OR Founder OR Partner OR Managing Director"]
+
+Measured against the parts: `Chairman` alone 40,639, `Founder` alone 1,318,501,
+the `OR` of the two 1,353,762 — the union less the 5,378 people holding both. At
+production filter settings one `OR` call returned 354,118 against 352,373 summed
+over six separate searches. **Six calls collapse into one.**
+
+Double quotes are rejected (`Must only contain letters and spaces`), so phrases
+cannot be quoted for exactness — see `exactJobTitle` below for that.
 
 Title matching is also **substring, not exact**. `"Chief Financial Officer"`
 matched an *Executive Assistant To* a CFO. `excludeJobTitleList` is therefore not

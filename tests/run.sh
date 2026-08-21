@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Run every regression suite against a local server and return a real exit code.
+#
+# The suites drive the actual page in Chromium rather than importing functions,
+# because the app is one HTML file with no module boundary — the only honest way
+# to test scoreLead is to load the page and call it.
+set -uo pipefail
+cd "$(dirname "$0")"
+ROOT="$(cd .. && pwd)"
+PORT="${PORT:-8099}"
+BASE="http://127.0.0.1:$PORT"
+
+# Reuse a server if one is already up; otherwise start one and clean it up.
+STARTED=""
+if ! curl -sf -o /dev/null --noproxy '*' --max-time 3 "$BASE/"; then
+  echo "starting server on $PORT"
+  (cd "$ROOT" && APP_BASE_URL="$BASE" PORT="$PORT" python3 -m webapp >/tmp/lq-test-server.log 2>&1) &
+  STARTED=$!
+  for _ in $(seq 1 20); do
+    curl -sf -o /dev/null --noproxy '*' --max-time 2 "$BASE/" && break
+    sleep 0.5
+  done
+  curl -sf -o /dev/null --noproxy '*' --max-time 2 "$BASE/" || {
+    echo "server never came up; see /tmp/lq-test-server.log"; tail -20 /tmp/lq-test-server.log; exit 1; }
+fi
+cleanup(){ [ -n "$STARTED" ] && kill "$STARTED" 2>/dev/null; }
+trap cleanup EXIT
+
+# Suites that assert and exit non-zero. These are the regression guard.
+SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js upgrade-test.js hh-test.js v3-test.js"
+FAILED=""
+for s in $SUITES; do
+  printf '%-20s ' "$s"
+  if out=$(node "$s" 2>&1); then
+    echo "$(echo "$out" | tail -1)"
+  else
+    echo "FAILED"
+    echo "$out" | sed 's/^/    /'
+    FAILED="$FAILED $s"
+  fi
+done
+
+# The backend OAuth suite runs from the repo root, against its own stub server.
+printf '%-20s ' "zi-oauth-test.py"
+if out=$(cd "$ROOT" && python3 tests/zi-oauth-test.py 2>&1); then
+  echo "$(echo "$out" | tail -1)"
+else
+  echo "FAILED"; echo "$out" | tail -20 | sed 's/^/    /'; FAILED="$FAILED zi-oauth-test.py"
+fi
+
+echo
+if [ -n "$FAILED" ]; then echo "FAILING:$FAILED"; exit 1; fi
+echo "all suites pass"

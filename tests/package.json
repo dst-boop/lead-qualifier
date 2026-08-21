@@ -1,0 +1,6 @@
+{
+  "name": "lead-qualifier-tests",
+  "private": true,
+  "scripts": { "test": "./run.sh" },
+  "dependencies": { "playwright": "^1.62.1" }
+}
