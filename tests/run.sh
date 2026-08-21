@@ -27,7 +27,7 @@ cleanup(){ [ -n "$STARTED" ] && kill "$STARTED" 2>/dev/null; }
 trap cleanup EXIT
 
 # Suites that assert and exit non-zero. These are the regression guard.
-SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js upgrade-test.js hh-test.js v3-test.js"
+SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js upgrade-test.js hh-test.js v3-test.js"
 FAILED=""
 for s in $SUITES; do
   printf '%-20s ' "$s"
@@ -40,13 +40,15 @@ for s in $SUITES; do
   fi
 done
 
-# The backend OAuth suite runs from the repo root, against its own stub server.
-printf '%-20s ' "zi-oauth-test.py"
-if out=$(cd "$ROOT" && python3 tests/zi-oauth-test.py 2>&1); then
-  echo "$(echo "$out" | tail -1)"
-else
-  echo "FAILED"; echo "$out" | tail -20 | sed 's/^/    /'; FAILED="$FAILED zi-oauth-test.py"
-fi
+# Backend suites run from the repo root, each against its own stub server.
+for s in zi-oauth-test.py edgar-test.py; do
+  printf '%-20s ' "$s"
+  if out=$(cd "$ROOT" && python3 "tests/$s" 2>&1); then
+    echo "$(echo "$out" | tail -1)"
+  else
+    echo "FAILED"; echo "$out" | tail -20 | sed 's/^/    /'; FAILED="$FAILED $s"
+  fi
+done
 
 echo
 if [ -n "$FAILED" ]; then echo "FAILING:$FAILED"; exit 1; fi
