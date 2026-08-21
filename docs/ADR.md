@@ -582,6 +582,87 @@ and it remains open question #1.
 
 ---
 
+## 11e. The search matters more than the model
+
+A real export settled a question the app had been guessing at. 87 Boeing contacts,
+run through the live scorer:
+
+**All 87 Tier C. Top score 30 out of 80. Median 10.**
+
+| Signal | Worth | Hit |
+|---|---|---|
+| A Age | 25 | 0 |
+| R Recent move + second role | 5 | 0 |
+| T Decision-maker level | 20 | 9 |
+| E Prior senior experience | 20 | 0 |
+| C Email + mobile | 10 | 47 |
+
+Tier B needs 40. With A and E structurally at zero the ceiling is 35, so **no
+lead in that file could clear Tier B by arithmetic**, whoever they were. The
+empty tiers were never a judgement about the people.
+
+### One credit per exported record changes where the work belongs
+
+The credit model is per exported record. That reframes everything: **93 of the
+180 leads in the live list were held out for having no mobile — roughly 93
+credits spent on people the app then refused to call.** In the Boeing file all 87
+had mobiles but 40 had no email, so signal C died on nearly half.
+
+Advanced Search has a **Contact Info** filter that requires business email *and*
+mobile with AND logic. Applying it costs nothing and makes every exported record
+satisfy signal C. The Excluded bucket becomes near-empty not because the scoring
+got kinder but because we stopped paying for records that were always going to
+fail it. Filtering before export is the only real control on spend.
+
+### Management Level beats our keyword matching
+
+Signal T matched 9 of 87 on a file full of "Manager, Electrical Engineering".
+ZoomInfo's own **Management Level** classification is "based on responsibility,
+not just words in the job title" — strictly better than a regex over title text,
+and available both as a search filter and an export column. The export that
+produced these numbers did not include the column at all. The app already maps
+and scores it, so adding it to the export is free accuracy.
+
+### What the export does not contain
+
+No graduation year, no years of experience. `Highest Level of Education` exports
+as a **category** — Graduate, Undergraduate, PhD — not a year, so it cannot proxy
+age. There is a `College/Degree` **search filter**, which proves ZoomInfo holds
+education data, but nothing establishes that a *date* is exportable.
+
+That leaves signals A and E — 45 of the 80 points — unreachable from ZoomInfo
+alone. One tempting shortcut does not work: deriving career length from Job Start
+Date makes signal E score zero by construction, because E is total years *minus*
+current tenure and that subtraction cancels.
+
+So confirmed age has to come from WhitePages enrichment, or the model has to be
+re-weighted around what is knowable. **That decision is deliberately not taken
+here** — it is a business judgement about who gets called first, and it should be
+made after a ten-record test export settles whether any education date exists.
+
+### The list and the model disagreed about what a good lead is
+
+Twenty-five of the 87 had 30+ years at one employer; nine had 40+. On the
+rollover thesis — orphaned 401(k), retirement, consolidation — a Boeing lifer
+approaching retirement is a better prospect than a VP who moved last year. The
+model scored them 10, because it uses *title* as the wealth proxy.
+
+Neither side is wrong. The scoring model encodes a wealthy-decision-maker ICP;
+that pull encoded a company. Until the search is written to match the model, the
+tiers will keep reporting a mismatch as if it were a quality problem.
+
+### Also worth knowing
+
+- **Records Under Management**: anything already exported can be re-pulled or
+  re-enriched free for a year, so refreshing the existing list costs nothing.
+- **Enhance** charges only for records it successfully updates — the credit-
+  efficient way to fill missing mobiles on a list already paid for.
+- **Views are not credits.** Revealing contact details on screen spends a view
+  even when nothing is exported.
+- Tagging is free.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.
