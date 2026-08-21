@@ -358,7 +358,7 @@
   </div>
   <h3>List-build recipe (what the team sees under "Build list")</h3>
   <div class="mcol" style="display:grid;gap:10px">
-    <label>Recipe<textarea id="sRecipe" rows="6"></textarea></label>
+    <label>Recipe <a href="#" id="lnkResetRecipe" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--brass)">reset to default</a><textarea id="sRecipe" rows="6"></textarea></label>
   </div>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mSettings')">Cancel</button>
@@ -516,11 +516,16 @@ const DEFAULTS={
   e3n:'Meeting confirm',
   e3s:'Good speaking with you',
   e3b:'Hi {firstName},\n\nGood speaking with you today. I\'ll follow with a calendar invite shortly — looking forward to it.\n\n{yourName}',
-  recipe:'STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = whatever states you do not cover (leave blank for all)\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.',
+  recipe:'STANDARD PULL — ZoomInfo Advanced Search, export CSV, import here. Save the search so it is one click next time.\n\nSEARCH FILTERS\n1. Management Level: C-Level, VP, Director. ZoomInfo classifies by responsibility rather than words in the title, which beats anything this app can infer from title text.\n2. Contact Info: Business Email AND Mobile Phone — set the logic to AND, not ANY. This is the filter that matters most: one credit is charged per exported record, and a record with no mobile is a credit spent on a lead this app puts straight into Excluded.\n3. Location of: Contact Office, United States (or just your states). Where they work, not company HQ.\n4. Job Title: NOT Assistant, Associate, Junior, Coordinator, Intern.\n5. Exclude my exported contacts — never buy the same person twice.\n6. New Hires (joined in the past 9 months) — the orphaned-401(k) event. Run this as a SECOND saved search rather than adding it to the first; it narrows hard and you want both lists.\n\nEXPORT COLUMNS\nTake the defaults, and add Management Level. Without that column the app falls back to keyword-matching the job title, which misses people ZoomInfo already knows are senior.\n\nCREDITS\n- One credit per exported record. Filtering before export is the only real control on spend.\n- Records Under Management: anything you have already exported can be re-pulled or re-enriched free for a year.\n- Enhance (Lists > Upload Lists > Enhance) charges only for records it successfully updates — the cheapest way to fill missing mobiles on a list you already own.\n- Tagging is free. Views are separate from credits: revealing contact info on screen spends a view even if you never export.\n\nSTILL UNSOLVED\nNo graduation year or years-of-experience column has been found in the export. Without one of them the age and prior-experience signals cannot fire, which is 45 of the 80 available points. Check the export field list for anything resembling either before the next large pull.',
   meet:5, contact:35, meetRate:12, advisors:'', priceA:45, priceB:25, priceC:10,
   subj:'Retirement planning introduction — {firstName}, meet {yourName}',
   body:'Hi {firstName},\n\nLooking forward to connecting. We\'ll cover your retirement picture, any accounts left with prior employers, and whether a review makes sense.\n\nTalk soon,\n{yourName}'
 };
+/* Recipes the app has shipped before. A saved recipe that still matches one
+   of these verbatim was never edited, so it can be refreshed to the current
+   default. Anything else is the user's own writing and is left alone — a
+   changed default must never silently delete what someone typed. */
+const LEGACY_RECIPES=['STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = whatever states you do not cover (leave blank for all)\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.'];
 const RENDER_CAP=250;   // rows drawn at once; filters reach the rest
 const SCORING_KEYS=['ageMin','gradBefore','tenMax','priorMin','titles','exTitles','wAge','wRecent','wTitle','wPrior','wContact','tierA','tierB'];
 const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='function');}catch(e){return false;}})();
@@ -584,6 +589,9 @@ function adoptSaved(s){
   // model changes; keep templates, org details and pricing.
   if((saved.modelVersion||1)<DEFAULTS.modelVersion)
     SCORING_KEYS.forEach(k=>delete saved[k]);
+  // The recipe is guidance, not scoring, so it survives a model bump. Refresh it
+  // only when it is still a shipped default word for word.
+  if(saved.recipe&&LEGACY_RECIPES.includes(saved.recipe))delete saved.recipe;
   state={settings:{...DEFAULTS,...saved,modelVersion:DEFAULTS.modelVersion},leads:s.leads};
   return true;
 }
@@ -603,7 +611,11 @@ async function boot(){
     try{
       const d=await api('/api/state',null,'GET');
       serverOk=true;
-      if(d.found&&(d.leads||[]).length){loaded=adoptSaved(d);setSync('synced to your account');}
+      // Settings belong to the account even when no leads have been imported
+      // yet. Gating this on lead count meant signing in on a second machine
+      // restored default weights, templates and recipe without saying so.
+      if(d.found)loaded=adoptSaved(d);
+      if(d.found&&(d.leads||[]).length){setSync('synced to your account');}
       else{
         // Nothing on the account yet. Prefer this account's own browser cache;
         // fall back to the pre-namespacing shared key exactly once, then delete
@@ -1647,6 +1659,11 @@ document.getElementById('jsonFile').addEventListener('change',e=>{
   r.readAsText(f);});
 
 /* =============== settings modal =============== */
+document.getElementById('lnkResetRecipe').addEventListener('click',e=>{
+  e.preventDefault();
+  document.getElementById('sRecipe').value=DEFAULTS.recipe;
+  toast('Recipe reset — Save to keep it.');
+});
 const SFIELDS=[['sAgeMin','ageMin'],['sGradBefore','gradBefore'],['sTenMax','tenMax'],['sPriorMin','priorMin'],['sTitles','titles'],['sExTitles','exTitles'],['sExStates','exStates'],['wRecent','wRecent'],['wTitle','wTitle'],['wPrior','wPrior'],['wAge','wAge'],['wContact','wContact'],['sTierA','tierA'],['sTierB','tierB'],['sSource','source'],['sAddrType','addrType'],['sOrgName','orgName'],['sOrgEmail','orgEmail'],['sDur','dur'],['sSubj','subj'],['sBody','body'],['sCallVia','callVia'],['sEmailVia','emailVia'],['sLiNote','liNote'],['sRecipe','recipe'],['sE1n','e1n'],['sE1s','e1s'],['sE1b','e1b'],['sE2n','e2n'],['sE2s','e2s'],['sE2b','e2b'],['sE3n','e3n'],['sE3s','e3s'],['sE3b','e3b'],['sMeet','meet'],['sContact','contact'],['sMeetRate','meetRate'],['sAdvisors','advisors'],['sPriceA','priceA'],['sPriceB','priceB'],['sPriceC','priceC']];
 document.getElementById('btnRecipe').addEventListener('click',()=>{
   document.getElementById('recipeText').textContent=state.settings.recipe;openModal('mRecipe');});
