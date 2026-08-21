@@ -74,7 +74,7 @@ Pushing to `main` is the deploy.
 |---|---|
 | `APP_BASE_URL` | Public URL, no trailing slash. OAuth redirects and the HTTPS redirect derive from it |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in, Gmail send, Calendar — [setup](SETUP-google.md) |
-| `MS_CLIENT_ID` / `MS_CLIENT_SECRET` / `MS_TENANT_ID` | Microsoft alternative — [setup](SETUP-microsoft.md) |
+| `MS_CLIENT_ID` / `MS_CLIENT_SECRET` / `MS_TENANT_ID` | Microsoft sign-in — requires an app registered by Equitable IT, [setup](SETUP-microsoft.md) |
 | `WHITEPAGES_API_KEY` | Phone verification and enrichment — [setup](SETUP-whitepages.md) |
 | `ZI_CLIENT_ID` / `ZI_CLIENT_SECRET` | Each user connects their own ZoomInfo seat — [setup](SETUP-zoominfo.md) |
 | `ANTHROPIC_API_KEY` | AI quality control — [setup](SETUP-ai-qc.md) |

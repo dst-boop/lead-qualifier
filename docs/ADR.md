@@ -643,11 +643,12 @@ succeed may prove nothing. The user's browser is ground truth.
 |---|---|---|---|
 | 1 | Does the ZoomInfo seat carry API entitlement? | Register a Standard App | Phase 1, §11d |
 | 2 | Does Equitable journaling capture Graph-sent mail? | Equitable compliance | Phase 2 scope |
-| 3 | Is the M365 tenant Equitable-managed? | Equitable IT | Phase 2 |
+| 3a | Will Equitable IT register the app? | Equitable IT | Microsoft sign-in |
 | 4 | What replaces the TCPA litigator flag? | Vendor research | §8.3 |
 | 5 | Buy property valuation data, or live without it? | Business decision | §4.3, §9 |
 
-**Resolved since v2.0:** ~~Trestle configuration~~ (wrong vendor entirely) ·
+**Resolved since v2.0:** ~~Which tenant hosts M365?~~ (§15) ·
+~~Trestle configuration~~ (wrong vendor entirely) ·
 ~~IP allowlist~~ (none) · ~~home value source~~ (does not exist here) ·
 ~~session persistence~~ (Firestore, shipped) · ~~custom domain and TLS~~
 (shipped).
@@ -655,3 +656,44 @@ succeed may prove nothing. The user's browser is ground truth.
 **Standing risks:** vendor pricing changes, so re-check the estimator's
 constants periodically. ZoomInfo contact data decays and is demonstrably wrong
 for some mobiles today. Do not design around SNAP; it is closed.
+
+---
+
+## 15. Microsoft sign-in — there is no FPA tenant to register in
+
+Tenant discovery settles what was open question #3, and not in the direction the
+setup doc assumed:
+
+| Domain | Tenant |
+|---|---|
+| `financialplannersofamerica.com` | none — `AADSTS90002: Tenant not found` |
+| `equitable.com` | `0ed45188-c605-4511-8b80-3a5831be1abc` |
+
+`SETUP-microsoft.md` opened with "sign in as admin" and "you need a Microsoft
+365 admin account". There is no directory for the FPA domain to be an admin of.
+Mail for it is handled outside Microsoft entirely, which is why Google sign-in
+works and Microsoft has nothing to attach to. The instructions were not merely
+incomplete; they described a console that does not exist for us.
+
+The only real tenant is Equitable's, and there the account is a user, not an
+admin. So Microsoft sign-in is **not an engineering task at all** — the code has
+been finished and verified for some time. It is a request to another firm's IT
+department, and it will live or die on their security review.
+
+That review turns on one distinction worth stating plainly in the request:
+these are **delegated** Graph permissions, not application permissions. The app
+acts only as the person signed in, on a token that person's own sign-in
+produced. It has no tenant-wide mailbox access and cannot touch anyone who has
+not signed into it. Mail leaves via `/me/sendMail`, so it lands in the sender's
+Sent Items and is journalled exactly as Outlook-sent mail is — which is also the
+best available answer to open question #2, though only Equitable compliance can
+confirm it.
+
+### The alternative, if the users are not Equitable's
+
+A multi-tenant registration (`MS_TENANT_ID=common`) lets advisors at any firm
+sign in with their own work account, at the price of each firm's admin
+consenting. It needs **no code change** — `MS_AUTHORITY` is built from
+`MS_TENANT_ID`, so `common` is a variable, not a branch. Worth remembering
+before anyone assumes a multi-firm future requires a rewrite.
+
