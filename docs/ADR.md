@@ -679,6 +679,85 @@ tiers will keep reporting a mismatch as if it were a quality problem.
 
 ---
 
+## 11f. SEC EDGAR — the one automated source that is permitted, not tolerated
+
+§10 rules out scrapers, and §11e showed the age signal is worth 45 of the 80
+available points and is unreachable from ZoomInfo. Those two facts point at the
+same question: is there anywhere age can be read automatically *without*
+breaching somebody's terms?
+
+There is, for one segment. **Regulation S-K Item 401 obliges a proxy statement
+(DEF 14A) to list the names, ages and positions of directors and executive
+officers.** Age is not something to be inferred for these people — it is a
+required public disclosure, filed annually, in a machine-readable archive.
+
+And the SEC **permits automated access on stated terms**: a descriptive
+User-Agent carrying a contact address, and a ceiling of 10 requests per second.
+That is a categorically different position from LinkedIn or ZoomInfo, where
+automated extraction breaches the terms of use. Here the operator is invited,
+subject to conditions.
+
+Both conditions are enforced in code rather than assumed. `EDGAR_USER_AGENT` has
+**no default** — unset, the endpoint refuses rather than sending an invented one,
+because a bad User-Agent is how a firm gets its whole IP range blocked. Requests
+are serialised through a lock and spaced to 8/second, under the ceiling rather
+than at it.
+
+### What it does not cover, stated plainly
+
+Section 16 officers and directors at SEC filers. That is roughly the C-suite and
+the board. It answers for **nobody else** — not a private-company owner, not a
+long-tenured engineer at a public company. Against the Boeing list from §11e,
+which is mostly managers and engineers, most rows will come back empty.
+
+So this is not a fix for signal A. It is a free, exact answer for precisely the
+segment the ICP was built around — the one currently returning zero Tier A leads.
+
+### Claude reads the filing; a regex would not survive
+
+Proxy statements are laid out by dozens of filing agents and no structural
+assumption holds across them. A regex aimed at a table cell would match the wrong
+cell silently — the WhitePages failure mode, at larger scale. The markup is
+stripped and the flattened text goes to Claude under a strict contract: report
+only an age printed for this person, never estimate, never infer from career
+length, never carry an age across from a similar name, prefer "not found" to a
+guess. The answer is then range-checked, because a wrong age scores worse than no
+age.
+
+**The lead detail shows the sentence the age came from and links the filing.**
+That follows §5's rule — attach the right person, or nobody — and makes the
+advisor the last check rather than the app's confidence.
+
+### Ambiguity refuses
+
+Stripping legal suffixes to make "The Boeing Company" match "Boeing" also
+collapses "Acme Industrial Corp" and "Acme Industrial Holdings" onto one key. The
+first implementation kept whichever arrived first, which would have returned the
+wrong company and therefore the wrong person's age — silently. A test caught it.
+Colliding names now return nothing, and the full legal name is matched first so
+that precision still wins.
+
+### Unverified, and why the seams are where they are
+
+**No live EDGAR response has ever been seen from the environment this was written
+in** — the egress gateway answers 403 to CONNECT for all three SEC hosts. The
+URLs and JSON shapes come from documentation, which §12 records as unreliable in
+this codebase specifically. Hence: all four hosts are environment variables, and
+`/api/edgar-debug` ships in the first commit rather than after two wrong parsers.
+
+Our own half is tested against a stub — 28 backend checks and 21 UI checks
+covering the User-Agent, the rate limit, ambiguous companies, and every way an
+age can fail to be real.
+
+### Deferred
+
+**Form 4 insider holdings** — the dollar value of stock an officer holds, a real
+wealth signal and already Phase 3 on the roadmap. It needs a separate pipeline
+(ownership XML, matching the person's own CIK) and was left out rather than
+half-built alongside this.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.
@@ -743,6 +822,7 @@ succeed may prove nothing. The user's browser is ground truth.
 | 3a | Will Equitable IT register the app? | Equitable IT | Microsoft sign-in |
 | 4 | What replaces the TCPA litigator flag? | Vendor research | §8.3 |
 | 5 | Buy property valuation data, or live without it? | Business decision | §4.3, §9 |
+| 6 | Is any education date exportable from ZoomInfo? | 10-record test export | §11e — decides whether the model needs re-weighting |
 
 **Resolved since v2.0:** ~~Which tenant hosts M365?~~ (§15) ·
 ~~Trestle configuration~~ (wrong vendor entirely) ·

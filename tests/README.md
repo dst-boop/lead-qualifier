@@ -36,6 +36,8 @@ it. Backend routes are the exception: `zi-oauth-test.py` drives FastAPI directly
 | `recipe-test.js` | a changed default refreshes untouched text and never overwrites what a user wrote |
 | `zi-ui-test.js` | the ZoomInfo connect/disconnect states in the auth bar |
 | `zi-oauth-test.py` | the per-user ZoomInfo OAuth flow against a stub that validates PKCE properly |
+| `edgar-test.py` | SEC lookups: the required User-Agent, the rate limit, ambiguous company names, and every way an age can fail to be real |
+| `edgar-ui-test.js` | the 🏛 button — score change, the filing evidence shown, and a miss that is recorded rather than retried |
 | `upgrade-test.js` | an older saved list still loads and rescores |
 | `hh-test.js` | household matching — telling a spouse apart from a wrong number |
 | `v3-test.js` | scoring and export against the v3 column layout |

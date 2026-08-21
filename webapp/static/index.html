@@ -660,6 +660,18 @@ function parseStart(v){
 function monthsSince(d){if(!d)return null;const n=new Date();return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth());}
 function truthy(v){return /^(true|yes|y|1)$/i.test((''+(v||'')).trim());}
 const NOW_YEAR=new Date().getFullYear();
+/* Age, best source first. A proxy statement prints an exact age on a dated
+   public filing, which beats a household record, which beats a graduation-year
+   guess. Graduation year stays where it is — it is handled separately in
+   scoreLead as an explicitly inferred fallback. */
+function leadAge(L){
+  if(L.edgar&&L.edgar.age>0)return L.edgar.age;
+  return (L.hd&&L.hd.age)||null;
+}
+function ageSource(L){
+  if(L.edgar&&L.edgar.age>0)return 'SEC proxy statement '+(L.edgar.asOf||'');
+  return 'public record';
+}
 /* Career length: use the stated figure, else derive it. Graduation year and
    first-job year both mark the start of working life, so either works; take
    whichever is earlier when both are present. */
@@ -693,7 +705,7 @@ function hasConcurrentRole(L){
 function callFirst(L){
   let n=0;
   (L.signals||[]).forEach(s=>{if(s.hit&&s.conf)n+=2;});      // confirmed beats inferred
-  if(L.hd&&L.hd.age)n+=3;                                     // age from public record
+  if(leadAge(L))n+=3;                                         // age from public record
   if(L.pv&&L.pv.ok)n+=3;                                      // number verified as theirs
   if(L.pv&&L.pv.wrong)n-=6;                                   // verified as someone else's
   if(L.mobilePhone&&!truthy(L.mobileDnc))n+=1;
@@ -729,11 +741,11 @@ function scoreLead(L){
   let score=0;
   // A — age: confirmed 59.5+, or graduated before 1990
   const gy=parseInt(L.gradYear,10);
-  const age=(L.hd&&L.hd.age)||null;
-  if(age&&age>=+s.ageMin){score+=+s.wAge;sig.push({k:'A',label:`Age ${age} — over ${s.ageMin} (public record)`,hit:true,conf:true,pts:+s.wAge});}
+  const age=leadAge(L);
+  if(age&&age>=+s.ageMin){score+=+s.wAge;sig.push({k:'A',label:`Age ${age} — over ${s.ageMin} (${ageSource(L)})`,hit:true,conf:true,pts:+s.wAge});}
   else if(L.ageVerified){score+=+s.wAge;sig.push({k:'A',label:'Age verified manually (LinkedIn)',hit:true,conf:true,pts:+s.wAge});}
   else if(gy&&gy<+s.gradBefore){score+=+s.wAge;sig.push({k:'A',label:`Graduated ${gy} — before ${s.gradBefore} (inferred)`,hit:true,conf:false,pts:+s.wAge});}
-  else if(age){sig.push({k:'A',label:`Age ${age} — under ${s.ageMin}`,hit:false,pts:0});}
+  else if(age){sig.push({k:'A',label:`Age ${age} — under ${s.ageMin} (${ageSource(L)})`,hit:false,pts:0});}
   else if(gy){sig.push({k:'A',label:`Graduated ${gy} — ${s.gradBefore} or later`,hit:false,pts:0});}
   else sig.push({k:'A',label:'Age unknown — enrich or check LinkedIn',hit:false,pts:0});
   // R — recent move AND still holding another current role. Both required:
@@ -1325,7 +1337,7 @@ function render(){
       <td><div class="act">
         ${L.enriched===false&&L.contactId&&window.__inClaude?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
         ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
-        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: home city/state, home value, mobile numbers on file (1-2 lookups)">&#127968;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
+        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: home city/state, home value, mobile numbers on file (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
         <button class="abtn" onclick="toggleDetail('${L.id}')">${expanded===L.id?'Close':'More'}</button>
@@ -1374,6 +1386,11 @@ function detailRow(L){
       <p class="hint">${esc(L.hd.relatives.join(' · '))}<br>A spouse is often the other half of a retirement decision.</p>`:''}
       ${(L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length)?`<h4 style="margin-top:12px">Previously lived</h4>
       <p class="hint">${esc(L.hd.priorPlaces.join(' · '))}</p>`:''}
+      ${L.edgar?`<h4 style="margin-top:12px">SEC filing</h4>
+      ${L.edgar.age?`<p class="hint"><b>Age ${L.edgar.age}</b>${L.edgar.asOf?` as stated in ${esc(L.edgar.asOf)}`:''}${L.edgar.title?` &mdash; ${esc(L.edgar.title)}`:''}<br>
+      ${L.edgar.quote?`<span style="font-style:italic">&ldquo;${esc(L.edgar.quote)}&rdquo;</span><br>`:''}
+      ${L.edgar.url?`<a target="_blank" rel="noopener" href="${esc(L.edgar.url)}">${esc(L.edgar.company||'Proxy statement')}, filed ${esc(L.edgar.filed||'')}</a> &mdash; read it and confirm this is the right person.`:''}</p>`
+      :`<p class="hint">${esc(L.edgar.reason||'No age found in a proxy statement.')}<br>Officers and directors of public companies are listed with an age; nobody else is.</p>`}`:''}
       <div class="manualtoggles">
         <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
@@ -1782,7 +1799,7 @@ function coverage(){
     rows:[
       {k:'A',label:'Age — confirmed, verified, or graduation year',
        v:pct(x=>(x.hd&&x.hd.age)||x.ageVerified||parseInt(x.gradYear,10)>1900),
-       fix:'Map Graduation Year, or run 🏠 enrichment for a confirmed age.'},
+       fix:'Map Graduation Year, run 🏛 for an officer of a public company (free), or 🏠 enrichment for a confirmed age.'},
       {k:'R',label:'Job start date',v:pct(started),
        fix:'Map Job Start Date — without it the recent-move signal cannot fire.'},
       {k:'R',label:'Second current role',v:pct(hasConcurrentRole),
@@ -1929,6 +1946,34 @@ window.enrichHome=async id=>{
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
 };
+ACT_LABEL.edgar='SEC filing';
+/* Age from the employer's latest proxy statement. Free and repeatable, unlike
+   every other enrichment in this app — the cost of a miss is a wasted few
+   seconds, so it is worth trying on any lead at a public company. */
+window.edgarAge=async id=>{
+  const L=byId(id);if(!L)return;
+  if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
+  toast('Reading '+(L.employer||'')+"'s proxy statement…");
+  try{
+    const d=await api('/api/edgar',{first_name:L.firstName||'',last_name:L.lastName||'',employer:L.employer||''});
+    // A miss is recorded, not discarded: without it the button reappears and
+    // invites the same fruitless lookup on every render.
+    L.edgar={age:d.found?d.age:null,title:d.title||'',asOf:d.as_of||'',
+             quote:d.quote||'',url:(d.filing&&d.filing.url)||'',
+             filed:(d.filing&&d.filing.filed)||'',
+             company:(d.company&&d.company.name)||'',reason:d.reason||''};
+    L.updatedAt=Date.now();
+    scoreLead(L);
+    if(d.found){
+      logAct(id,'edgar','age '+d.age+' ('+(d.company&&d.company.name||'')+' proxy, filed '+((d.filing&&d.filing.filed)||'')+') — now '+L.tier+'·'+L.score);
+      toast('Age '+d.age+' — now '+L.tier+'·'+L.score);
+    }else{
+      logAct(id,'edgar','no age on file — '+(d.reason||'not listed'));
+      toast(d.reason||'Not listed in a proxy statement.');
+    }
+    save();render();
+  }catch(e){toast('SEC lookup failed: '+e.message);}
+};
 document.getElementById('btnQC').addEventListener('click',async()=>{
   if(!(window.ME&&ME.signed_in)){toast('Sign in to run AI quality control.');return;}
   const pend=filtered().filter(L=>!L.qc&&L.tier!=='X');
@@ -1939,7 +1984,7 @@ document.getElementById('btnQC').addEventListener('click',async()=>{
     for(let i=0;i<pend.length;i+=10){
       const batch=pend.slice(i,i+10);
       btn.textContent=`AI QC\u2026 ${Math.min(i+10,pend.length)}/${pend.length}`;
-      const d=await api('/api/qc',{base_age_min:+state.settings.ageMin||null,leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:(L.hd&&L.hd.age)||null,ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
+      const d=await api('/api/qc',{base_age_min:+state.settings.ageMin||null,leads:batch.map((L,j)=>({i:j,name:(L.firstName+' '+L.lastName).trim(),title:L.title,jobLevel:L.mgmtLevel,company:L.employer,state:L.state,gradYear:L.gradYear,positionStart:L.jobStartDate,employees:L.employees,notes:L.notes,yearsExperience:L.yearsExperience||'',yearsAtEmployer:L.yearsAtEmployer||'',jobHopper:!!L.jobHopper,age:leadAge(L),ownsHome:(L.hd&&L.hd.ownsHome)||null,propertiesOwned:(L.hd&&L.hd.props)||null,deedHeldBy:(L.hd&&L.hd.ownerType)||''}))});
       (d.verdicts||[]).forEach(v=>{const L=batch[v.i];if(L){L.qc=v;L.updatedAt=Date.now();}});
       doneN+=batch.length;save();render();
     }
