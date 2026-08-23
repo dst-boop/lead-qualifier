@@ -39,9 +39,9 @@ const ROWS = [
 
   await p.goto('http://127.0.0.1:8099/', {waitUntil:'networkidle'});
   await p.waitForTimeout(400);
-  await p.click('#btnDrive'); await p.waitForTimeout(400);
-  await p.click('#drvList .sigrow'); await p.waitForTimeout(400);
-  await p.click('#btnDoImport'); await p.waitForTimeout(800);
+  // The sheet is read on arrival — no picker, no mapper, no import button.
+  await p.waitForFunction(()=>state.leads.length>0,null,{timeout:8000});
+  await p.waitForTimeout(300);
 
   let fail=0;
   const ck=(name,cond,detail)=>{ console.log((cond?'ok   ':'FAIL ')+name+(detail?'  '+detail:'')); if(!cond)fail++; };
@@ -70,7 +70,7 @@ const ROWS = [
   const noneInABC = await p.evaluate(()=>state.leads.filter(l=>['A','B','C'].includes(l.tier)&&!l.mobilePhone).length);
   ck('no A/B/C lead lacks a mobile', noneInABC===0, 'violations='+noneInABC);
 
-  const label = await p.textContent('#summary');
+  const label = await p.textContent('#tierRow');
   ck('bucket is not labelled CT/MA', !/CT\/MA/.test(label), label.replace(/\s+/g,' ').slice(0,120));
 
   // The would-be tier must be visible in the Excluded view, not just in state.

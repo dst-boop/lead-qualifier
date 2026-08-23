@@ -3,7 +3,7 @@
 const { chromium } = require('playwright');
 const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'dst@fpa.com',
   providers:{google:true,microsoft:true},
-  features:{whitepages:true,ai_qc:true,server_state:true,drive:true,zoominfo:false},
+  features:{whitepages:true,ai_qc:true,server_state:true,drive:false,zoominfo:false},
   storage:'firestore',encryption:'kms',...o});
 
 (async()=>{
@@ -124,7 +124,7 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'dst@fpa.com',
   ck('  ...and it scored', typeof lead.score==='number', lead.score+'/'+lead.tier);
 
   // --- the template ---------------------------------------------------------
-  await p.click('#btnTemplate'); await p.waitForTimeout(300);
+  await p.click('#btnMore'); await p.click('#btnTemplate'); await p.waitForTimeout(300);
   ck('template modal opens from the toolbar', await p.isVisible('#mTemplate'));
   const trows=await p.evaluate(()=>document.querySelectorAll('#tmplRows tr').length);
   ck('template lists its columns', trows>=15, 'rows='+trows);

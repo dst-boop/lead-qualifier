@@ -26,8 +26,13 @@ const me=(o)=>({signed_in:false,providers:{google:true,microsoft:true},
     const d=serverDb[em];
     return r.fulfill({json:d?{found:true,...d}:{found:false,settings:{},leads:[]}});
   });
-  await p.route('**/api/drive/find*',r=>r.fulfill({json:{files:[{id:'f1',name:'401(k) Rollover Leads.xlsx',
-    mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',modifiedTime:'2026-08-20T18:00:00Z'}],searched:'x'}}));
+  // Drive is per-account: A has a prospecting sheet, B does not. That is the
+  // only honest way to mock automatic sourcing here — B's list must stay empty
+  // because B's own Drive is empty, not because sourcing was switched off.
+  await p.route('**/api/drive/find*',r=>r.fulfill({json:{
+    files:(who.email==='a@firm.com')?[{id:'f1',name:'Wealth Management Lead Prospecting',
+      mimeType:'application/vnd.google-apps.spreadsheet',modifiedTime:'2026-08-20T18:00:00Z'}]:[],
+    searched:'x'}}));
   await p.route('**/api/drive/rows*',r=>r.fulfill({json:{name:'x.xlsx',rows:[HDR,ROW],truncated:false}}));
 
   let fail=0;
@@ -38,9 +43,8 @@ const me=(o)=>({signed_in:false,providers:{google:true,microsoft:true},
   // --- User A signs in and imports a lead -------------------------------
   who=me({signed_in:true,provider:'google',name:'User A',email:'a@firm.com'});
   await reload();
-  await p.click('#btnDrive');await p.waitForTimeout(400);
-  await p.click('#drvList .sigrow');await p.waitForTimeout(400);
-  await p.click('#btnDoImport');await p.waitForTimeout(900);
+  await p.waitForFunction(()=>state.leads.length>0,null,{timeout:8000});
+  await p.waitForTimeout(300);
   ck('user A imports a lead', await leadCount()===1, 'n='+await leadCount());
 
   // --- User A signs out -------------------------------------------------

@@ -55,7 +55,7 @@ const LEAD={id:'L1',firstName:'A',lastName:'B',status:'New',activity:[],mobilePh
   // 5. the reset link is there for anyone who did edit theirs
   server={found:true,settings:{recipe:MINE,modelVersion:3},leads:[LEAD]};
   await load();
-  await p.click('#btnSettings');await p.waitForTimeout(400);
+  await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
   ck('settings shows the user recipe', (await p.inputValue('#sRecipe'))===MINE);
   await p.click('#lnkResetRecipe');await p.waitForTimeout(300);
   const box=await p.inputValue('#sRecipe');

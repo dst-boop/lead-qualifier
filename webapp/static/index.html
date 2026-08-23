@@ -37,6 +37,48 @@
   .tbtn.primary{background:var(--brass);border-color:var(--brass);color:#1b1508;font-weight:600}
   .tbtn.primary:hover{background:#bd913c}
 
+  .menuwrap{position:relative}
+  .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);
+        border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:230px;z-index:60;padding:5px}
+  .menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 11px;
+        font-size:.85rem;color:var(--ink);border-radius:4px}
+  .menu button:hover{background:var(--brass-soft)}
+
+  /* ---------- The pipeline: source, enrich, qualify, track ---------- */
+  .pipeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;padding:16px 22px 4px;align-items:start}
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:13px 15px 15px;
+         border-top:3px solid var(--line);display:flex;flex-direction:column;gap:7px;min-height:150px}
+  #stSource{border-top-color:var(--brass)}
+  #stEnrich{border-top-color:var(--called)}
+  #stQualify{border-top-color:var(--tierA)}
+  #stTrack{border-top-color:var(--ink)}
+  .sthead{display:flex;align-items:baseline;gap:9px}
+  .sthead h2{font-family:var(--font-disp);font-size:1.02rem;font-weight:600;margin-right:auto}
+  .stnum{font-family:var(--font-mono);font-size:.66rem;font-weight:700;color:#fff;background:var(--ink-faint);
+         border-radius:50%;width:17px;height:17px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+  #stSource .stnum{background:var(--brass)} #stEnrich .stnum{background:var(--called)}
+  #stQualify .stnum{background:var(--tierA)} #stTrack .stnum{background:var(--ink)}
+  .stcount{font-family:var(--font-mono);font-size:1.45rem;font-weight:700;line-height:1}
+  .stsub{font-size:.79rem;color:var(--ink-soft);line-height:1.4;min-height:2.1em}
+  .stacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+  .pbtn{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;
+        font-size:.8rem;color:var(--ink)}
+  .pbtn:hover:not(:disabled){border-color:var(--brass);background:var(--brass-soft)}
+  .pbtn:disabled{opacity:.45;cursor:not-allowed}
+  .pbtn.primary{background:var(--ink);border-color:var(--ink);color:#f2f4f0;font-weight:600}
+  .pbtn.primary:hover:not(:disabled){background:#2b3f56;border-color:#2b3f56}
+  .srcnote{font-size:.76rem;color:var(--ink-faint);line-height:1.45}
+  .srcnote.ok{color:var(--tierA)} .srcnote.warn{color:var(--tierX)}
+  .tierrow{display:flex;gap:5px;flex-wrap:wrap;margin-top:auto}
+  .tierrow .card{padding:6px 9px;border-top-width:2px;flex:1 1 auto;min-width:64px}
+  .tierrow .card .n{font-size:1.05rem}
+  .tierrow .card .l{font-size:.6rem;letter-spacing:.05em;margin-top:0}
+  .trackrow{display:flex;gap:5px;flex-wrap:wrap;margin-top:auto}
+  .chipcount{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 11px;
+             font-size:.76rem;color:var(--ink-soft)}
+  .chipcount:hover{border-color:var(--brass);background:var(--brass-soft)}
+  .chipcount b{font-family:var(--font-mono);color:var(--ink)}
+
   /* ---------- Summary strip ---------- */
   .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:16px 22px 4px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;cursor:pointer;text-align:left;border-top:3px solid var(--line)}
@@ -204,25 +246,69 @@
 <header class="topbar">
   <div class="brand">
     <h1>Lead Qualifier <span class="amp">&middot;</span> Command Center</h1>
-    <div class="sub">Financial Planners of America &mdash; build &middot; score &middot; verify &middot; call &middot; set</div>
+    <div class="sub">Financial Planners of America &mdash; source &middot; enrich &middot; qualify &middot; track</div>
   </div>
   <div class="topbtns">
-    <button class="tbtn" id="btnRecipe">Build list</button>
-    <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
-    <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" id="btnCsv" data-t="Import a CSV export" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
-    <button class="tbtn" id="btnOpps" style="display:none" title="Employers with a dated mass separation, priced by the size of their 401(k) plan">Money in motion</button>
-    <button class="tbtn" id="btnRetryBlocked" style="display:none;border-color:var(--brass);color:#7a5c15">Retry blocked (0)</button>
-    <button class="tbtn" id="btnPasteJson" title="Paste a JSON array of leads — a batch produced in a chat drops straight in">Paste JSON batch</button>
-    <button class="tbtn" id="btnTemplate" title="See the columns the app reads, or download a blank CSV to fill in">CSV template</button>
-    <button class="tbtn" id="btnExport">Export call list (CSV)</button>
-    <button class="tbtn" id="btnBackup">Backup</button>
-    <label class="filelabel"><input type="file" id="jsonFile" accept=".json" hidden><button class="tbtn" onclick="document.getElementById('jsonFile').click()">Restore</button></label>
-    <button class="tbtn" id="btnQC" style="display:none">AI quality control</button><button class="tbtn" id="btnAssign" style="display:none">Auto-assign</button><button class="tbtn" id="btnCoverage">Coverage</button><button class="tbtn" id="btnSettings">ICP settings</button>
+    <button class="tbtn" id="btnExport">Export call list</button>
+    <div class="menuwrap">
+      <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
+      <div class="menu" id="moreMenu" hidden>
+        <button id="btnCoverage">Data coverage</button>
+        <button id="btnSettings">ICP settings</button>
+        <button id="btnTemplate">CSV template &amp; research prompt</button>
+        <button id="btnRecipe">Search recipe</button>
+        <button id="btnDrive" style="display:none">Pick a different sheet&hellip;</button>
+        <button id="btnQC" style="display:none">AI quality control</button>
+        <button id="btnAssign" style="display:none">Auto-assign to advisors</button>
+        <button id="btnBackup">Back up list</button>
+        <button onclick="document.getElementById('jsonFile').click()">Restore a backup</button>
+      </div>
+    </div>
+    <input type="file" id="jsonFile" accept=".json" hidden>
   </div>
 </header>
 <div id="authbar" style="display:none;padding:7px 22px;background:#243448;color:#cfd9e4;font-size:.8rem"></div>
 
-<section class="summary" id="summary"></section>
+<!-- The four things the job consists of, in the order they happen. Each stage
+     shows how many leads are waiting in it and offers only the actions that
+     move them on. -->
+<section class="pipeline" id="pipeline">
+  <div class="stage" id="stSource">
+    <div class="sthead"><span class="stnum">1</span><h2>Source</h2><span class="stcount" id="cSource">&mdash;</span></div>
+    <p class="stsub" id="sSource">Where new prospects come from.</p>
+    <div class="stacts">
+      <button class="pbtn primary" id="btnSync">Check my sheet</button>
+      <button class="pbtn" id="btnOpps" style="display:none" title="Employers with a dated mass layoff, ranked by the size of the retirement plan they are leaving">Find employers</button>
+      <button class="pbtn" id="btnBuildOpen">Search ZoomInfo</button>
+      <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="pbtn" id="btnCsv" data-t="Import a spreadsheet" onclick="document.getElementById('csvFile').click()">Import a file</button></label>
+      <button class="pbtn" id="btnPaste">Paste a list</button>
+    </div>
+    <p class="srcnote" id="srcNote"></p>
+  </div>
+
+  <div class="stage" id="stEnrich">
+    <div class="sthead"><span class="stnum">2</span><h2>Enrich</h2><span class="stcount" id="cEnrich">&mdash;</span></div>
+    <p class="stsub" id="sEnrich">Fill in what is missing before anyone calls.</p>
+    <div class="stacts">
+      <button class="pbtn primary" id="btnEnrichAll">Enrich these</button>
+      <button class="pbtn" id="btnRetryBlocked" style="display:none">Retry blocked (0)</button>
+    </div>
+    <p class="srcnote" id="enrNote"></p>
+  </div>
+
+  <div class="stage" id="stQualify">
+    <div class="sthead"><span class="stnum">3</span><h2>Qualify</h2><span class="stcount" id="cQualify">&mdash;</span></div>
+    <p class="stsub" id="sQualify">Scored and tiered against your ICP.</p>
+    <div class="tierrow" id="tierRow"></div>
+  </div>
+
+  <div class="stage" id="stTrack">
+    <div class="sthead"><span class="stnum">4</span><h2>Track</h2><span class="stcount" id="cTrack">&mdash;</span></div>
+    <p class="stsub" id="sTrack">Worked, and what came of it.</p>
+    <div class="trackrow" id="trackRow"></div>
+  </div>
+</section>
+
 <section class="stats" id="stats"></section>
 
 <details class="buildpanel" open>
@@ -528,25 +614,6 @@
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mPaste')">Cancel</button>
     <button class="mbtn save" id="pasteGo">Review &amp; import</button>
-  </div>
-</div></div>
-
-<!-- Paste a JSON batch -->
-<div class="overlay" id="mJson"><div class="modal" style="max-width:680px">
-  <h2>Paste JSON batch</h2>
-  <p class="hint">A JSON array of lead objects &mdash; the shape a chat hands back when it has already done the research. Keys are matched the same way CSV headers are, so <code>firstName</code>, <code>first_name</code> and <code>"First Name"</code> all land in the same place. A <code>personId</code> or <code>contactId</code> is what makes a lead enrichable later, so keep it if you have it.</p>
-  <p class="hint">Set the campaign below &mdash; it decides which rules score the batch, and it is stamped on each lead so it survives a later switch.</p>
-  <label style="display:flex;gap:14px;align-items:center;font-size:.82rem;margin-bottom:6px">
-    <span style="font-weight:600">Score as</span>
-    <label class="toggle"><input type="radio" name="jcamp" value="rollover" id="jcampR" checked> Rollover</label>
-    <label class="toggle"><input type="radio" name="jcamp" value="scs" id="jcampS"> SCS</label>
-    <label class="toggle"><input type="checkbox" id="jcampBlocked"> Mark as credit-blocked (parks them in Retry blocked)</label>
-  </label>
-  <textarea id="jsonText" rows="11" style="width:100%;font-family:var(--font-mono);font-size:.75rem" placeholder='[{"firstName":"Ray","lastName":"Okonjo","title":"Senior Manager","employer":"IBM","jobStartDate":"1998-06-01","email":"r@example.com","mobilePhone":"(207) 555-0117","personId":"123456"}]'></textarea>
-  <p class="hint" id="jsonMsg" style="margin:6px 0 0"></p>
-  <div class="mfoot">
-    <button class="mbtn" onclick="closeModal('mJson')">Cancel</button>
-    <button class="mbtn save" id="jsonGo">Import batch</button>
   </div>
 </div></div>
 
@@ -1240,25 +1307,120 @@ function splitName(full){
   while(li>0&&SUFFIXES.has(parts[li].toLowerCase().replace(/[^a-z.]/g,'')))li--;
   return [parts.slice(0,li).join(' '),parts.slice(li).join(' ')];
 }
-document.getElementById('btnDoImport').addEventListener('click',()=>{
-  const map=currentMap();
-  const batch=document.getElementById('impBatch').value.trim()||'Import';
-  const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
-  let added=0,dup=0;
-  pending.data.forEach(row=>{
-    const L={id:'L'+Date.now()+Math.random().toString(36).slice(2,7),batch,status:'New',notes:'',jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now()};
-    FIELDS.forEach(([key])=>{const i=map[key];L[key]=(i>-1&&row[i]!==undefined)?(''+row[i]).trim():'';});
-    if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
-    delete L.fullName;                       // a mapping input, not a lead field
-    L.enriched=!!(L.email||L.mobilePhone);
-    const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
-    if((L.contactId||L.email)&&seen.has(dk)){dup++;return;}
-    seen.add(dk); scoreLead(L); state.leads.push(L); added++;
+/* Every identity a row might arrive with. A ZoomInfo export has a contact ID;
+   a research tool's sheet usually has only a profile URL and a name. Matching
+   on one of them alone re-imports the same person every sync, which is how a
+   sheet the tool appends to becomes a list with the same fifty people in it
+   four times. */
+function dedupeKeys(L){
+  const k=[];
+  if(L.contactId)k.push('id:'+L.contactId);
+  if(L.email)k.push('em:'+L.email.toLowerCase().trim());
+  if(L.linkedinUrl)k.push('li:'+(''+L.linkedinUrl).toLowerCase().replace(/[?#].*$/,'').replace(/\/+$/,''));
+  const nm=((L.firstName||'')+' '+(L.lastName||'')).trim().toLowerCase();
+  if(nm&&L.employer)k.push('ne:'+nm+'@'+(''+L.employer).toLowerCase().trim());
+  return k;
+}
+function seenIndex(){
+  const s=new Set();
+  state.leads.forEach(L=>dedupeKeys(L).forEach(k=>s.add(k)));
+  return s;
+}
+/* One row to one lead. Shared by the mapper and by the automatic Drive sync so
+   the two paths cannot score the same file differently. */
+function leadFromRow(row,map,batch){
+  const L={id:'L'+Date.now()+Math.random().toString(36).slice(2,7),batch,status:'New',notes:'',
+           jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now(),
+           campaign:(state.settings.campaign||'rollover')};
+  FIELDS.forEach(([key])=>{const i=map[key];L[key]=(i>-1&&row[i]!==undefined)?(''+row[i]).trim():'';});
+  if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
+  delete L.fullName;                       // a mapping input, not a lead field
+  L.enriched=!!(L.email||L.mobilePhone);
+  return L;
+}
+function importRows(rows,map,batch){
+  const seen=seenIndex();
+  let added=0,dup=0,blank=0;
+  rows.forEach(row=>{
+    const L=leadFromRow(row,map,batch);
+    if(!L.firstName&&!L.lastName){blank++;return;}
+    const keys=dedupeKeys(L);
+    if(keys.some(k=>seen.has(k))){dup++;return;}
+    keys.forEach(k=>seen.add(k));
+    scoreLead(L); state.leads.push(L); added++;
   });
+  return {added,dup,blank};
+}
+document.getElementById('btnDoImport').addEventListener('click',()=>{
+  const r=importRows(pending.data,currentMap(),
+                     document.getElementById('impBatch').value.trim()||'Import');
   save(); pending=null; closeModal('mImport'); render();
-  toast(`Imported ${added} leads${dup?` — skipped ${dup} duplicates`:''}.`);
+  toast(`Imported ${r.added} leads${r.dup?` — skipped ${r.dup} already on your list`:''}.`);
   coverageWarn();
 });
+
+/* =============== automatic sourcing from Drive =============== */
+/* The research tool appends rows to one named sheet on its own schedule. The
+   advisor should never have to know that — no picking a file, no column
+   dialog, no import button. The app checks the sheet, maps it the same way it
+   maps any CSV, and adds whoever is new.
+   Nothing is ever overwritten and nothing is deleted: a row already on the list
+   is skipped, so a sheet that grows is the only thing that changes anything. */
+const SOURCE_SHEET='Wealth Management Lead Prospecting';
+let sourcing=false;
+
+function sourceLine(msg,kind){
+  const el=document.getElementById('srcNote');if(!el)return;
+  el.textContent=msg||'';
+  el.className='srcnote'+(kind?' '+kind:'');
+}
+async function syncFromSheet(manual){
+  if(sourcing)return;
+  if(!(window.ME&&ME.signed_in&&ME.features&&ME.features.drive)){
+    if(manual)sourceLine('Google Drive is not connected — sign in with Google to read the sheet.','warn');
+    return;
+  }
+  sourcing=true;
+  const btn=document.getElementById('btnSync');if(btn)btn.disabled=true;
+  sourceLine('Checking '+SOURCE_SHEET+'…');
+  try{
+    const found=await api('/api/drive/find?name='+encodeURIComponent(SOURCE_SHEET),null,'GET');
+    const file=(found.files||[])[0];
+    if(!file){
+      sourceLine('No sheet named “'+SOURCE_SHEET+'” in your Drive yet. Point your research tool at that name and it will appear here.','warn');
+      return;
+    }
+    const d=await api('/api/drive/rows?id='+encodeURIComponent(file.id),null,'GET');
+    const rows=(d.rows||[]).filter(r=>r.some(c=>(''+(c??'')).trim()));
+    if(rows.length<2){sourceLine(file.name+' has a header but no rows yet.','warn');return;}
+    const headers=rows[0].map(h=>(''+h).trim());
+    const map=guessColumns(headers);
+    const r=importRows(rows.slice(1),map,'Sheet '+new Date().toLocaleDateString());
+    state.settings.lastSync=Date.now();
+    save();render();
+    // What was ignored matters more here than in the manual importer, because
+    // nobody saw the mapping screen. Say it in one line rather than silently.
+    const used=new Set(Object.values(map).filter(i=>i>-1));
+    const skippedCols=headers.filter((h,i)=>!used.has(i)&&looksDerived(h));
+    const gaps=[];
+    if(!(map.mobilePhone>-1))gaps.push('no mobile column');
+    if(!(map.email>-1))gaps.push('no email column');
+    sourceLine(
+      (r.added?`Added ${r.added} new lead${r.added===1?'':'s'} from ${file.name}.`
+             :`${file.name} is up to date — nothing new.`)
+      +(r.dup?` ${r.dup} already on your list.`:'')
+      +(gaps.length?` The sheet has ${gaps.join(' and ')}, so these leads cannot be called until they are enriched.`:'')
+      +(skippedCols.length?` Ignored ${skippedCols.length} estimated column${skippedCols.length===1?'':'s'}.`:''),
+      r.added?'ok':'');
+    if(r.added)coverageWarn();
+  }catch(e){
+    sourceLine('Could not read the sheet: '+e.message,'warn');
+  }finally{
+    sourcing=false;
+    const b=document.getElementById('btnSync');if(b)b.disabled=false;
+    renderPipeline();
+  }
+}
 
 /* =============== ZoomInfo list builder =============== */
 function pick(c,...keys){
@@ -1644,19 +1806,78 @@ function filtered(){
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
     :s==='state'?(a.state||'').localeCompare(b.state||'')
     :s==='updated'?b.updatedAt-a.updatedAt
-    :(b.score-a.score)||callFirst(b)-callFirst(a));
+    // Excluded leads sort last whatever they score. A 75-point lead with no
+    // mobile is genuinely valuable — that is why the bucket exists — but it is
+    // not a call, and putting it at the top of a call list wastes the first
+    // thing the advisor looks at every morning.
+    :((a.tier==='X')-(b.tier==='X'))||(b.score-a.score)||callFirst(b)-callFirst(a));
   return out;
 }
-function render(){
-  const counts={A:0,B:0,C:0,X:0};state.leads.forEach(L=>counts[L.tier]=(counts[L.tier]||0)+1);
-  const set=state.leads.filter(L=>L.status==='Set').length;
-  document.getElementById('summary').innerHTML=[
-    ['','tAll','All leads',state.leads.length],['A','tA','Tier A — call first',counts.A],
-    ['B','tB','Tier B — nurture',counts.B],['C','tC','Tier C — low signal',counts.C],
-    ['X','tX','Excluded \u2014 no mobile',counts.X]
-  ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('')
-  +`<div class="card" style="cursor:default;border-top-color:var(--set)"><div class="n" style="color:var(--set)">${set}</div><div class="l">Meetings set</div></div>`;
+/* A lead is "waiting to be enriched" when the app can still do something about
+   it: it has a ZoomInfo id and is missing the number you would call. Anything
+   else in the gap is a job for a person, not a button. */
+function needsEnrich(L){
+  return !L.retryBlocked&&!!L.contactId&&(!L.mobilePhone||!L.email);
+}
+function renderPipeline(){
+  const leads=state.leads;
+  const counts={A:0,B:0,C:0,X:0};leads.forEach(L=>counts[L.tier]=(counts[L.tier]||0)+1);
+  const set=leads.filter(L=>L.status==='Set').length;
+  const worked=leads.filter(L=>L.status&&L.status!=='New').length;
+  const enrichable=leads.filter(needsEnrich).length;
+  const blocked=blockedLeads().length;
+  const $=id=>document.getElementById(id);
 
+  // 1 — Source
+  $('cSource').textContent=leads.length;
+  const last=state.settings.lastSync;
+  $('sSource').textContent=leads.length
+    ? `${leads.length} prospect${leads.length===1?'':'s'} on your list`
+       +(last?` · sheet last checked ${new Date(last).toLocaleString()}`:'')
+    : 'Nothing yet. Check your sheet, or search ZoomInfo.';
+
+  // 2 — Enrich
+  $('cEnrich').textContent=enrichable;
+  const gapNoId=leads.filter(L=>!L.contactId&&(!L.mobilePhone||!L.email)).length;
+  $('sEnrich').textContent=enrichable
+    ? `${enrichable} lead${enrichable===1?'':'s'} missing an email or a mobile, and ZoomInfo can fill them`
+    : blocked ? `${blocked} lead${blocked===1?'':'s'} waiting on your credit limit — nothing else to fill.`
+    : gapNoId ? `${gapNoId} lead${gapNoId===1?' is':'s are'} missing contact details, but came from a file with no ZoomInfo id — try 🏠 or 📞? on the row.`
+    : (leads.length?'Every lead has an email and a mobile.':'Nothing to enrich yet.');
+  const ea=$('btnEnrichAll');
+  ea.disabled=!enrichable;
+  ea.textContent=enrichable?`Enrich ${enrichable}`:'Enrich these';
+  $('enrNote').textContent=blocked?`${blocked} parked — your ZoomInfo credit limit was spent. Their IDs are saved.`:'';
+
+  // 3 — Qualify
+  const sellableNow=leads.filter(L=>sellable(L).k==='yes').length;
+  $('cQualify').textContent=counts.A+counts.B;
+  $('sQualify').textContent=leads.length
+    ? `${counts.A+counts.B} worth working · ${sellableNow} already past 59½`
+    : 'Leads are scored the moment they arrive.';
+  $('tierRow').innerHTML=[
+    ['','tAll','All',leads.length],['A','tA','Tier A · call first',counts.A],
+    ['B','tB','Tier B · nurture',counts.B],['C','tC','Tier C · low signal',counts.C],
+    ['X','tX','Excluded · no mobile',counts.X]
+  ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('');
+
+  // 4 — Track
+  $('cTrack').textContent=set;
+  $('sTrack').textContent=worked
+    ? `${worked} lead${worked===1?'':'s'} worked · ${set} meeting${set===1?'':'s'} set`
+    : 'Nobody worked yet.';
+  const byStatus={};leads.forEach(L=>{if(L.status&&L.status!=='New')byStatus[L.status]=(byStatus[L.status]||0)+1;});
+  const order=['Called','Call Back','Set','Not Interested','Has Advisor'];
+  $('trackRow').innerHTML=order.filter(k=>byStatus[k]).map(k=>
+    `<button class="chipcount" onclick="setStatusFilter('${k}')" title="Show only ${k}">${esc(k)} <b>${byStatus[k]}</b></button>`).join('')
+    ||`<span class="hint">Set a status on a lead and it shows up here.</span>`;
+}
+window.setStatusFilter=v=>{
+  const el=document.getElementById('fStatus');
+  el.value=(el.value===v)?'':v;render();
+};
+function render(){
+  renderPipeline();
   const all=filtered();
   // Only draw the top of the list. Every edit re-renders, and at the 5,000-row
   // import cap that cost well over a second per status change. You work the
@@ -1673,7 +1894,7 @@ function render(){
       : 'Your list is tied to your account, so nothing is shown until you sign in.<br>Use the sign-in link above.';
   }
   // Importing while signed out would build a list with no owner.
-  ['btnDrive','btnCsv','btnPaste','btnPasteJson','btnBuild','btnQC','btnAssign'].forEach(id=>{
+  ['btnCsv','btnPaste','btnBuild','btnQC','btnAssign','btnSync','btnBuildOpen'].forEach(id=>{
     const el=document.getElementById(id);
     if(el){el.disabled=!inAcct;el.title=inAcct?(el.dataset.t||el.title):'Sign in first — lists are tied to your account';
            if(inAcct&&el.dataset.t)el.title=el.dataset.t;}
@@ -2237,6 +2458,30 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
 ['q','fStatus','fSort','fEmailFirst','fSellable'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
+/* ---- the new controls ---- */
+document.getElementById('btnSync').addEventListener('click',()=>syncFromSheet(true));
+document.getElementById('btnBuildOpen').addEventListener('click',()=>{
+  const d=document.querySelector('details.buildpanel');
+  d.setAttribute('open','');d.scrollIntoView({behavior:'smooth',block:'nearest'});
+});
+document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
+  const targets=state.leads.filter(needsEnrich);
+  if(!targets.length){toast('Nothing waiting to be enriched.');return;}
+  if(!await appConfirm(`Enrich ${targets.length} lead${targets.length>1?'s':''}? Uses up to ${targets.length} ZoomInfo credit${targets.length>1?'s':''}. Re-enriching the same contact within a year is free.`,'Enrich leads'))return;
+  enrichLeads(targets);
+});
+/* The overflow menu. Everything that is not one of the four stages lives here,
+   because a row of eleven equal-weight buttons is a menu with extra steps. */
+(function(){
+  const b=document.getElementById('btnMore'), m=document.getElementById('moreMenu');
+  const close=()=>{m.hidden=true;b.setAttribute('aria-expanded','false');};
+  b.addEventListener('click',e=>{e.stopPropagation();
+    m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));});
+  m.addEventListener('click',()=>setTimeout(close,0));
+  document.addEventListener('click',close);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+})();
+
 if(!HAS_WS){
   document.getElementById('btnBuild').style.display='none';
   document.getElementById('btnEnrich').style.display='none';
@@ -2254,72 +2499,6 @@ document.getElementById('pasteGo').addEventListener('click',()=>{
   if(rows.length<2){toast('Need a header row plus at least one lead.');return;}
   pending={headers:rows[0].map(h=>h.trim()),data:rows.slice(1)};
   closeModal('mPaste');openMapper('Pasted list');
-});
-/* ---- JSON batch ----
-   The CSV path already handles a file. This handles the other thing that keeps
-   happening: a batch of leads worked out in a conversation, arriving as JSON
-   with whatever key names that conversation happened to use. Rather than a
-   second mapping UI, keys are normalised through the same alias table the CSV
-   headers use, so the two paths cannot drift apart. */
-const JSON_EXTRA_KEYS={personid:'contactId',zoominfoid:'contactId',company:'employer',
-  companyname:'employer',jobtitle:'title',phone:'directPhone',cell:'mobilePhone',
-  positionstartdate:'jobStartDate',startdate:'jobStartDate',tenure:'yearsAtEmployer',
-  tenureyears:'yearsAtEmployer',yearsattenure:'yearsAtEmployer',accuracy:'accuracy',
-  notes:'notes',linkedin:'linkedinUrl'};
-function jsonKeyToField(k){
-  const n=normHeader(k);
-  for(const [key,,syn] of FIELDS){
-    if(normHeader(key)===n)return key;
-    if(syn.some(a=>normHeader(a)===n))return key;
-  }
-  return JSON_EXTRA_KEYS[n.replace(/ /g,'')]||null;
-}
-function leadFromJson(o,batch,camp,blocked){
-  const L={id:'r'+Math.random().toString(36).slice(2,10),batch,status:'New',activity:[],
-           campaign:camp,updatedAt:Date.now()};
-  Object.entries(o||{}).forEach(([k,v])=>{
-    if(v===null||v===undefined||v==='')return;
-    const f=jsonKeyToField(k);
-    if(f)L[f]=typeof v==='object'?JSON.stringify(v):(''+v).trim();
-  });
-  if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
-  delete L.fullName;
-  // A pasted lead is only "enriched" if it actually arrived with contact
-  // details; otherwise it must stay eligible for the enrich button.
-  L.enriched=!!(L.email||L.mobilePhone);
-  if(blocked&&L.contactId){L.retryBlocked=true;L.retryReason='Marked credit-blocked on import';L.enriched=false;}
-  return L;
-}
-document.getElementById('btnPasteJson').addEventListener('click',()=>{
-  document.getElementById('jsonText').value='';
-  document.getElementById('jsonMsg').textContent='';
-  document.getElementById('jcampS').checked=(state.settings.campaign==='scs');
-  document.getElementById('jcampR').checked=(state.settings.campaign!=='scs');
-  openModal('mJson');
-});
-document.getElementById('jsonGo').addEventListener('click',()=>{
-  const msg=document.getElementById('jsonMsg');
-  let data;
-  try{data=JSON.parse(document.getElementById('jsonText').value);}
-  catch(e){msg.innerHTML='<span class="mapwarn">That is not valid JSON: '+esc(e.message)+'</span>';return;}
-  // Tolerate the common wrappers a chat puts around an array.
-  if(data&&!Array.isArray(data))data=data.leads||data.contacts||data.results||data.data||data.items;
-  if(!Array.isArray(data)||!data.length){
-    msg.innerHTML='<span class="mapwarn">Expected an array of lead objects (or an object with a leads/contacts/results key).</span>';return;}
-  const camp=document.getElementById('jcampS').checked?'scs':'rollover';
-  const blocked=document.getElementById('jcampBlocked').checked;
-  const batch=(camp==='scs'?'SCS':'Rollover')+' JSON '+new Date().toLocaleDateString();
-  const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
-  let added=0,dup=0,skipped=0;
-  data.forEach(o=>{
-    const L=leadFromJson(o,batch,camp,blocked);
-    if(!L.firstName&&!L.lastName){skipped++;return;}
-    const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
-    if(L.contactId&&seen.has(dk)){dup++;return;}
-    seen.add(dk);scoreLead(L);state.leads.push(L);added++;
-  });
-  save();render();renderBlocked();closeModal('mJson');
-  toast(`Imported ${added} lead${added===1?'':'s'}${dup?`, skipped ${dup} duplicate${dup===1?'':'s'}`:''}${skipped?`, ${skipped} had no name`:''}.`);
 });
 let noteFor=null;
 document.getElementById('noteSave').addEventListener('click',()=>{
@@ -2368,6 +2547,10 @@ async function loadMe(){
   }
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
   if(ME.features&&ME.features.drive)document.getElementById('btnDrive').style.display='';
+  // The sheet is the primary source, so it is checked on arrival rather than
+  // waiting for someone to press anything.
+  if(ME.signed_in&&ME.features&&ME.features.drive)syncFromSheet(false);
+  else if(ME.signed_in)sourceLine('Sign in with Google to have the app read your prospecting sheet automatically.','');
   if(advisorList().length)document.getElementById('btnAssign').style.display='';
   render();
 }
