@@ -80,6 +80,11 @@
   .sig.neg{background:var(--tierX);border-color:var(--tierX);color:#fff}
 
   .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:var(--tierX-bg);color:var(--tierX);white-space:nowrap}
+  .badge.camp-scs{background:#e8eef7;color:#33507a}
+  .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
+  .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
+  .sellbadge.soon{background:var(--brass-soft);color:#7a5c15;border-color:#e0d2b0}
+  .sellbadge.unknown{background:transparent;color:var(--ink-faint);border-color:var(--line)}
 
   select.status{padding:4px 6px;border-radius:4px;border:1px solid var(--line);font-size:.78rem;font-weight:600;background:#fff}
   select.status.sNew{color:var(--ink-soft)}
@@ -206,6 +211,8 @@
     <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
     <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" id="btnCsv" data-t="Import a CSV export" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
     <button class="tbtn" id="btnOpps" style="display:none" title="Employers with a dated mass separation, priced by the size of their 401(k) plan">Money in motion</button>
+    <button class="tbtn" id="btnRetryBlocked" style="display:none;border-color:var(--brass);color:#7a5c15">Retry blocked (0)</button>
+    <button class="tbtn" id="btnPasteJson" title="Paste a JSON array of leads — a batch produced in a chat drops straight in">Paste JSON batch</button>
     <button class="tbtn" id="btnTemplate" title="See the columns the app reads, or download a blank CSV to fill in">CSV template</button>
     <button class="tbtn" id="btnExport">Export call list (CSV)</button>
     <button class="tbtn" id="btnBackup">Backup</button>
@@ -221,7 +228,27 @@
 <details class="buildpanel" open>
   <summary>Build a list from ZoomInfo</summary>
   <div class="bp-inner" id="envWarn" style="display:none;padding-bottom:0"><p class="hint" style="color:var(--ink-soft);font-size:.82rem;border:1px solid var(--brass);background:var(--brass-soft);border-radius:4px;padding:8px 10px;margin:0"><strong>Standalone mode.</strong> Live pull &amp; enrich run inside Claude, or by messaging Claude with the filters below &mdash; you'll get back a CSV to import or paste here. Everything else (scoring, calling, email, invites, export) works right now.</p></div>
-  <div class="bp-inner">
+  <div class="bp-inner" style="padding-bottom:0">
+    <label style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:.82rem">
+      <span style="font-weight:600">Campaign</span>
+      <label class="toggle"><input type="radio" name="camp" value="rollover" id="campRollover" checked> Rollover &mdash; they just left an employer</label>
+      <label class="toggle"><input type="radio" name="camp" value="scs" id="campScs"> SCS &mdash; long tenure, 59&frac12;, in-service</label>
+    </label>
+  </div>
+  <div class="bp-inner" id="scsInner" style="display:none;padding-bottom:0">
+    <div class="bp-grid">
+      <label>Employer tickers <input id="sTickers" value="IBM,RTX,XOM,ED,BA"></label>
+      <label>Min years at employer <input type="number" id="sTenure" value="18" min="1" max="45"></label>
+      <label>Management level <input id="sMgmt" value="Director,Manager,Non-Manager"></label>
+      <label>Min accuracy score <input type="number" id="sAcc" value="90" min="70" max="99"></label>
+      <label>Pull size <select id="sN"><option>25</option><option selected>50</option><option>100</option></select></label>
+      <label>Page <input type="number" id="sPage" value="1" min="1"></label>
+    </div>
+    <p class="hint" style="margin:8px 0 0">Tickers, not company names &mdash; ZoomInfo resolves a ticker to one company, where a name match spreads across subsidiaries. <b>One quirk:</b> <code>BA</code> is Boeing on the NYSE but ZoomInfo has resolved it to <b>BAE Systems</b>; check the employer column on the first page and swap to the company name if it came back wrong.</p>
+    <p class="hint" style="margin:6px 0 0">Min tenure sets <code>positionStartDateMax</code> &mdash; it asks for people who started <i>before</i> that date, which is the opposite of the Rollover search. Nobody is filtered on age here: ZoomInfo has no age field, so age is worked out after the pull and shown with its basis.</p>
+    <p class="hint" style="margin:6px 0 0;color:var(--ink-soft);border-left:2px solid var(--brass);padding-left:8px">Equitable pre-approval is required before any SCS outreach goes out, and SCS&#43; material must carry the prospectus language. The app does not check either &mdash; that is on you.</p>
+  </div>
+  <div class="bp-inner" id="rolloverInner">
     <div class="bp-grid">
       <label>Person state(s) <input id="bStates" value="New York"></label>
       <label>Area keyword <input id="bArea" value="Long Island" placeholder="optional"></label>
@@ -257,6 +284,7 @@
     <option value="updated">Sort: Recently worked</option>
   </select>
   <label class="toggle"><input type="checkbox" id="fEmailFirst"> Email-first (DNC) only</label>
+  <label class="toggle"><input type="checkbox" id="fSellable"> 59&frac12;+ only</label>
 </section>
 
 <section class="tablewrap">
@@ -503,6 +531,25 @@
   </div>
 </div></div>
 
+<!-- Paste a JSON batch -->
+<div class="overlay" id="mJson"><div class="modal" style="max-width:680px">
+  <h2>Paste JSON batch</h2>
+  <p class="hint">A JSON array of lead objects &mdash; the shape a chat hands back when it has already done the research. Keys are matched the same way CSV headers are, so <code>firstName</code>, <code>first_name</code> and <code>"First Name"</code> all land in the same place. A <code>personId</code> or <code>contactId</code> is what makes a lead enrichable later, so keep it if you have it.</p>
+  <p class="hint">Set the campaign below &mdash; it decides which rules score the batch, and it is stamped on each lead so it survives a later switch.</p>
+  <label style="display:flex;gap:14px;align-items:center;font-size:.82rem;margin-bottom:6px">
+    <span style="font-weight:600">Score as</span>
+    <label class="toggle"><input type="radio" name="jcamp" value="rollover" id="jcampR" checked> Rollover</label>
+    <label class="toggle"><input type="radio" name="jcamp" value="scs" id="jcampS"> SCS</label>
+    <label class="toggle"><input type="checkbox" id="jcampBlocked"> Mark as credit-blocked (parks them in Retry blocked)</label>
+  </label>
+  <textarea id="jsonText" rows="11" style="width:100%;font-family:var(--font-mono);font-size:.75rem" placeholder='[{"firstName":"Ray","lastName":"Okonjo","title":"Senior Manager","employer":"IBM","jobStartDate":"1998-06-01","email":"r@example.com","mobilePhone":"(207) 555-0117","personId":"123456"}]'></textarea>
+  <p class="hint" id="jsonMsg" style="margin:6px 0 0"></p>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mJson')">Cancel</button>
+    <button class="mbtn save" id="jsonGo">Import batch</button>
+  </div>
+</div></div>
+
 <!-- Log a note -->
 <div class="overlay" id="mNote"><div class="modal" style="max-width:440px">
   <h2>Log a note</h2>
@@ -529,6 +576,22 @@ const DEFAULTS={
   // role clears it comfortably.
   tierA:60, tierB:40,
   modelVersion:3,
+  /* ---- campaigns ----
+     Rollover works a job change: the money moves because the person left.
+     SCS works the opposite lead — someone who never left, whose balance grew
+     for twenty years at one employer, and who has just turned 59½ and can take
+     an in-service distribution without leaving at all. The two campaigns want
+     opposite things from the same tenure number, which is why the campaign has
+     to reach the scorer rather than living in a saved-search description. */
+  campaign:'rollover',
+  scsTickers:'IBM,RTX,XOM,ED,BA',
+  scsMinTenure:18,          // years at the employer before the balance is worth a call
+  scsBonusTenure:30,        // and the point where it is worth calling first
+  scsAcc:90,
+  scsMgmt:'Director,Manager,Non-Manager',
+  /* A tenure longer than this is a bad date, not a long career. Set at 50 after
+     a 46-year run at Boeing — a real one — was being flagged at 40. */
+  scsSuspectYears:50,
   source:'ZoomInfo', addrType:'Business',
   orgName:'', orgEmail:'', dur:30,
   callVia:'rcapp', emailVia:'mailto',
@@ -553,7 +616,7 @@ const DEFAULTS={
    changed default must never silently delete what someone typed. */
 const LEGACY_RECIPES=['STANDARD WEEKLY PULL — run in Claude with the ZoomInfo connector, then import the CSV here.\n\n1. Contact search with locationSearchType = Person (where they live, not company HQ)\n2. excludedRegions = whatever states you do not cover (leave blank for all)\n3. managementLevel: run C-Level first, then VP-Level as a separate search\n4. positionStartDateMin = last 12-18 months (the orphaned-401k signal)\n5. requiredFields = email, mobilePhone\n6. excludeJobTitle = Assistant, Associate, Junior, Coordinator\n7. pageSize = 100 — searching is free; enrichment costs credits. Request DNC flags on any enrichment.\n\nWiza: export contacts to CSV and import here — columns map automatically.'];
 const RENDER_CAP=250;   // rows drawn at once; filters reach the rest
-const SCORING_KEYS=['ageMin','gradBefore','tenMax','priorMin','titles','exTitles','wAge','wRecent','wTitle','wPrior','wContact','tierA','tierB'];
+const SCORING_KEYS=['ageMin','gradBefore','tenMax','priorMin','titles','exTitles','wAge','wRecent','wTitle','wPrior','wContact','tierA','tierB','campaign','scsMinTenure','scsBonusTenure','scsSuspectYears'];
 const HAS_WS=(()=>{try{return !!(window.storage&&typeof window.storage.get==='function');}catch(e){return false;}})();
 window.__inClaude=HAS_WS;
 let state={settings:{...DEFAULTS},leads:[]};
@@ -629,6 +692,7 @@ async function boot(){
   // fresh account would adopt them and push them to its own record.
   if(!(window.ME&&ME.signed_in)){
     state={settings:{...DEFAULTS},leads:[]};
+    syncCampaignUI();
     render();
     return;
   }
@@ -664,7 +728,25 @@ async function boot(){
       if(raw)adoptSaved(JSON.parse(raw));
     }catch(e){/* first run — nothing saved yet */}
   }
+  syncCampaignUI();
   rescoreAll();render();
+}
+/* The switch reflects the saved setting, not the other way round — otherwise
+   signing in on a second machine silently reverts the campaign to Rollover and
+   the next build runs the wrong search. */
+function syncCampaignUI(){
+  try{
+    const scs=(state.settings.campaign||'rollover')==='scs';
+    document.getElementById('campScs').checked=scs;
+    document.getElementById('campRollover').checked=!scs;
+    document.getElementById('scsInner').style.display=scs?'':'none';
+    document.getElementById('rolloverInner').style.display=scs?'none':'';
+    const set=(id,v)=>{const el=document.getElementById(id);if(el&&v!==undefined&&v!==null&&v!=='')el.value=v;};
+    set('sTickers',state.settings.scsTickers);
+    set('sTenure',state.settings.scsMinTenure);
+    set('sMgmt',state.settings.scsMgmt);
+    set('sAcc',state.settings.scsAcc);
+  }catch(e){/* pre-render */}
 }
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
 let _cfResolve=null;
@@ -694,9 +776,88 @@ function leadAge(L){
   if(L.edgar&&L.edgar.age>0)return L.edgar.age;
   return (L.hd&&L.hd.age)||null;
 }
+/* The best age available including a worked-out one. Kept separate from
+   leadAge() on purpose: leadAge() is what the score treats as a fact, and an
+   inference must never enter through that door. This is for the badge, the row
+   and the call sheet, all of which show the basis alongside it. */
+function leadAgeAny(L){
+  const conf=leadAge(L); if(conf)return conf;
+  const inf=inferredAge(L); return inf?inf.age:null;
+}
+/* Age from the start of working life. Someone who began work in 1979 is around
+   68 now, because people mostly start at about 22. That is an inference and it
+   is wrong for the career-changer and the late graduate, so it is never
+   presented as a fact: every row that uses it shows what it was derived from,
+   and the age signal it fires is marked unconfirmed. Without it the SCS list
+   has no age at all, and age is the whole eligibility question. */
+const ASSUMED_START_AGE=22;
+function inferredAge(L){
+  const yrs=careerYears(L);
+  if(!(yrs>0))return null;
+  const stated=parseFloat((''+(L.yearsExperience||'')).replace(/[^\d.]/g,''));
+  const gy=parseInt(L.gradYear,10), fy=parseInt(L.firstJobYear,10);
+  const basis = stated>0 ? `${stated} yrs experience + ${ASSUMED_START_AGE}`
+    : (fy>1900&&(!(gy>1900)||fy<=gy)) ? `first worked ${fy} + ${ASSUMED_START_AGE}`
+    : `graduated ${gy} + ${ASSUMED_START_AGE}`;
+  return {age:Math.round(yrs+ASSUMED_START_AGE), basis};
+}
 function ageSource(L){
   if(L.edgar&&L.edgar.age>0)return 'SEC proxy statement '+(L.edgar.asOf||'');
-  return 'public record';
+  if(L.hd&&L.hd.age)return 'public record';
+  const inf=inferredAge(L);
+  return inf?('inferred: '+inf.basis):'public record';
+}
+/* Whether the age behind a row is observed or worked out. The table shows it on
+   every lead, because an inferred 61 and a filed 61 are not the same fact and
+   the person making the call is entitled to know which they have. */
+function ageBasis(L){
+  if(L.edgar&&L.edgar.age>0)return {kind:'filed',label:'SEC filing'};
+  if(L.hd&&L.hd.age)return {kind:'record',label:'public record'};
+  if(L.ageVerified)return {kind:'checked',label:'checked by hand'};
+  const inf=inferredAge(L);
+  if(inf)return {kind:'inferred',label:inf.basis};
+  return {kind:'none',label:'unknown'};
+}
+/* Distance to the in-service distribution age. Everything the SCS campaign
+   sells depends on it, so it is on every row rather than buried in a signal. */
+/* Which campaign a lead belongs to. Stamped at import so a list built under
+   one campaign keeps scoring the way it was built even after the switch moves,
+   and a mixed list scores each half on its own terms. */
+function leadCampaign(L){
+  const c=(L&&L.campaign||'').toLowerCase();
+  return c==='scs'?'scs':c==='rollover'?'rollover':((state.settings.campaign||'rollover')==='scs'?'scs':'rollover');
+}
+/* Years at the current employer. The stated column wins; otherwise the position
+   start date carries it, which is what ZoomInfo returns. */
+function tenureYears(L){
+  const stated=parseFloat((''+(L.yearsAtEmployer||'')).replace(/[^\d.]/g,''));
+  if(stated>0)return stated;
+  const mo=monthsSince(parseStart(L.jobStartDate));
+  return mo===null?null:mo/12;
+}
+/* A start date that implies a career longer than anyone has. ZoomInfo
+   occasionally returns the company's founding date, or a 1900 placeholder, and
+   an unchecked 120-year tenure sorts straight to the top of the call list.
+   The threshold is deliberately high: a 46-year run at one employer is
+   unusual, not impossible, and flagging it as bad data loses the best lead on
+   the list. */
+function suspectTenure(L){
+  const ty=tenureYears(L);
+  if(ty===null)return false;
+  return ty>+ (state.settings.scsSuspectYears||50);
+}
+const SELL_AGE=59.5;
+function sellable(L){
+  const b=ageBasis(L);
+  if(b.kind==='none')return {k:'unknown',label:'verify date',title:'No age and nothing to infer one from — enrich, or check by hand.'};
+  const age=leadAgeAny(L);
+  if(!age)return {k:'unknown',label:'verify date',title:'No age on file.'};
+  if(age>=SELL_AGE)
+    return {k:'yes',label:'59½ ✓',
+      title:`Age ${age} (${b.label}) — past ${SELL_AGE}, an in-service distribution is available.`};
+  const yrs=Math.max(1,Math.round(SELL_AGE-age));
+  return {k:'soon',label:`59½ in ~${yrs}y`,
+    title:`Age ${age} (${b.label}) — about ${yrs} year${yrs>1?'s':''} short of ${SELL_AGE}. Nurture.`};
 }
 /* Career length: use the stated figure, else derive it. Graduation year and
    first-job year both mark the start of working life, so either works; take
@@ -774,6 +935,7 @@ function scoreLead(L){
   else if(age){sig.push({k:'A',label:`Age ${age} — under ${s.ageMin} (${ageSource(L)})`,hit:false,pts:0});}
   else if(gy){sig.push({k:'A',label:`Graduated ${gy} — ${s.gradBefore} or later`,hit:false,pts:0});}
   else sig.push({k:'A',label:'Age unknown — enrich or check LinkedIn',hit:false,pts:0});
+  const camp=leadCampaign(L);
   // R — recent move AND still holding another current role. Both required:
   // a concurrent "Present" position is what separates a genuine second seat
   // (board, advisory, own business) from an ordinary job change.
@@ -782,7 +944,24 @@ function scoreLead(L){
   // A second role read out of the title is an inference; a mapped column or a
   // ticked box is not. Show the difference rather than presenting both as fact.
   const dual=(L.concurrentRole===undefined&&!L.concurrentRoles)?dualTitle(L.title):'';
-  if(mo!==null&&mo<+s.tenMax&&conc){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo and holds another current role${L.concurrentRoles?': '+L.concurrentRoles:(dual?': '+dual:'')}`,hit:true,conf:!dual,pts:+s.wRecent});}
+  if(camp==='scs'){
+    // V — the balance signal. Twenty years of contributions at one employer is
+    // the reason to call; the tenure number stands in for the account size,
+    // because nobody publishes the account size.
+    const ty=tenureYears(L);
+    const need=+s.scsMinTenure, bonus=+s.scsBonusTenure;
+    if(ty===null)sig.push({k:'V',label:'Tenure unknown — enrich for the position start date',hit:false,pts:0});
+    else if(suspectTenure(L)){
+      sig.push({k:'V',label:`Start date gives ${ty.toFixed(0)} yrs — implausible, check it`,hit:false,neg:true,pts:0});
+    }else if(ty>=bonus){
+      score+=+s.wPrior+ +s.wRecent;
+      sig.push({k:'V',label:`${ty.toFixed(0)} yrs at ${L.employer||'this employer'} — past ${bonus}, largest balances sit here`,hit:true,conf:true,pts:+s.wPrior+ +s.wRecent});
+    }else if(ty>=need){
+      score+=+s.wPrior;
+      sig.push({k:'V',label:`${ty.toFixed(0)} yrs at ${L.employer||'this employer'} — over ${need}`,hit:true,conf:true,pts:+s.wPrior});
+    }else sig.push({k:'V',label:`Only ${ty.toFixed(0)} yrs at this employer — under ${need}`,hit:false,pts:0});
+  }
+  else if(mo!==null&&mo<+s.tenMax&&conc){score+=+s.wRecent;sig.push({k:'R',label:`In role ${mo} mo and holds another current role${L.concurrentRoles?': '+L.concurrentRoles:(dual?': '+dual:'')}`,hit:true,conf:!dual,pts:+s.wRecent});}
   else if(mo!==null&&mo<+s.tenMax){sig.push({k:'R',label:`In role ${mo} mo, but no second current role`,hit:false,pts:0});}
   else if(mo!==null){sig.push({k:'R',label:`In role ${mo} mo — ${s.tenMax}+`,hit:false,pts:0});}
   else sig.push({k:'R',label:'Start date unknown',hit:false,pts:0});
@@ -795,7 +974,12 @@ function scoreLead(L){
   const tHit=senior(tt)||senior(ml);
   if(tHit){score+=+s.wTitle;sig.push({k:'T',label:'Decision-maker level: '+(L.title||L.mgmtLevel),hit:true,conf:true,pts:+s.wTitle});}
   else sig.push({k:'T',label:'Not C/VP/Director/Partner/Owner/President/Founder',hit:false,pts:0});
-  // E — 10+ years of senior-level experience at previous companies
+  // E — 10+ years of senior-level experience at previous companies. Under SCS
+  // this is the wrong question: the whole thesis is that they never left, so
+  // prior-company years are close to zero on exactly the best leads. V carries
+  // the weight instead, and the budget stays at 80 either way.
+  if(camp==='scs'){/* V above holds wPrior (+wRecent as the 30-year bonus) */}
+  else {
   const totYrs=careerYears(L);
   let hereYrs=parseFloat((''+(L.yearsAtEmployer||'')).replace(/[^\d.]/g,''));
   if(!(hereYrs>=0)&&mo!==null)hereYrs=mo/12;
@@ -804,6 +988,7 @@ function scoreLead(L){
   else if(priorYrs!==null&&priorYrs>=+s.priorMin){sig.push({k:'E',label:`${priorYrs.toFixed(0)} yrs prior experience, but not senior level`,hit:false,pts:0});}
   else if(priorYrs!==null){sig.push({k:'E',label:`Only ${priorYrs.toFixed(0)} yrs at previous companies`,hit:false,pts:0});}
   else sig.push({k:'E',label:'Career length unknown — needs Years of Experience column',hit:false,pts:0});
+  }
   // C — contact completeness
   if(L.email&&L.mobilePhone){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile on file',hit:true,conf:true,pts:+s.wContact});}
   else if(L.enriched===false&&truthy(L.hasEmail)&&truthy(L.hasMobile)){score+=+s.wContact;sig.push({k:'C',label:'Email + mobile confirmed by ZoomInfo — enrich to reveal',hit:true,conf:false,pts:+s.wContact});}
@@ -1197,9 +1382,54 @@ async function callClaude(prompt){
   if(HAS_WS)return callClaudeInPage(prompt);
   throw new Error(OUTSIDE_MSG);
 }
+/* ---- campaign switch ----
+   The two searches ask ZoomInfo for opposite things out of the same field:
+   Rollover wants positionStartDateMin (started recently), SCS wants
+   positionStartDateMax (started long ago). Keeping them as one form with a
+   flag would make that inversion easy to get backwards, so they are two forms
+   and one button. */
+function currentCampaign(){
+  return document.getElementById('campScs').checked?'scs':'rollover';
+}
+function applyCampaign(){
+  const scs=currentCampaign()==='scs';
+  document.getElementById('scsInner').style.display=scs?'':'none';
+  document.getElementById('rolloverInner').style.display=scs?'none':'';
+  state.settings.campaign=scs?'scs':'rollover';
+  save();
+}
+['campRollover','campScs'].forEach(id=>document.getElementById(id).addEventListener('change',applyCampaign));
+[['sTickers','scsTickers'],['sTenure','scsMinTenure'],['sMgmt','scsMgmt'],['sAcc','scsAcc']].forEach(([id,key])=>{
+  const el=document.getElementById(id);if(!el)return;
+  el.addEventListener('change',()=>{state.settings[key]=el.value.trim();save();
+    // Min tenure is a scoring input as well as a search input, so the list has
+    // to move when it does.
+    if(key==='scsMinTenure'){rescoreAll();render();}});
+});
+
+function scsPrompt(){
+  const g=id=>document.getElementById(id).value.trim();
+  const yrs=+g('sTenure')||18;
+  const d=new Date();d.setFullYear(d.getFullYear()-yrs);
+  const maxDate=d.toISOString().slice(0,10);
+  return {yrs,maxDate,prompt:`Call the ZoomInfo tool named search_contacts exactly ONCE with exactly these parameters:
+companyTicker: "${g('sTickers')}"
+managementLevel: "${g('sMgmt')}"
+positionStartDateMax: "${maxDate}"
+requiredFields: "email,mobilePhone"
+contactAccuracyScoreMin: "${g('sAcc')||'90'}"
+sort: "-contactAccuracyScore"
+pageSize: ${+g('sN')||50}
+page: ${+g('sPage')||1}
+userIntent: "Building a qualified prospect call list for a financial advisory team"
+positionStartDateMax is deliberate: this search wants people who started at the employer BEFORE that date, i.e. long tenure. Do not substitute positionStartDateMin. managementLevel must be passed verbatim as given above — it is an exact enum value. Do NOT call any enrich tool (enrichment spends credits; search is free). After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`};
+}
+
 document.getElementById('btnBuild').addEventListener('click',async()=>{
   const btn=document.getElementById('btnBuild'),st=document.getElementById('bStatus');
   const g=id=>document.getElementById(id).value.trim();
+  const camp=currentCampaign();
+  if(camp==='scs')return runScsBuild(btn,st);
   const win=+g('bWindow')||18;const d=new Date();d.setMonth(d.getMonth()-win);
   const minDate=d.toISOString().slice(0,10);
   const exReg=g('bExStates');
@@ -1240,6 +1470,38 @@ Note: managementLevel must be passed verbatim as given above — it is an exact 
   finally{btn.disabled=false;}
 });
 
+async function runScsBuild(btn,st){
+  const g=id=>document.getElementById(id).value.trim();
+  const {yrs,maxDate,prompt}=scsPrompt();
+  btn.disabled=true;st.classList.remove('err');
+  st.textContent=`Searching ZoomInfo for ${yrs}+ year tenure (started before ${maxDate})\u2026`;
+  try{
+    const payloads=await callClaude(prompt);
+    const contacts=[];payloads.forEach(pl=>harvest(pl,contacts,0));
+    if(!contacts.length)throw new Error('The search ran but returned no contacts — lower the min tenure or the accuracy score, or check the tickers resolved to the companies you meant.');
+    let total='';payloads.forEach(pl=>{try{if(pl&&pl.meta&&pl.meta.totalResults)total=pl.meta.totalResults.toLocaleString();}catch(e){}});
+    const batch='SCS '+new Date().toLocaleDateString()+' \u00b7 '+g('sTickers')+' p'+g('sPage');
+    const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
+    let added=0,dup=0;const employers={};
+    contacts.forEach(c=>{
+      const L=ziNormalize(c,batch,{mgmt:g('sMgmt'),state:''});
+      if(!L.firstName&&!L.lastName)return;
+      L.campaign='scs';
+      const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
+      if(L.contactId&&seen.has(dk)){dup++;return;}
+      seen.add(dk);scoreLead(L);state.leads.push(L);added++;
+      if(L.employer)employers[L.employer]=(employers[L.employer]||0)+1;
+    });
+    save();render();
+    // The ticker quirk is only visible in what came back, so say what came back.
+    const got=Object.entries(employers).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} (${v})`).join(', ');
+    st.textContent=`Added ${added} leads${dup?`, skipped ${dup} duplicates`:''}${total?` — ${total} total match`:''}. `
+      +(got?`Employers returned: ${got}. Check these are the companies you meant — a ticker can resolve to the wrong one. `:'')
+      +`Scores marked ~ until enriched.`;
+  }catch(e){st.classList.add('err');st.textContent='Problem: '+e.message;}
+  finally{btn.disabled=false;}
+}
+
 /* =============== enrichment (uses credits) =============== */
 function extractGradYear(edu){
   try{const m=JSON.stringify(edu).match(/\b(19[5-9]\d|20[0-1]\d)\b/g);
@@ -1264,7 +1526,7 @@ async function enrichLeads(list){
   const st=document.getElementById('bStatus'),btn=document.getElementById('btnEnrich');
   btn.disabled=true;st.classList.remove('err');
   const batches=[];for(let i=0;i<list.length;i+=10)batches.push(list.slice(i,i+10));
-  let done=0,failed=0,lastErr='';
+  let done=0,failed=0,blocked=0,lastErr='';
   try{
     for(let bi=0;bi<batches.length;bi++){
       st.textContent=`Enriching batch ${bi+1} of ${batches.length}\u2026`;
@@ -1306,19 +1568,31 @@ Every personId value must be passed as a string, exactly as given. Make exactly 
           if(li)L.linkedinUrl=''+li;
           const gy=extractGradYear(rec.education);if(gy)L.gradYear=gy;
           if(detectHopper(rec.employmentHistory))L.jobHopper=true;
-          L.enriched=true;L.updatedAt=Date.now();scoreLead(L);done++;
+          L.enriched=true;L.retryBlocked=false;L.retryReason='';L.updatedAt=Date.now();scoreLead(L);done++;
         });
         if(!matchedInBatch){
           const snippet=JSON.stringify(recs[0]).slice(0,200);
           throw new Error('Got '+recs.length+' records back but none matched your leads by ID or name. First record: '+snippet);
         }
         save();render();
-      }catch(e){failed+=ids.length;lastErr=e.message;console.error(e);}
+      }catch(e){
+        failed+=ids.length;lastErr=e.message;console.error(e);
+        // A credit cap is not a failure, it is a wait. Parking the batch means
+        // the IDs survive the page and one click re-runs them when the limit
+        // resets — before this, a capped batch simply vanished into a status
+        // line and the leads looked enriched-and-empty.
+        if(isLimitError(e.message)){
+          batches[bi].forEach(L=>{L.retryBlocked=true;L.retryReason=e.message.slice(0,180);});
+          blocked+=batches[bi].length;save();
+        }
+      }
     }
+    const parked=blocked?` ${blocked} parked in Retry blocked — your credit limit is spent; click Retry blocked when it resets.`:'';
     st.textContent=done
-      ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}. Emails, phones and start dates are live; scores are now firm.`
-      :`Enriched 0 leads. ${lastErr||'ZoomInfo returned nothing usable.'}`;
-    if(!done)st.classList.add('err');
+      ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}.${parked} Emails, phones and start dates are live; scores are now firm.`
+      :`Enriched 0 leads.${parked} ${blocked?'':(lastErr||'ZoomInfo returned nothing usable.')}`;
+    if(!done&&!blocked)st.classList.add('err');
+    renderBlocked();
   }finally{btn.disabled=false;}
 }
 document.getElementById('btnEnrich').addEventListener('click',async()=>{
@@ -1331,6 +1605,27 @@ window.enrichOne=async id=>{const L=byId(id);if(!L||!L.contactId)return;
   if(!await appConfirm(`Enrich ${L.firstName} ${L.lastName}? Uses 1 ZoomInfo credit.`,'Enrich lead'))return;
   enrichLeads([L]);};
 
+/* The shapes a spent credit limit comes back in. ZoomInfo says "limit
+   exceeded"; the connector sometimes wraps it as a 429 or a quota message. All
+   of them mean the same thing — wait, then run it again. */
+function isLimitError(msg){
+  return /limit exceed|exceeded your limit|quota|rate.?limit|429|insufficient credit|credit limit|too many requests/i.test(''+(msg||''));
+}
+function blockedLeads(){return state.leads.filter(L=>L.retryBlocked&&L.contactId);}
+function renderBlocked(){
+  const b=document.getElementById('btnRetryBlocked');if(!b)return;
+  const n=blockedLeads().length;
+  b.style.display=n?'':'none';
+  b.textContent=`Retry blocked (${n})`;
+  b.title=n?`${n} lead${n>1?'s':''} were not enriched because the credit limit was spent. Their ZoomInfo IDs are saved — click to run them again.`:'';
+}
+document.addEventListener('DOMContentLoaded',()=>{const b=document.getElementById('btnRetryBlocked');
+  if(b)b.addEventListener('click',()=>{
+    const t=blockedLeads();
+    if(!t.length){toast('Nothing parked.');return;}
+    enrichLeads(t);
+  });});
+
 /* =============== rendering =============== */
 let filterTier='',expanded=null;
 const esc=s=>(''+(s??'')).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1338,10 +1633,12 @@ function filtered(){
   const q=document.getElementById('q').value.trim().toLowerCase();
   const st=document.getElementById('fStatus').value;
   const ef=document.getElementById('fEmailFirst').checked;
+  const sf=(document.getElementById('fSellable')||{}).checked;
   let out=state.leads.filter(L=>
     (!filterTier||L.tier===filterTier)&&
     (!st||L.status===st)&&
     (!ef||truthy(L.mobileDnc))&&
+    (!sf||sellable(L).k==='yes')&&
     (!q||[L.firstName,L.lastName,L.employer,L.title,L.state].join(' ').toLowerCase().includes(q)));
   const s=document.getElementById('fSort').value;
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
@@ -1376,14 +1673,14 @@ function render(){
       : 'Your list is tied to your account, so nothing is shown until you sign in.<br>Use the sign-in link above.';
   }
   // Importing while signed out would build a list with no owner.
-  ['btnDrive','btnCsv','btnPaste','btnBuild','btnQC','btnAssign'].forEach(id=>{
+  ['btnDrive','btnCsv','btnPaste','btnPasteJson','btnBuild','btnQC','btnAssign'].forEach(id=>{
     const el=document.getElementById(id);
     if(el){el.disabled=!inAcct;el.title=inAcct?(el.dataset.t||el.title):'Sign in first — lists are tied to your account';
            if(inAcct&&el.dataset.t)el.title=el.dataset.t;}
   });
   const rows=document.getElementById('rows');
   rows.innerHTML=list.map(L=>{
-    const tape=(L.signals||[]).filter(s=>'ARTEC'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('');
+    const tape=(L.signals||[]).filter(s=>'ARTECV'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('');
     const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
     const inv=L.email?'' :'disabled title="No email on file"';
     return `<tr class="lead">
@@ -1394,7 +1691,7 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}</td>
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
       <td>${phBtn(L,'directPhone')}</td>
@@ -1416,6 +1713,7 @@ function render(){
   const note=document.getElementById('rowCap');
   if(note)note.innerHTML=more>0
     ?`Showing the top <strong>${list.length}</strong> of ${all.length} matching leads &mdash; search or filter to reach the rest. Export includes all ${all.length}.`:'';
+  renderBlocked();
   renderStats();
 }
 function detailRow(L){
@@ -1530,6 +1828,17 @@ function renderStats(){
      <span class="stat hot"><b>${sW}</b> set <span class="per">last 7 days</span></span>`+funnelStats();
 }
 
+/* The two chips that ride on every name: how far the lead is from being
+   sellable, and which campaign's rules scored them. Both answer a question the
+   tier alone cannot — an A-tier lead who turns 59½ in four years is a good
+   lead and a bad call today. */
+function sellBadge(L){
+  const v=sellable(L);
+  return ` <span class="sellbadge ${v.k}" title="${esc(v.title)}">${esc(v.label)}</span>`;
+}
+function campChip(L){
+  return leadCampaign(L)==='scs'?` <span class="badge camp-scs" title="Scored on the SCS rules: tenure at one employer, not a recent move">SCS</span>`:'';
+}
 /* =============== click-to-call (RingCentral) =============== */
 function normPhone(v){let d=(''+(v||'')).replace(/[^\d+]/g,'');
   if(/^\+/.test(d))return d; d=d.replace(/\D/g,'');
@@ -1662,7 +1971,12 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
     const nc=(L.activity||[]).filter(a=>a.k==='call').length,ne=(L.activity||[]).filter(a=>a.k==='email').length;
-    const comments=[`Status: ${L.status}`,nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+    const sell=sellable(L), ab=ageBasis(L);
+    const comments=[`Status: ${L.status}`,
+      `Campaign: ${leadCampaign(L)==='scs'?'SCS':'Rollover'}`,
+      `59.5: ${sell.k==='yes'?'sellable now':sell.k==='soon'?sell.label.replace('59½','turns 59.5'):'age unverified'}`,
+      ab.kind==='none'?'':`Age basis: ${ab.label}`,
+      L.retryBlocked?'Enrichment blocked — credit limit':'',nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
     const a=exportAddress(L), em=exportEmails(L);
     return [L.firstName,L.lastName,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
   }));
@@ -1921,7 +2235,7 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
-['q','fStatus','fSort','fEmailFirst'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+['q','fStatus','fSort','fEmailFirst','fSellable'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
 if(!HAS_WS){
   document.getElementById('btnBuild').style.display='none';
@@ -1940,6 +2254,72 @@ document.getElementById('pasteGo').addEventListener('click',()=>{
   if(rows.length<2){toast('Need a header row plus at least one lead.');return;}
   pending={headers:rows[0].map(h=>h.trim()),data:rows.slice(1)};
   closeModal('mPaste');openMapper('Pasted list');
+});
+/* ---- JSON batch ----
+   The CSV path already handles a file. This handles the other thing that keeps
+   happening: a batch of leads worked out in a conversation, arriving as JSON
+   with whatever key names that conversation happened to use. Rather than a
+   second mapping UI, keys are normalised through the same alias table the CSV
+   headers use, so the two paths cannot drift apart. */
+const JSON_EXTRA_KEYS={personid:'contactId',zoominfoid:'contactId',company:'employer',
+  companyname:'employer',jobtitle:'title',phone:'directPhone',cell:'mobilePhone',
+  positionstartdate:'jobStartDate',startdate:'jobStartDate',tenure:'yearsAtEmployer',
+  tenureyears:'yearsAtEmployer',yearsattenure:'yearsAtEmployer',accuracy:'accuracy',
+  notes:'notes',linkedin:'linkedinUrl'};
+function jsonKeyToField(k){
+  const n=normHeader(k);
+  for(const [key,,syn] of FIELDS){
+    if(normHeader(key)===n)return key;
+    if(syn.some(a=>normHeader(a)===n))return key;
+  }
+  return JSON_EXTRA_KEYS[n.replace(/ /g,'')]||null;
+}
+function leadFromJson(o,batch,camp,blocked){
+  const L={id:'r'+Math.random().toString(36).slice(2,10),batch,status:'New',activity:[],
+           campaign:camp,updatedAt:Date.now()};
+  Object.entries(o||{}).forEach(([k,v])=>{
+    if(v===null||v===undefined||v==='')return;
+    const f=jsonKeyToField(k);
+    if(f)L[f]=typeof v==='object'?JSON.stringify(v):(''+v).trim();
+  });
+  if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
+  delete L.fullName;
+  // A pasted lead is only "enriched" if it actually arrived with contact
+  // details; otherwise it must stay eligible for the enrich button.
+  L.enriched=!!(L.email||L.mobilePhone);
+  if(blocked&&L.contactId){L.retryBlocked=true;L.retryReason='Marked credit-blocked on import';L.enriched=false;}
+  return L;
+}
+document.getElementById('btnPasteJson').addEventListener('click',()=>{
+  document.getElementById('jsonText').value='';
+  document.getElementById('jsonMsg').textContent='';
+  document.getElementById('jcampS').checked=(state.settings.campaign==='scs');
+  document.getElementById('jcampR').checked=(state.settings.campaign!=='scs');
+  openModal('mJson');
+});
+document.getElementById('jsonGo').addEventListener('click',()=>{
+  const msg=document.getElementById('jsonMsg');
+  let data;
+  try{data=JSON.parse(document.getElementById('jsonText').value);}
+  catch(e){msg.innerHTML='<span class="mapwarn">That is not valid JSON: '+esc(e.message)+'</span>';return;}
+  // Tolerate the common wrappers a chat puts around an array.
+  if(data&&!Array.isArray(data))data=data.leads||data.contacts||data.results||data.data||data.items;
+  if(!Array.isArray(data)||!data.length){
+    msg.innerHTML='<span class="mapwarn">Expected an array of lead objects (or an object with a leads/contacts/results key).</span>';return;}
+  const camp=document.getElementById('jcampS').checked?'scs':'rollover';
+  const blocked=document.getElementById('jcampBlocked').checked;
+  const batch=(camp==='scs'?'SCS':'Rollover')+' JSON '+new Date().toLocaleDateString();
+  const seen=new Set(state.leads.map(L=>(L.contactId||'')+'|'+(L.email||'').toLowerCase()));
+  let added=0,dup=0,skipped=0;
+  data.forEach(o=>{
+    const L=leadFromJson(o,batch,camp,blocked);
+    if(!L.firstName&&!L.lastName){skipped++;return;}
+    const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
+    if(L.contactId&&seen.has(dk)){dup++;return;}
+    seen.add(dk);scoreLead(L);state.leads.push(L);added++;
+  });
+  save();render();renderBlocked();closeModal('mJson');
+  toast(`Imported ${added} lead${added===1?'':'s'}${dup?`, skipped ${dup} duplicate${dup===1?'':'s'}`:''}${skipped?`, ${skipped} had no name`:''}.`);
 });
 let noteFor=null;
 document.getElementById('noteSave').addEventListener('click',()=>{

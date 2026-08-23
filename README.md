@@ -80,6 +80,7 @@ Pushing to `main` is the deploy.
 | *(none)* | ZoomInfo via the MCP connector — no entitlement, paste a token in ICP settings — [setup](SETUP-zoominfo.md) |
 | `ANTHROPIC_API_KEY` | AI quality control, and reading SEC filings — [setup](SETUP-ai-qc.md) |
 | `EDGAR_USER_AGENT` | Free exact age for public-company officers from SEC proxy statements — [setup](SETUP-edgar.md) |
+| *(none)* | SCS campaign — long tenure, 59½, in-service distributions — [setup](SETUP-scs.md) |
 | `WARN_FEEDS` / `FORM5500_URL` | Money in motion — employers with a dated mass separation, priced by their 401(k) plan — [setup](SETUP-prospecting.md) |
 | `USE_FIRESTORE=0` | Force memory mode — [setup](SETUP-firestore.md) |
 

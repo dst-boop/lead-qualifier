@@ -1103,3 +1103,84 @@ the next run importable.
 in bulk, and it arrives looking exactly like the observed fact it stands in for.
 The only defence is the one applied here and in §16: refuse to consume it, keep
 the blank, and say why the blank is there.
+
+## 18. Two campaigns, one scorer
+
+Everything up to here assumes one thesis: the money moves because the person
+left an employer. Section 16 pushed that as far as it goes by starting from the
+separation event itself. **SCS is the opposite lead**, and it is worth writing
+down why it could not simply be a second saved search.
+
+Structured Capital Strategies targets someone who *never* left. Twenty or thirty
+years of contributions at one employer, and — past 59½ — the ability to take an
+**in-service distribution** without resigning. No job change, no WARN notice, no
+separation date. The event is a birthday.
+
+### The two campaigns want opposite things from the same field
+
+Rollover asks ZoomInfo for `positionStartDateMin` — started *after* this date.
+SCS asks for `positionStartDateMax` — started *before* it. Same field, inverted.
+And the tenure number that makes a Rollover lead good (short: they just moved)
+is what makes an SCS lead bad.
+
+That inversion cannot live in a saved-search description, because it has to
+reach the scorer as well as the search. A list built under SCS rules and scored
+under Rollover rules produces a coherent-looking ranking that is exactly
+backwards. So `campaign` is a setting the scorer reads, and it is **stamped on
+each lead at import** — a mixed list scores each half on its own terms, and
+moving the switch does not silently rescore work already done.
+
+### Signal E is dropped rather than reinterpreted
+
+The 80-point budget is unchanged. A (age), T (level) and C (contact) are
+identical. R becomes **V**: tenure at the current employer, 20 points at 18
+years and 25 at 30. E — years at *previous* companies — is dropped entirely.
+
+Dropping it is the point. E asks how much career happened somewhere else, and on
+the best possible SCS lead the honest answer is "none, that's why I'm calling
+them". Keeping it would have penalised precisely the leads the campaign exists
+to find. Rolling its weight into V keeps the totals comparable, so `tierA` and
+`tierB` did not need retuning and a mixed list sorts sensibly.
+
+### The suspect-tenure threshold, and what set it
+
+ZoomInfo sometimes returns a company founding date or a 1900 placeholder as a
+position start. Unflagged, a 126-year tenure sorts to the top of the call list.
+
+The flag exists. What matters is where it sits: **50 years**. It was lower, and
+it flagged a real 46-year run at Boeing — the strongest lead on that list — as
+bad data. A validity check that discards the best record is worse than no check.
+The lesson generalises: a plausibility bound tuned on the typical case will cut
+the tail, and in prospecting the tail is the product.
+
+### Inferred age is allowed in, through a separate door
+
+SCS needs an age and ZoomInfo has no age field, so age is worked out from the
+start of working life: graduation year, first work year, or stated experience,
+plus an assumed start age of 22. That is an inference, and §17 had just finished
+arguing that a derived column is not data.
+
+Both things are true, and the resolution is the door it comes through:
+
+- `leadAge()` returns **observed** ages only — a proxy statement, a public
+  record — and is what `scoreLead` reads. An inference cannot fire signal A as
+  confirmed.
+- `leadAgeAny()` includes the inference and is what the badge, the row and the
+  export read, always accompanied by `ageBasis()` naming what it came from
+  (`graduated 1984 + 22`).
+
+The distinction §17 drew was never "no inferences". It was **no inference
+wearing the clothes of an observation**. An inferred age with its basis visible
+on every row is a working hypothesis. The same number in a column called
+`Est. Age Range` is a fabrication. The difference is entirely in whether the
+consumer can tell.
+
+### A credit cap is a wait, not a failure
+
+Enrichment never requests `yearsOfExperience` — the field that exhausted the
+account once — and the request list is asserted in tests so it cannot creep
+back. When the limit is spent anyway, the affected leads keep their ZoomInfo
+person IDs, take a `retryBlocked` flag, and surface as a counted button in the
+header. Before this, a capped batch disappeared into a status line and the leads
+looked enriched-and-empty, which is the failure mode that costs the most: not an
+error, but a silent hole in a list you believe is complete.
