@@ -166,6 +166,17 @@ FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
 # cannot push the others towards Firestore's per-document limit, and switching
 # lists loads only the one being opened.
 FS_LISTS = os.environ.get("FIRESTORE_LISTS_COLLECTION", "lead_lists")
+# Lists shared with you, keyed by your email: a reverse index, because
+# Firestore cannot ask "which of everyone's lists name me" without one.
+FS_SHARED = os.environ.get("FIRESTORE_SHARED_COLLECTION", "lead_shares")
+# One document per advisor per day of counted activity. Aggregating the team
+# from everyone's lead documents would mean reading every lead in the firm to
+# draw a leaderboard; a daily counter is two numbers and a date.
+FS_STATS = os.environ.get("FIRESTORE_STATS_COLLECTION", "advisor_stats")
+FS_BATTLES = os.environ.get("FIRESTORE_BATTLES_COLLECTION", "battles")
+# Who counts as a teammate. Everyone at the same email domain is the rule a
+# single firm actually wants, and it needs no invitations to administer.
+TEAM_BY_DOMAIN = os.environ.get("TEAM_BY_DOMAIN", "1") not in ("0", "false", "no")
 
 _MEM_SESSIONS: dict[str, dict] = {}
 _MEM_STATE: dict[str, dict] = {}
@@ -2121,6 +2132,9 @@ async def put_state(body: LeadState, request: Request):
 # opening the app reads a short index rather than every lead the user owns.
 
 _MEM_LISTS: dict[str, dict] = {}
+_MEM_SHARED: dict[str, dict] = {}
+_MEM_STATS: dict[str, dict] = {}
+_MEM_BATTLES: dict[str, dict] = {}
 LIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
@@ -2201,13 +2215,81 @@ class ListSave(BaseModel):
     leads: list
 
 
+# ------------------------- sharing -------------------------
+# A list belongs to the advisor who built it. Sharing grants a named colleague
+# access to that one list, and nothing else — there is no firm-wide pool, and
+# no way to enumerate what has not been shared with you.
+
+def _domain(email: str) -> str:
+    return email.split("@", 1)[1].lower() if "@" in email else ""
+
+
+async def _shared_index(email: str) -> list:
+    doc = await _fs_get(FS_SHARED, email) or _MEM_SHARED.get(email) or {}
+    try:
+        return json.loads(doc.get("data") or "[]")
+    except ValueError:
+        return []
+
+
+async def _write_shared_index(email: str, rows: list) -> None:
+    payload = {"data": json.dumps(rows), "saved_at": time.time()}
+    if not await _fs_set(FS_SHARED, email, payload):
+        _MEM_SHARED[email] = payload
+
+
+async def _grant(owner: str, list_id: str, name: str, to: str, role: str) -> None:
+    rows = [r for r in await _shared_index(to)
+            if not (r.get("owner") == owner and r.get("id") == list_id)]
+    rows.append({"owner": owner, "id": list_id, "name": name, "role": role,
+                 "shared_at": time.time()})
+    await _write_shared_index(to, rows)
+
+
+async def _revoke(owner: str, list_id: str, frm: str) -> None:
+    rows = [r for r in await _shared_index(frm)
+            if not (r.get("owner") == owner and r.get("id") == list_id)]
+    await _write_shared_index(frm, rows)
+
+
+async def _access(email: str, owner: str, list_id: str) -> str:
+    """'owner', 'editor', 'viewer' or '' for the caller on one list."""
+    if owner == email:
+        return "owner"
+    for r in await _shared_index(email):
+        if r.get("owner") == owner and r.get("id") == list_id:
+            return r.get("role") or "viewer"
+    return ""
+
+
+def _split_ref(list_id: str) -> tuple[str, str]:
+    """'someone@firm.com~listid' addresses a shared list; a bare id is your own."""
+    if "~" in list_id:
+        owner, _, rid = list_id.partition("~")
+        return owner.lower(), rid
+    return "", list_id
+
+
+class ShareRequest(BaseModel):
+    email: EmailStr
+    role: str = "editor"
+
+
 @app.get("/api/lists")
 async def get_lists(request: Request):
     email = await _signed_in_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Not signed in")
     idx = await _ensure_lists(email)
-    return {"lists": idx["lists"], "settings": idx["settings"],
+    mine = [dict(l, owner="", role="owner") for l in idx["lists"]]
+    # Lists other advisors have shared, addressed as owner~id so the two kinds
+    # can live in one switcher without their ids colliding.
+    shared = []
+    for r in await _shared_index(email):
+        shared.append({"id": f"{r['owner']}~{r['id']}", "name": r.get("name") or "Shared list",
+                       "owner": r["owner"], "role": r.get("role") or "viewer",
+                       "count": r.get("count", 0), "shared_at": r.get("shared_at")})
+    return {"lists": mine + shared, "settings": idx["settings"],
             "backend": storage_backend()}
 
 
@@ -2237,12 +2319,25 @@ async def read_list(list_id: str, request: Request):
     email = await _signed_in_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Not signed in")
-    _check_list_id(list_id)
+    owner, rid = _split_ref(list_id)
+    _check_list_id(rid)
+    if owner:
+        role = await _access(email, owner, rid)
+        if not role:
+            raise HTTPException(status_code=403, detail="That list is not shared with you.")
+        oidx = await _read_index(owner)
+        entry = next((l for l in oidx["lists"] if l["id"] == rid), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="The owner has deleted that list.")
+        return {"list": dict(entry, id=list_id, owner=owner, role=role),
+                "leads": await _read_list(owner, rid),
+                "settings": (await _ensure_lists(email))["settings"],
+                "backend": storage_backend()}
     idx = await _ensure_lists(email)
-    entry = next((l for l in idx["lists"] if l["id"] == list_id), None)
+    entry = next((l for l in idx["lists"] if l["id"] == rid), None)
     if not entry:
         raise HTTPException(status_code=404, detail="No such list.")
-    return {"list": entry, "leads": await _read_list(email, list_id),
+    return {"list": dict(entry, role="owner"), "leads": await _read_list(email, rid),
             "settings": idx["settings"], "backend": storage_backend()}
 
 
@@ -2251,18 +2346,103 @@ async def save_list(list_id: str, body: ListSave, request: Request):
     email = await _signed_in_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Not signed in")
-    _check_list_id(list_id)
+    owner, rid = _split_ref(list_id)
+    _check_list_id(rid)
+    if owner:
+        role = await _access(email, owner, rid)
+        if role != "editor":
+            raise HTTPException(
+                status_code=403,
+                detail="You have view-only access to that list — ask the owner for editing.")
+        oidx = await _read_index(owner)
+        if not any(l["id"] == rid for l in oidx["lists"]):
+            raise HTTPException(status_code=404, detail="The owner has deleted that list.")
+        await _write_list(owner, rid, body.leads)
+        for l in oidx["lists"]:
+            if l["id"] == rid:
+                l["count"] = len(body.leads)
+                l["saved_at"] = time.time()
+        await _write_index(owner, oidx["settings"], oidx["lists"], oidx["legacy_leads"])
+        return {"ok": True, "leads": len(body.leads),
+                "lists": (await get_lists(request))["lists"]}
     idx = await _ensure_lists(email)
     lists = idx["lists"]
-    if not any(l["id"] == list_id for l in lists):
+    if not any(l["id"] == rid for l in lists):
         raise HTTPException(status_code=404, detail="No such list.")
-    await _write_list(email, list_id, body.leads)
+    await _write_list(email, rid, body.leads)
     for l in lists:
-        if l["id"] == list_id:
+        if l["id"] == rid:
             l["count"] = len(body.leads)
             l["saved_at"] = time.time()
     await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
-    return {"ok": True, "leads": len(body.leads), "lists": lists}
+    return {"ok": True, "leads": len(body.leads),
+            "lists": (await get_lists(request))["lists"]}
+
+
+@app.get("/api/lists/{list_id}/shares")
+async def list_shares(list_id: str, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    owner, rid = _split_ref(list_id)
+    if owner and owner != email:
+        raise HTTPException(status_code=403, detail="Only the owner can see who a list is shared with.")
+    _check_list_id(rid)
+    idx = await _ensure_lists(email)
+    entry = next((l for l in idx["lists"] if l["id"] == rid), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such list.")
+    return {"shares": entry.get("shares") or []}
+
+
+@app.post("/api/lists/{list_id}/shares")
+async def add_share(list_id: str, body: ShareRequest, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    owner, rid = _split_ref(list_id)
+    if owner and owner != email:
+        raise HTTPException(status_code=403, detail="Only the owner can share a list.")
+    _check_list_id(rid)
+    to = str(body.email).lower().strip()
+    if to == email:
+        raise HTTPException(status_code=400, detail="That is your own address.")
+    role = body.role if body.role in ("editor", "viewer") else "editor"
+    idx = await _ensure_lists(email)
+    entry = next((l for l in idx["lists"] if l["id"] == rid), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such list.")
+    shares = [s for s in (entry.get("shares") or []) if s.get("email") != to]
+    shares.append({"email": to, "role": role, "at": time.time()})
+    entry["shares"] = shares
+    await _write_index(email, idx["settings"], idx["lists"], idx["legacy_leads"])
+    await _grant(email, rid, entry.get("name") or "Shared list", to, role)
+    return {"shares": shares}
+
+
+@app.delete("/api/lists/{list_id}/shares/{who}")
+async def drop_share(list_id: str, who: str, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    owner, rid = _split_ref(list_id)
+    who = who.lower().strip()
+    # Either the owner revokes, or the recipient walks away from a list they
+    # did not ask for. Both are legitimate; nobody else may do either.
+    if owner and owner != email:
+        if who != email:
+            raise HTTPException(status_code=403, detail="You can only remove your own access.")
+        await _revoke(owner, rid, email)
+        return {"ok": True, "shares": []}
+    _check_list_id(rid)
+    idx = await _ensure_lists(email)
+    entry = next((l for l in idx["lists"] if l["id"] == rid), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such list.")
+    entry["shares"] = [s for s in (entry.get("shares") or []) if s.get("email") != who]
+    await _write_index(email, idx["settings"], idx["lists"], idx["legacy_leads"])
+    await _revoke(email, rid, who)
+    return {"ok": True, "shares": entry["shares"]}
 
 
 @app.patch("/api/lists/{list_id}")
@@ -2288,18 +2468,28 @@ async def delete_list(list_id: str, request: Request):
     email = await _signed_in_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Not signed in")
+    owner, list_id = _split_ref(list_id)
+    if owner and owner != email:
+        raise HTTPException(
+            status_code=403,
+            detail=f"That list belongs to {owner}. Remove your own access instead of deleting it.")
     _check_list_id(list_id)
     idx = await _ensure_lists(email)
     if len(idx["lists"]) <= 1:
         raise HTTPException(status_code=400, detail="This is your only list — rename it instead of deleting it.")
     if not any(l["id"] == list_id for l in idx["lists"]):
         raise HTTPException(status_code=404, detail="No such list.")
+    gone = next(l for l in idx["lists"] if l["id"] == list_id)
     lists = [l for l in idx["lists"] if l["id"] != list_id]
     await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
     key = _list_key(email, list_id)
     await _fs_del(FS_LISTS, key)
     _MEM_LISTS.pop(key, None)
-    return {"ok": True, "lists": lists}
+    # Everyone it was shared with loses it too, or their switcher keeps
+    # offering a list that no longer exists.
+    for sh in (gone.get("shares") or []):
+        await _revoke(email, list_id, sh.get("email") or "")
+    return {"ok": True, "lists": (await get_lists(request))["lists"]}
 
 
 class SettingsSave(BaseModel):
@@ -2314,6 +2504,231 @@ async def save_settings(body: SettingsSave, request: Request):
         raise HTTPException(status_code=401, detail="Not signed in")
     idx = await _ensure_lists(email)
     await _write_index(email, body.settings, idx["lists"], idx["legacy_leads"])
+    return {"ok": True}
+
+
+# ------------------------- team: stats, leaderboard, battles -------------------------
+# What an advisor did today, as four integers. The alternative — deriving the
+# leaderboard from everyone's lead documents — means reading every lead in the
+# firm to draw one table, and it would expose lists that were never shared.
+# A counter document leaks nothing but the count.
+
+STAT_KEYS = ("calls", "emails", "invites", "meetings")
+
+
+def _stat_key(email: str, day: str) -> str:
+    return f"{email}__{day}"
+
+
+def _today(offset_days: int = 0) -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - offset_days * 86400))
+
+
+class StatsPost(BaseModel):
+    day: str = ""
+    calls: int = 0
+    emails: int = 0
+    invites: int = 0
+    meetings: int = 0
+
+
+@app.put("/api/stats")
+async def put_stats(body: StatsPost, request: Request):
+    """Today's counters for the signed-in advisor. Idempotent: the client sends
+    totals for the day, not increments, so a replay cannot inflate a score."""
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    day = body.day if re.match(r"^\d{4}-\d{2}-\d{2}$", body.day or "") else _today()
+    payload = {"email": email, "day": day, "domain": _domain(email),
+               "saved_at": time.time()}
+    for k in STAT_KEYS:
+        payload[k] = max(0, int(getattr(body, k, 0) or 0))
+    key = _stat_key(email, day)
+    if not await _fs_set(FS_STATS, key, payload):
+        _MEM_STATS[key] = payload
+    return {"ok": True, "day": day}
+
+
+async def _team_members(email: str) -> list:
+    """Colleagues: same email domain, plus anyone in a shared-list relationship.
+
+    Domain is the rule a single firm actually wants and needs no administering.
+    Sharing adds the cases it misses — an advisor at another firm you work a
+    list with.
+    """
+    people = {email}
+    if TEAM_BY_DOMAIN and _domain(email):
+        dom = _domain(email)
+        for key, doc in list(_MEM_STATS.items()):
+            if doc.get("domain") == dom:
+                people.add(doc["email"])
+        db = _firestore()
+        if db is not None:
+            try:
+                q = db.collection(FS_STATS).where("domain", "==", dom).limit(500)
+                async for d in q.stream():
+                    v = d.to_dict() or {}
+                    if v.get("email"):
+                        people.add(v["email"])
+            except Exception as e:
+                print(f"[team] domain query failed: {e}")
+    for r in await _shared_index(email):
+        people.add(r["owner"])
+    idx = await _read_index(email)
+    for l in idx["lists"]:
+        for sh in (l.get("shares") or []):
+            if sh.get("email"):
+                people.add(sh["email"])
+    return sorted(people)
+
+
+async def _stats_for(people: list, days: int) -> dict:
+    wanted = {_today(i) for i in range(max(1, days))}
+    out = {p: {k: 0 for k in STAT_KEYS} for p in people}
+    for p in people:
+        for day in wanted:
+            key = _stat_key(p, day)
+            doc = await _fs_get(FS_STATS, key) or _MEM_STATS.get(key)
+            if not doc:
+                continue
+            for k in STAT_KEYS:
+                out[p][k] += int(doc.get(k) or 0)
+    return out
+
+
+def _score_row(row: dict) -> int:
+    """One number to rank on. A meeting is the product; a call is the input.
+
+    The weights are deliberately lopsided so nobody wins a contest by dialling
+    numbers they never intended to talk to.
+    """
+    return (row["calls"] * 1) + (row["emails"] * 1) + (row["invites"] * 3) + (row["meetings"] * 10)
+
+
+@app.get("/api/leaderboard")
+async def leaderboard(request: Request, days: int = 7):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    days = max(1, min(int(days or 7), 90))
+    people = await _team_members(email)
+    stats = await _stats_for(people, days)
+    rows = [dict(stats[p], email=p, you=(p == email), points=_score_row(stats[p]))
+            for p in people]
+    rows.sort(key=lambda r: (-r["points"], r["email"]))
+    for i, r in enumerate(rows, 1):
+        r["rank"] = i
+    return {"days": days, "rows": rows, "team_size": len(people)}
+
+
+# --- battles ---------------------------------------------------------------
+# A contest is a leaderboard with a start, an end and a named field. Everything
+# scoring-related is the same code; only the window and the roster differ.
+
+class BattleCreate(BaseModel):
+    name: str
+    days: int = 1
+    opponents: list = []
+    metric: str = "points"
+
+
+def _battle_key(bid: str) -> str:
+    return bid
+
+
+@app.get("/api/battles")
+async def get_battles(request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    out = []
+    db = _firestore()
+    docs = []
+    if db is not None:
+        try:
+            async for d in db.collection(FS_BATTLES).limit(200).stream():
+                docs.append(d.to_dict() or {})
+        except Exception as e:
+            print(f"[battles] read failed: {e}")
+    docs += list(_MEM_BATTLES.values())
+    seen = set()
+    for b in docs:
+        if b.get("id") in seen:
+            continue
+        seen.add(b.get("id"))
+        roster = b.get("players") or []
+        if email not in roster:
+            continue
+        stats = {}
+        for p in roster:
+            row = {k: 0 for k in STAT_KEYS}
+            day = b.get("start_day") or _today()
+            for i in range(max(1, int(b.get("days") or 1))):
+                d = time.strftime("%Y-%m-%d",
+                                  time.gmtime(time.mktime(time.strptime(day, "%Y-%m-%d")) + i * 86400))
+                key = _stat_key(p, d)
+                doc = await _fs_get(FS_STATS, key) or _MEM_STATS.get(key)
+                if doc:
+                    for k in STAT_KEYS:
+                        row[k] += int(doc.get(k) or 0)
+            stats[p] = row
+        rows = [dict(stats[p], email=p, you=(p == email),
+                     points=stats[p][b["metric"]] if b.get("metric") in STAT_KEYS
+                     else _score_row(stats[p])) for p in roster]
+        rows.sort(key=lambda r: (-r["points"], r["email"]))
+        for i, r in enumerate(rows, 1):
+            r["rank"] = i
+        out.append({**{k: b.get(k) for k in ("id", "name", "metric", "days", "start_day", "created_by")},
+                    "rows": rows, "over": _battle_over(b)})
+    out.sort(key=lambda x: (x["over"], x.get("start_day") or ""), reverse=False)
+    return {"battles": out}
+
+
+def _battle_over(b: dict) -> bool:
+    try:
+        start = time.mktime(time.strptime(b.get("start_day") or _today(), "%Y-%m-%d"))
+    except Exception:
+        return False
+    return time.time() > start + max(1, int(b.get("days") or 1)) * 86400
+
+
+@app.post("/api/battles")
+async def create_battle(body: BattleCreate, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    name = (body.name or "").strip()[:60]
+    if not name:
+        raise HTTPException(status_code=400, detail="A contest needs a name.")
+    players = sorted({email} | {str(o).lower().strip() for o in (body.opponents or []) if str(o).strip()})
+    if len(players) < 2:
+        raise HTTPException(status_code=400, detail="Pick at least one person to go up against.")
+    if len(players) > 25:
+        raise HTTPException(status_code=400, detail="25 people is the limit for one contest.")
+    metric = body.metric if body.metric in STAT_KEYS or body.metric == "points" else "points"
+    bid = "b" + secrets.token_urlsafe(9).replace("-", "_")
+    doc = {"id": bid, "name": name, "metric": metric,
+           "days": max(1, min(int(body.days or 1), 31)),
+           "start_day": _today(), "created_by": email, "players": players,
+           "created_at": time.time()}
+    if not await _fs_set(FS_BATTLES, bid, doc):
+        _MEM_BATTLES[bid] = doc
+    return {"battle": {k: doc[k] for k in ("id", "name", "metric", "days", "start_day")}}
+
+
+@app.delete("/api/battles/{bid}")
+async def delete_battle(bid: str, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    doc = await _fs_get(FS_BATTLES, bid) or _MEM_BATTLES.get(bid)
+    if not doc:
+        raise HTTPException(status_code=404, detail="No such contest.")
+    if doc.get("created_by") != email:
+        raise HTTPException(status_code=403, detail="Only whoever started it can end it.")
+    await _fs_del(FS_BATTLES, bid)
+    _MEM_BATTLES.pop(bid, None)
     return {"ok": True}
 
 

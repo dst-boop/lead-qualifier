@@ -1342,3 +1342,86 @@ signed in. The modal text was correct and the button contradicted it. Fixed to
 "Send now" / "Send invite" when signed in. Worth recording only because no test
 caught it and no test could have: every assertion was about behaviour, and the
 defect was entirely in what the button claimed that behaviour was.
+
+## 21. Callbacks, sharing, and a leaderboard that is not made of leads
+
+Magic List Maker was named as the feature set to match. Comparing it against
+what was here, four things were genuinely missing — a callback reminder, list
+sharing, a leaderboard, and contests — and the rest (statuses, notes, an
+activity log, one-click invites, a template engine) already existed.
+
+### The callback is the one that mattered
+
+"Call me back Thursday" is the commonest outcome of a call. The app had a status
+called Call Back and nowhere to put the date, so it lived in someone's head.
+
+A reminder nobody is shown is worse than no reminder, so a due callback surfaces
+in three places at once: a counted button in the Track stage, a red line on the
+row carrying what to pick up on, and a filter. It also **sorts to the top of the
+call list, ahead of higher scores** — the same reasoning as §19's excluded-last
+rule, taken one step further. The default sort answers *who do I call now*, and
+a promise made to a person beats a score computed about one.
+
+It stops surfacing when the meeting is set, or when the lead is marked Not
+Interested or Has Advisor. A reminder about someone who has already said no is
+noise, and noise is how a queue stops being read.
+
+### Sharing: one list, one named colleague
+
+§12 established that a lead list belongs to one account, and sharing is the
+first deliberate hole in that. It is kept narrow: a share names one colleague
+and one list, and nothing else on the account travels with it.
+
+The mechanism is a reverse index (`lead_shares/{recipient}`), because Firestore
+cannot answer "which of everyone's lists name me" without one. A shared list is
+addressed `owner@firm.com~listid`, which lets both kinds live in one switcher
+without their ids colliding — `default` is a plausible id for two different
+people's first list, and §20 relies on exactly that being safe.
+
+Every read and write re-checks access server-side rather than trusting the id in
+the URL. An editor may write; a viewer is refused with an explanation rather
+than a silent no-op; someone the list was never shared with gets 403 and cannot
+tell a private list from a nonexistent one.
+
+Two revocation paths exist and both are legitimate: the owner withdraws access,
+and the recipient walks away from a list they did not ask for. Deleting a list
+revokes it from everyone, or their switcher keeps offering a list that is gone.
+
+### The leaderboard is counters, not leads
+
+The obvious implementation aggregates everyone's lead documents. It is wrong
+twice: drawing one table would mean reading every lead in the firm, and it would
+expose lists that were never shared. So each advisor writes four integers a day
+— calls, emails, invites, meetings — to `advisor_stats/{email}__{day}`. A
+counter document leaks a number where a lead document leaks a prospect.
+
+The client sends **totals for the day, not increments**, so a replay, a double
+click or a reopened tab cannot inflate a score. That is a one-word difference in
+the API and the difference between a leaderboard people trust and one they
+don't.
+
+**Points are deliberately lopsided**: a call or an email is 1, an invite 3, a
+meeting 10. A contest scored on raw dials is won by whoever dials numbers they
+never meant to talk to. The scoring rule is the incentive, and getting it wrong
+would make the feature actively harmful rather than merely useless.
+
+A contest is the same code with a start date, an end and a chosen field. Nothing
+about scoring is duplicated.
+
+### Team membership by email domain
+
+A firm is a domain. That rule needs no invitations, no admin screen and no
+onboarding, and it is right for the only deployment that exists. Sharing
+relationships extend it to advisors at other firms. `TEAM_BY_DOMAIN=0` turns the
+domain half off for a deployment where that assumption fails.
+
+### Two small corrections made along the way
+
+`cbLabel` measured whole days by rounding the difference between a timestamp and
+today's midnight, so a callback due at 5pm two days ago read "yesterday".
+Comparing calendar days fixes it. Worth recording because the test that caught
+it was checking the *text*, not the arithmetic — the bug was in what the row
+said, and only an assertion on the sentence would have found it.
+
+The 🏠 button's tooltip promised "home value", which this API has never
+returned (§4). Now it names what actually comes back.
