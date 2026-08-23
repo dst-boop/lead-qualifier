@@ -42,7 +42,7 @@ import msal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from webapp import prospecting
+from webapp import prospecting, signals
 from pydantic import BaseModel, EmailStr
 
 # --- Microsoft ---
@@ -1787,6 +1787,51 @@ async def _edgar_latest_proxy(cik: str) -> Optional[dict]:
     return None
 
 
+async def _edgar_recent_8k(cik: str, within_days: int = 45) -> Optional[dict]:
+    """A recent 8-K reporting an officer departure, as {url, filed, accession}.
+
+    Item 5.02 — departure or election of directors and principal officers — is
+    a required disclosure with a four-business-day deadline, so it is the
+    fastest free notice that a senior person's employment is ending. The item
+    number is not in the submissions index, so the filing is fetched and read;
+    that is one extra request per employer per refresh, not per lead.
+    """
+    subs = await _edgar_get(f"{EDGAR_DATA}/submissions/CIK{cik}.json")
+    recent = ((subs or {}).get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    cutoff = time.time() - within_days * 86400
+    for i, form in enumerate(forms):
+        if form != "8-K":
+            continue
+        filed = (recent.get("filingDate") or [])[i]
+        try:
+            if time.mktime(time.strptime(filed, "%Y-%m-%d")) < cutoff:
+                break            # the index is newest first, so we are past the window
+        except (ValueError, TypeError):
+            continue
+        items = ((recent.get("items") or [])[i] if recent.get("items") else "") or ""
+        if "5.02" not in items:
+            continue
+        acc = (recent.get("accessionNumber") or [])[i].replace("-", "")
+        doc = (recent.get("primaryDocument") or [])[i]
+        if not acc or not doc:
+            continue
+        url = f"{EDGAR_WWW}/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+        summary = ""
+        try:
+            text = _strip_html(await _edgar_get(url, as_json=False) or "")
+            m = re.search(r"(?is)item\s*5\.02[^.]{0,120}\.(.{0,400})", text)
+            summary = (m.group(1).strip() if m else text[:400])
+        except Exception:
+            pass
+        days_ago = int((time.time() - time.mktime(time.strptime(filed, "%Y-%m-%d"))) / 86400)
+        return {"url": url, "filed": filed, "days_ago": days_ago,
+                "accession": (recent.get("accessionNumber") or [])[i],
+                "summary": summary or "Item 5.02 — departure or election of directors "
+                                      "and principal officers"}
+    return None
+
+
 def _strip_html(html: str) -> str:
     """Filing text without the markup. Proxy statements are laid out by dozens of
     different filing agents, so no structural assumption survives — the text is
@@ -2505,6 +2550,97 @@ async def save_settings(body: SettingsSave, request: Request):
     idx = await _ensure_lists(email)
     await _write_index(email, body.settings, idx["lists"], idx["legacy_leads"])
     return {"ok": True}
+
+
+# ------------------------- money-in-motion signals -------------------------
+# The rest of the app finds people. This watches the ones already found and
+# says when something makes their retirement money movable. Everything here is
+# free: an age is arithmetic, a WARN notice and an 8-K are public filings.
+
+FS_SEEN = os.environ.get("FIRESTORE_SEEN_COLLECTION", "signals_seen")
+_MEM_SEEN: dict[str, dict] = {}
+
+
+async def _seen_ids(email: str) -> set:
+    doc = await _fs_get(FS_SEEN, email) or _MEM_SEEN.get(email) or {}
+    try:
+        return set(json.loads(doc.get("data") or "[]"))
+    except ValueError:
+        return set()
+
+
+async def _mark_seen(email: str, ids: list) -> None:
+    # Bounded, newest-last: an advisor who works a list for a year should not
+    # accumulate an unbounded document of ids they will never see again.
+    keep = list(dict.fromkeys(list(await _seen_ids(email)) + list(ids)))[-4000:]
+    payload = {"data": json.dumps(keep), "saved_at": time.time()}
+    if not await _fs_set(FS_SEEN, email, payload):
+        _MEM_SEEN[email] = payload
+
+
+class SignalsRequest(BaseModel):
+    leads: list = []
+    min_tenure: float = 18.0
+    mark_seen: bool = False
+
+
+@app.post("/api/signals")
+async def get_signals(body: SignalsRequest, request: Request):
+    """Every money-in-motion event across the leads posted.
+
+    The leads come from the client rather than being read server-side, so this
+    works on the open list whether or not it has been saved, and on a list
+    shared from another advisor without this route needing to re-derive access.
+    """
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+
+    warn_index, warn_note = {}, ""
+    if WARN_FEEDS.strip():
+        try:
+            got = await _load_warn()
+            plans = {}
+            try:
+                plans = (await _load_plans()).get("plans") or {}
+            except Exception:
+                pass
+            opps = prospecting.build_opportunities(
+                got["events"], plans, min_workers=1, states=_source_states() or None)
+            warn_index = signals.index_warn(opps)
+        except Exception as e:
+            warn_note = f"WARN feeds unavailable: {type(e).__name__}"
+
+    # One EDGAR round-trip per distinct employer, not per lead: a list of forty
+    # people at four companies costs four lookups.
+    filings, filing_note = {}, ""
+    if EDGAR_USER_AGENT:
+        employers = {}
+        for L in body.leads:
+            name = (L.get("employer") or "").strip()
+            if name:
+                employers.setdefault(signals.norm_company(name), name)
+        for key, name in list(employers.items())[:25]:
+            try:
+                hit = await _edgar_company_cik(name)
+                if not hit:
+                    continue
+                f = await _edgar_recent_8k(hit["cik"])
+                if f:
+                    filings[key] = f
+            except Exception:
+                continue
+    else:
+        filing_note = "EDGAR_USER_AGENT is not set, so officer-departure filings are not checked."
+
+    seen = await _seen_ids(email)
+    out = signals.build_signals(body.leads, warn_index, filings,
+                                min_tenure=body.min_tenure, seen=seen)
+    if body.mark_seen and out:
+        await _mark_seen(email, [s["id"] for s in out])
+    return {"signals": out, "new": sum(1 for s in out if s["new"]),
+            "checked": len(body.leads),
+            "notes": [n for n in (warn_note, filing_note) if n]}
 
 
 # ------------------------- team: stats, leaderboard, battles -------------------------

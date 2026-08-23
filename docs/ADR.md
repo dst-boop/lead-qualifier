@@ -1425,3 +1425,76 @@ said, and only an assertion on the sentence would have found it.
 
 The 🏠 button's tooltip promised "home value", which this API has never
 returned (§4). Now it names what actually comes back.
+
+## 22. Watching the leads you already have
+
+§16 inverted the pipeline to start from an event. This applies the same idea to
+a list that already exists: rather than asking *who should I find*, ask *which
+of these people has something happening*.
+
+### Four detectors, ranked by how much they can be trusted
+
+**Turning 59½ is the only money-in-motion event that can be known before it
+happens, with certainty, for free.** It is a date, not a search — everything
+else in this project has been an inference dressed carefully enough to be
+useful, and this one is arithmetic. That is worth stating plainly because it
+inverts the usual cost/confidence ordering: the cheapest signal here is also the
+most reliable.
+
+WARN and 8-K are exact but external. Tenure is arithmetic again.
+
+### The 8-K nearly shipped as a false positive
+
+Item 5.02 is a four-business-day disclosure of an officer departure, and the
+first implementation fired it at every lead whose employer had filed one. A test
+fixture caught it: a 41-year-old logistics manager at Boeing was being told that
+Boeing's money was in motion because Boeing's CFO retired. He learns nothing
+from that.
+
+The rule now has two doors. If the filing text **names the lead**, it is the
+strongest signal the app can produce — a dated, legally required disclosure that
+this specific person's employment is ending. Otherwise it is offered only to
+officers of that company, hedged, at lower urgency. Everyone else is not told.
+
+WARN is deliberately the opposite: shown to every lead at that employer, because
+a mass separation genuinely affects the whole workforce. The two are not
+inconsistent — one names a person, the other names a population.
+
+The general rule this settles: **a signal must be about the lead, not merely
+near them.** A watchlist that cries wolf is not read by the second week, and an
+unread watchlist is worse than none because it is believed to be working.
+
+### Seen-state is per advisor
+
+"New since you last looked" is what makes a watchlist survive daily use, and it
+has to be per person: two advisors sharing a list each track their own, or the
+first to open it silences the second. The store is bounded at 4,000 ids,
+newest-last — an advisor working a list for a year should not accumulate an
+unbounded document of ids they will never see again.
+
+### Cost shape was designed before the feature
+
+One EDGAR round-trip per **distinct employer**, capped at 25. A list of forty
+people at four companies costs four lookups, not forty. Written that way from
+the start because the per-lead version is the obvious one and is 10× the
+requests against a rate-limited government API.
+
+### Unattended email is deliberately not built
+
+The panel sends a digest on demand, from the advisor's own connected account,
+while they are present.
+
+A morning email that arrives without opening the app is possible — Google
+refresh tokens are stored KMS-wrapped and are valid offline, so a scheduled job
+could mint a token and send as the user. It is a small change and it is left
+undone on purpose: it means **the server sending mail as a person who is not
+there**. That is a decision for the account owner, not an implementation detail
+to slip into a feature about reminders.
+
+### A note on what "free" bought
+
+Every source here is public and free: state WARN filings, the SEC submissions
+index, and arithmetic on a date. Between this and §16, the app now has an
+event-driven prospecting engine and an event-driven watchlist, and the only
+paid dependency in either is the enrichment that turns a name into a phone
+number.
