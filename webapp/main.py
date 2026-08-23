@@ -120,8 +120,12 @@ GOOGLE_SCOPES = (
     # Read-only, and used only to fetch a named export by filename. drive.file
     # would be narrower but requires running Google's Picker in the browser
     # with the access token, which would put a third-party token in the page.
-    "https://www.googleapis.com/auth/drive.readonly"
+    "https://www.googleapis.com/auth/drive.readonly "
+    # Lists the addresses Gmail will let this account send as — a work alias, a
+    # shared team address. Read-only and settings-only; it cannot change them.
+    "https://www.googleapis.com/auth/gmail.settings.basic"
 )
+GMAIL_SENDAS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs"
 DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -157,6 +161,11 @@ SESSION_TTL = 8 * 3600
 USE_FIRESTORE = os.environ.get("USE_FIRESTORE", "1") != "0"
 FS_SESSIONS = os.environ.get("FIRESTORE_SESSIONS_COLLECTION", "sessions")
 FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
+# One document per list rather than one per user. An advisor working four
+# campaigns keeps four independent documents, so a five-thousand-row import
+# cannot push the others towards Firestore's per-document limit, and switching
+# lists loads only the one being opened.
+FS_LISTS = os.environ.get("FIRESTORE_LISTS_COLLECTION", "lead_lists")
 
 _MEM_SESSIONS: dict[str, dict] = {}
 _MEM_STATE: dict[str, dict] = {}
@@ -282,6 +291,18 @@ async def _fs_set(collection: str, key: str, value: dict) -> bool:
     except Exception as e:
         print(f"[storage] Firestore write failed, using memory: {e}")
         _fs_failed = True
+        return False
+
+
+async def _fs_del(collection: str, key: str) -> bool:
+    db = _firestore()
+    if db is None:
+        return False
+    try:
+        await db.collection(collection).document(key).delete()
+        return True
+    except Exception as e:
+        print(f"[storage] Firestore delete failed: {e}")
         return False
 
 
@@ -684,12 +705,118 @@ async def _active_token(request: Request) -> tuple[str, str]:
     raise HTTPException(status_code=401, detail="Not signed in")
 
 
-def _gmail_raw(to: str, subject: str, body: str) -> str:
+def _gmail_raw(to: str, subject: str, body: str, sender: str = "") -> str:
     msg = EmailMessage()
     msg["To"] = to
     msg["Subject"] = subject
+    # Gmail rejects a From it has not been told this account may send as, so
+    # this is only ever set to an address /api/senders read back from Gmail.
+    if sender:
+        msg["From"] = sender
     msg.set_content(body)
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+# ------------------------- who the mail goes out as -------------------------
+# One person, several work addresses: a personal domain on Google, an employer
+# mailbox on Microsoft, an alias or shared box hanging off either. All of them
+# are the user's own accounts — the app never sends as anyone who has not
+# signed in here — and which one to use is a per-message decision, because the
+# right From for a prospect at their old employer is not the right one for a
+# calendar invite from the advisory firm.
+
+async def _google_senders(session: dict) -> list[dict]:
+    token = await _google_token(session)
+    if not token:
+        return []
+    headers = {"Authorization": f"Bearer {token}"}
+    primary = ""
+    async with httpx.AsyncClient(timeout=15) as cx:
+        r = await cx.get(GOOGLE_USERINFO_URL, headers=headers)
+        if r.status_code == 200:
+            primary = (r.json().get("email") or "").lower()
+        # Aliases need a scope granted after some accounts signed in, so a 403
+        # here is ordinary and means "primary only", not an error.
+        try:
+            a = await cx.get(GMAIL_SENDAS_URL, headers=headers)
+            rows = a.json().get("sendAs", []) if a.status_code == 200 else []
+        except Exception:
+            rows = []
+    out, seen = [], set()
+    for row in rows:
+        addr = (row.get("sendAsEmail") or "").lower()
+        if not addr or addr in seen:
+            continue
+        # An unverified alias is one Gmail will refuse at send time.
+        if not row.get("isPrimary") and row.get("verificationStatus") not in ("accepted", None, ""):
+            continue
+        seen.add(addr)
+        out.append({"id": "google:" + addr, "provider": "google", "address": addr,
+                    "name": row.get("displayName") or "",
+                    "primary": bool(row.get("isPrimary")),
+                    "kind": "primary" if row.get("isPrimary") else "alias"})
+    if primary and primary not in seen:
+        out.insert(0, {"id": "google:" + primary, "provider": "google", "address": primary,
+                       "name": "", "primary": True, "kind": "primary"})
+    return out
+
+
+async def _ms_senders(session: dict) -> list[dict]:
+    token = _ms_token(session)
+    if not token:
+        return []
+    async with httpx.AsyncClient(timeout=15) as cx:
+        r = await cx.get(f"{GRAPH}/me", headers={"Authorization": f"Bearer {token}"})
+    if r.status_code != 200:
+        return []
+    d = r.json()
+    addr = ((d.get("mail") or d.get("userPrincipalName")) or "").lower()
+    if not addr:
+        return []
+    return [{"id": "microsoft:" + addr, "provider": "microsoft", "address": addr,
+             "name": d.get("displayName") or "", "primary": True, "kind": "primary"}]
+
+
+async def _senders(request: Request) -> list[dict]:
+    session = request.state.session
+    out = await _google_senders(session)
+    out += await _ms_senders(session)
+    return out
+
+
+async def _sender_token(request: Request, sender_id: str) -> tuple[str, str, str]:
+    """(provider, token, from_address) for a chosen sender, or the default one.
+
+    An unknown id is refused rather than quietly falling back: sending from the
+    wrong address is the kind of mistake that is only noticed by the recipient.
+    """
+    session = request.state.session
+    if not sender_id:
+        provider, token = await _active_token(request)
+        return provider, token, ""
+    available = await _senders(request)
+    match = next((s for s in available if s["id"] == sender_id), None)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{sender_id.split(':', 1)[-1]} is not one of your connected sending "
+                   f"addresses. Connect that account, or pick another address.")
+    if match["provider"] == "google":
+        token = await _google_token(session)
+        if not token:
+            raise HTTPException(status_code=401, detail="Google account is not connected.")
+        return "google", token, ("" if match["primary"] else match["address"])
+    token = _ms_token(session)
+    if not token:
+        raise HTTPException(status_code=401, detail="Microsoft account is not connected.")
+    return "microsoft", token, ""
+
+
+@app.get("/api/senders")
+async def senders(request: Request):
+    await _active_token(request)
+    out = await _senders(request)
+    return {"senders": out, "default": (out[0]["id"] if out else "")}
 
 
 # ------------------------- API routes -------------------------
@@ -738,6 +865,10 @@ async def me(request: Request):
                     "name": d.get("displayName"),
                     "email": d.get("mail") or d.get("userPrincipalName"),
                     "providers": providers, "features": features,
+                    # Which accounts actually have tokens on this session, as
+                    # opposed to which the deployment is configured for.
+                    "linked_google": bool(session.get("google")),
+                    "linked_microsoft": bool(session.get("ms_token_cache")),
                     "zi_connected": bool(session.get("zoominfo")),
                     "storage": storage, "encryption": encryption}
     return JSONResponse({"signed_in": False, "providers": providers,
@@ -749,15 +880,17 @@ class EmailRequest(BaseModel):
     to: EmailStr
     subject: str
     body: str
+    sender: str = ""          # a /api/senders id; empty means the signed-in account
 
 
 @app.post("/api/send-email")
 async def send_email(req: EmailRequest, request: Request):
-    provider, token = await _active_token(request)
+    provider, token, from_addr = await _sender_token(request, req.sender)
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30) as cx:
         if provider == "google":
-            r = await cx.post(GMAIL_SEND_URL, json={"raw": _gmail_raw(str(req.to), req.subject, req.body)},
+            r = await cx.post(GMAIL_SEND_URL,
+                              json={"raw": _gmail_raw(str(req.to), req.subject, req.body, from_addr)},
                               headers=headers)
             ok = r.status_code == 200
         else:
@@ -773,7 +906,7 @@ async def send_email(req: EmailRequest, request: Request):
             ok = r.status_code in (200, 202)
     if not ok:
         raise HTTPException(status_code=502, detail=f"{provider} send error {r.status_code}: {r.text[:300]}")
-    return {"ok": True, "provider": provider}
+    return {"ok": True, "provider": provider, "from": from_addr}
 
 
 class EventRequest(BaseModel):
@@ -783,11 +916,15 @@ class EventRequest(BaseModel):
     start: str          # "YYYY-MM-DDTHH:MM:SS" local wall time
     end: str
     timezone: str = "America/New_York"
+    sender: str = ""    # which connected calendar the invite comes from
 
 
 @app.post("/api/create-event")
 async def create_event(req: EventRequest, request: Request):
-    provider, token = await _active_token(request)
+    # A calendar invite is owned by the calendar it is created on, so unlike
+    # mail there is no alias to set: picking a sender picks whose calendar it
+    # lands in and therefore what address the attendee sees.
+    provider, token, _from = await _sender_token(request, req.sender)
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30) as cx:
         if provider == "google":
@@ -1975,6 +2112,209 @@ async def put_state(body: LeadState, request: Request):
     if not await _fs_set(FS_STATE, email, payload):
         _MEM_STATE[email] = payload
     return {"ok": True, "leads": len(body.leads), "backend": storage_backend()}
+
+
+# ------------------------- named lead lists -------------------------
+# One user, several lists: a rollover campaign, an SCS campaign, the leads that
+# came off one employer's WARN notice. Each is a separate document keyed
+# email__listId, and the index of them lives on the user's state document, so
+# opening the app reads a short index rather than every lead the user owns.
+
+_MEM_LISTS: dict[str, dict] = {}
+LIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def _list_key(email: str, list_id: str) -> str:
+    return f"{email}__{list_id}"
+
+
+def _check_list_id(list_id: str) -> str:
+    if not LIST_ID_RE.match(list_id or ""):
+        raise HTTPException(status_code=400, detail="Bad list id.")
+    return list_id
+
+
+async def _read_index(email: str) -> dict:
+    doc = await _fs_get(FS_STATE, email) or _MEM_STATE.get(email) or {}
+    try:
+        payload = json.loads(doc.get("data") or "{}")
+    except ValueError:
+        payload = {}
+    return {"settings": payload.get("settings") or {},
+            "lists": payload.get("lists") or [],
+            "legacy_leads": payload.get("leads") or [],
+            "saved_at": doc.get("saved_at")}
+
+
+async def _write_index(email: str, settings: dict, lists: list, legacy: list) -> None:
+    payload = {"data": json.dumps({"settings": settings, "lists": lists, "leads": legacy}),
+               "saved_at": time.time(), "lead_count": sum(l.get("count", 0) for l in lists)}
+    if not await _fs_set(FS_STATE, email, payload):
+        _MEM_STATE[email] = payload
+
+
+async def _read_list(email: str, list_id: str) -> list:
+    key = _list_key(email, list_id)
+    doc = await _fs_get(FS_LISTS, key) or _MEM_LISTS.get(key)
+    if not doc:
+        return []
+    try:
+        return json.loads(doc.get("data") or "[]")
+    except ValueError:
+        return []
+
+
+async def _write_list(email: str, list_id: str, leads: list) -> None:
+    key = _list_key(email, list_id)
+    payload = {"data": json.dumps(leads), "saved_at": time.time(), "lead_count": len(leads)}
+    if not await _fs_set(FS_LISTS, key, payload):
+        _MEM_LISTS[key] = payload
+
+
+async def _ensure_lists(email: str) -> dict:
+    """The user's list index, migrating a pre-lists single list on first read."""
+    idx = await _read_index(email)
+    if idx["lists"]:
+        return idx
+    legacy = idx["legacy_leads"]
+    first = {"id": "default", "name": "My leads", "created_at": time.time(),
+             "count": len(legacy)}
+    if legacy:
+        await _write_list(email, "default", legacy)
+    # The legacy array is left in place rather than deleted. If this migration
+    # is wrong the original is still there to read; nothing writes to it again.
+    await _write_index(email, idx["settings"], [first], legacy)
+    idx["lists"] = [first]
+    return idx
+
+
+class ListCreate(BaseModel):
+    name: str
+    copy_from: str = ""
+
+
+class ListPatch(BaseModel):
+    name: str
+
+
+class ListSave(BaseModel):
+    leads: list
+
+
+@app.get("/api/lists")
+async def get_lists(request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    idx = await _ensure_lists(email)
+    return {"lists": idx["lists"], "settings": idx["settings"],
+            "backend": storage_backend()}
+
+
+@app.post("/api/lists")
+async def create_list(body: ListCreate, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    name = (body.name or "").strip()[:60]
+    if not name:
+        raise HTTPException(status_code=400, detail="A list needs a name.")
+    idx = await _ensure_lists(email)
+    if len(idx["lists"]) >= 40:
+        raise HTTPException(status_code=400, detail="40 lists is the limit — rename or delete one.")
+    new_id = "l" + secrets.token_urlsafe(9).replace("-", "_")
+    leads = await _read_list(email, _check_list_id(body.copy_from)) if body.copy_from else []
+    if leads:
+        await _write_list(email, new_id, leads)
+    entry = {"id": new_id, "name": name, "created_at": time.time(), "count": len(leads)}
+    lists = idx["lists"] + [entry]
+    await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
+    return {"list": entry, "lists": lists}
+
+
+@app.get("/api/lists/{list_id}")
+async def read_list(list_id: str, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _check_list_id(list_id)
+    idx = await _ensure_lists(email)
+    entry = next((l for l in idx["lists"] if l["id"] == list_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such list.")
+    return {"list": entry, "leads": await _read_list(email, list_id),
+            "settings": idx["settings"], "backend": storage_backend()}
+
+
+@app.put("/api/lists/{list_id}")
+async def save_list(list_id: str, body: ListSave, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _check_list_id(list_id)
+    idx = await _ensure_lists(email)
+    lists = idx["lists"]
+    if not any(l["id"] == list_id for l in lists):
+        raise HTTPException(status_code=404, detail="No such list.")
+    await _write_list(email, list_id, body.leads)
+    for l in lists:
+        if l["id"] == list_id:
+            l["count"] = len(body.leads)
+            l["saved_at"] = time.time()
+    await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
+    return {"ok": True, "leads": len(body.leads), "lists": lists}
+
+
+@app.patch("/api/lists/{list_id}")
+async def rename_list(list_id: str, body: ListPatch, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _check_list_id(list_id)
+    name = (body.name or "").strip()[:60]
+    if not name:
+        raise HTTPException(status_code=400, detail="A list needs a name.")
+    idx = await _ensure_lists(email)
+    entry = next((l for l in idx["lists"] if l["id"] == list_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such list.")
+    entry["name"] = name
+    await _write_index(email, idx["settings"], idx["lists"], idx["legacy_leads"])
+    return {"list": entry, "lists": idx["lists"]}
+
+
+@app.delete("/api/lists/{list_id}")
+async def delete_list(list_id: str, request: Request):
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _check_list_id(list_id)
+    idx = await _ensure_lists(email)
+    if len(idx["lists"]) <= 1:
+        raise HTTPException(status_code=400, detail="This is your only list — rename it instead of deleting it.")
+    if not any(l["id"] == list_id for l in idx["lists"]):
+        raise HTTPException(status_code=404, detail="No such list.")
+    lists = [l for l in idx["lists"] if l["id"] != list_id]
+    await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
+    key = _list_key(email, list_id)
+    await _fs_del(FS_LISTS, key)
+    _MEM_LISTS.pop(key, None)
+    return {"ok": True, "lists": lists}
+
+
+class SettingsSave(BaseModel):
+    settings: dict
+
+
+@app.put("/api/settings")
+async def save_settings(body: SettingsSave, request: Request):
+    """Settings belong to the user, not to any one list."""
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    idx = await _ensure_lists(email)
+    await _write_index(email, body.settings, idx["lists"], idx["legacy_leads"])
+    return {"ok": True}
 
 
 # ------------------------- Google Drive import -------------------------

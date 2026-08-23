@@ -27,7 +27,7 @@ cleanup(){ [ -n "$STARTED" ] && kill "$STARTED" 2>/dev/null; }
 trap cleanup EXIT
 
 # Suites that assert and exit non-zero. These are the regression guard.
-SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js upgrade-test.js hh-test.js v3-test.js"
+SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js upgrade-test.js hh-test.js v3-test.js"
 FAILED=""
 for s in $SUITES; do
   printf '%-20s ' "$s"
@@ -41,7 +41,7 @@ for s in $SUITES; do
 done
 
 # Backend suites run from the repo root, each against its own stub server.
-for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py; do
+for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py; do
   printf '%-20s ' "$s"
   if out=$(cd "$ROOT" && python3 "tests/$s" 2>&1); then
     echo "$(echo "$out" | tail -1)"

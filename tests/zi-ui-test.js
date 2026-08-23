@@ -14,6 +14,13 @@ const me=(o)=>({signed_in:false,providers:{google:true,microsoft:true},
 
   let who=me({}), ziBody=null, ziStatus=200, ziResp={data:[]};
   await p.route('**/api/me',r=>r.fulfill({json:who}));
+  // The app reads its list index first; without this the unmocked call 401s
+  // against the real server and shows up as a console error.
+  await p.route('**/api/lists', r=>r.fulfill({json:{lists:[{id:'default',name:'My leads',count:0}],settings:{}}}));
+  await p.route('**/api/lists/*', r=>r.request().method()==='GET'
+    ? r.fulfill({json:{list:{id:'default',name:'My leads'},leads:[],settings:{}}})
+    : r.fulfill({json:{ok:true,lists:[{id:'default',name:'My leads',count:0}]}}));
+  await p.route('**/api/settings', r=>r.fulfill({json:{ok:true}}));
   await p.route('**/api/state',r=>r.fulfill({json:{found:false,settings:{},leads:[]}}));
   await p.route('**/api/zi/search',r=>{
     ziBody=JSON.parse(r.request().postData()||'{}');

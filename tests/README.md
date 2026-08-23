@@ -43,6 +43,9 @@ and `opportunities-test.py` drive FastAPI (or the parsers) directly.
 | `zi-mcp-ui-test.js` | saving and removing the MCP token, and that the credential never reaches localStorage or the lead-state document |
 | `prospecting-test.py` | the WARN and Form 5500 parsers — company-name normalisation, column aliasing, the join, and that an unmatched event survives without acquiring a made-up dollar figure |
 | `opportunities-test.py` | the source endpoints against a stub WARN feed and a stub zipped DOL file: the probe reports what came back, one dead feed does not sink the refresh, and a signed-out visitor gets nothing |
+| `lists-test.py` | named lead lists server-side — one document per list, the migration off the single-list document, and that one user's lists are invisible to another even when both are called `default` |
+| `senders-test.py` | sending as the right address — which addresses are on offer, the alias From header, and that an address the user has not connected is refused rather than silently swapped |
+| `lists-ui-test.js` | the switcher and the From picker — switching flushes the list you are leaving, and one address hides the dropdown |
 | `pipeline-test.js` | the four-stage layout and automatic sourcing — the sheet read on arrival with no dialog, re-reading a sheet that grew without duplicating anyone, the stage counts, and an excluded lead never heading the call list |
 | `scs-test.js` | the SCS campaign — tenure scoring including the 46-year run that must not be flagged, inferred age never firing signal A as confirmed, the 59½ badge, `positionStartDateMax` not `Min`, credit-cap parking, and the JSON batch importer |
 | `research-prompt-test.js` | a real research-tool export end to end — what the app can and cannot read from it, that self-declared estimates never reach a scoring field, the generated research prompt, and pasting a Drive link |
