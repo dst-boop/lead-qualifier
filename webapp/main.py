@@ -41,6 +41,8 @@ import httpx
 import msal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+
+from webapp import prospecting
 from pydantic import BaseModel, EmailStr
 
 # --- Microsoft ---
@@ -50,6 +52,22 @@ MS_TENANT_ID = os.environ.get("MS_TENANT_ID", "common")
 MS_AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 MS_SCOPES = ["User.Read", "Mail.Send", "Calendars.ReadWrite"]
 GRAPH = "https://graph.microsoft.com/v1.0"
+
+# --- Money-in-motion sources (WARN notices, Form 5500) ---
+# Both are free public data published for the purpose. Neither is reachable from
+# the environment this was written in, but Cloud Run has ordinary egress, so the
+# app fetches them at run time and /api/sources/probe reports what actually came
+# back — the parser gets pinned to a real response rather than to a guess about
+# column names.
+#
+# WARN_FEEDS is JSON: [{"id","state","format":"csv"|"json","url"}]. Empty by
+# default, because a wrong URL that quietly 404s is worse than no feed at all.
+WARN_FEEDS = os.environ.get("WARN_FEEDS", "")
+FORM5500_URL = os.environ.get("FORM5500_URL", "")
+FORM5500_CSV_IN_ZIP = os.environ.get("FORM5500_CSV_IN_ZIP", "f_5500")
+SOURCE_STATES = os.environ.get("SOURCE_STATES", "")     # e.g. "NY,NJ,CT,PA"
+SOURCE_MIN_WORKERS = int(os.environ.get("SOURCE_MIN_WORKERS", "25"))
+FS_OPPS = os.environ.get("FIRESTORE_OPPS_COLLECTION", "opportunities")
 
 # --- ZoomInfo via the MCP connector ---
 # The DevPortal REST API and the MCP server are different doors. The REST API
@@ -690,6 +708,7 @@ async def me(request: Request):
         "zoominfo": _zi_configured(),
         "edgar": bool(EDGAR_USER_AGENT and ANTHROPIC_API_KEY),
         "zi_mcp": bool(ANTHROPIC_API_KEY),
+        "opportunities": bool(WARN_FEEDS.strip()),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -1189,6 +1208,164 @@ async def zi_debug(request: Request, path: str = "lookup/inputfields/contact/sea
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, headers={"Authorization": f"Bearer {token}"})
     return {"url": url, "status": r.status_code, "body": r.text[:4000]}
+
+
+# ------------------- Money in motion: WARN x Form 5500 -------------------
+# The rest of the app scores a list somebody else built. This finds the events
+# that make the list: a dated mass separation at a named employer, priced by the
+# size of that employer's retirement plan.
+
+def _source_states() -> set:
+    return {s.strip().upper() for s in SOURCE_STATES.split(",") if s.strip()}
+
+
+def _warn_feeds() -> list:
+    if not WARN_FEEDS.strip():
+        return []
+    try:
+        feeds = json.loads(WARN_FEEDS)
+    except ValueError:
+        return []
+    return [f for f in feeds if isinstance(f, dict) and f.get("url")]
+
+
+async def _get(url: str, *, as_bytes: bool = False, timeout: int = 120):
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as cx:
+        r = await cx.get(url, headers={"User-Agent": EDGAR_USER_AGENT or
+                                       "FPA Lead Qualifier"})
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"{url} returned {r.status_code}: {r.text[:200]}")
+    return r.content if as_bytes else r.text
+
+
+async def _load_warn() -> dict:
+    """Every configured WARN feed, normalised. Reports per-feed what happened."""
+    events, report = [], []
+    for feed in _warn_feeds():
+        fid = feed.get("id") or feed.get("state") or feed["url"][:40]
+        try:
+            if (feed.get("format") or "csv").lower() == "json":
+                raw = json.loads(await _get(feed["url"]))
+                if isinstance(raw, dict):
+                    # Socrata sometimes wraps rows; take the first list it holds.
+                    raw = next((v for v in raw.values() if isinstance(v, list)), [])
+                parsed = prospecting.parse_warn_json(raw, feed.get("state", ""))
+            else:
+                parsed = prospecting.parse_warn_csv(await _get(feed["url"]), feed.get("state", ""))
+        except HTTPException as e:
+            report.append({"id": fid, "error": e.detail})
+            continue
+        except Exception as e:
+            report.append({"id": fid, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+            continue
+        events.extend(parsed["events"])
+        report.append({"id": fid, "events": len(parsed["events"]),
+                       "mapped": parsed["mapped"], "unmapped": parsed["unmapped"]})
+    return {"events": events, "feeds": report}
+
+
+async def _load_plans() -> dict:
+    """Form 5500 sponsors, filtered to the states this practice covers."""
+    if not FORM5500_URL:
+        return {"plans": {}, "note": "FORM5500_URL is not set."}
+    blob = await _get(FORM5500_URL, as_bytes=True)
+    text = (prospecting.unzip_first_csv(blob, FORM5500_CSV_IN_ZIP)
+            if FORM5500_URL.lower().endswith(".zip") or blob[:2] == b"PK"
+            else blob.decode("utf-8", errors="replace"))
+    parsed = prospecting.parse_5500_csv(text, states=_source_states() or None)
+    return {"plans": parsed["plans"], "rows": parsed.get("rows"),
+            "kept": parsed.get("kept"), "mapped": parsed["mapped"],
+            "unmapped": parsed["unmapped"]}
+
+
+@app.get("/api/sources/probe")
+async def sources_probe(request: Request, which: str = "all"):
+    """What the feeds actually return, and which columns were matched.
+
+    None of these hosts is reachable from the environment this was written in,
+    so this is how the column mapping gets pinned to reality instead of to a
+    guess. Run it once after setting the URLs; anything in `unmapped` is a
+    column alias that needs adding.
+    """
+    await _active_token(request)
+    out = {"states": sorted(_source_states()), "min_workers": SOURCE_MIN_WORKERS}
+    if which in ("all", "warn"):
+        feeds = _warn_feeds()
+        out["warn"] = {"configured": len(feeds)}
+        if feeds:
+            got = await _load_warn()
+            out["warn"]["feeds"] = got["feeds"]
+            out["warn"]["sample"] = got["events"][:3]
+    if which in ("all", "5500"):
+        if not FORM5500_URL:
+            out["form5500"] = {"error": "FORM5500_URL is not set."}
+        else:
+            try:
+                got = await _load_plans()
+                sample = list(got["plans"].items())[:3]
+                out["form5500"] = {"rows_read": got.get("rows"), "kept": got.get("kept"),
+                                   "mapped": got.get("mapped"), "unmapped": got.get("unmapped"),
+                                   "sample": [v for _, v in sample]}
+            except HTTPException as e:
+                out["form5500"] = {"error": e.detail}
+            except Exception as e:
+                out["form5500"] = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
+    return out
+
+
+@app.post("/api/sources/refresh")
+async def sources_refresh(request: Request):
+    """Rebuild the opportunity list and store it.
+
+    Cheap enough to run on a schedule — Cloud Scheduler hitting this weekly is
+    what turns a set of buttons into something that watches.
+    """
+    await _active_token(request)
+    warn = await _load_warn()
+    if not warn["events"]:
+        return {"stored": 0, "feeds": warn["feeds"],
+                "note": "No WARN events. Set WARN_FEEDS, then check /api/sources/probe."}
+    try:
+        plans = await _load_plans()
+    except Exception as e:
+        plans = {"plans": {}, "note": f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}"}
+    opps = prospecting.build_opportunities(
+        warn["events"], plans.get("plans") or {},
+        min_workers=SOURCE_MIN_WORKERS, states=_source_states() or None)
+    await _fs_set(FS_OPPS, "latest", {
+        "built_at": int(time.time()),
+        "count": len(opps),
+        "matched": sum(1 for o in opps if o["plan_matched"]),
+        "items": opps[:500],                 # the tail is noise, and documents have limits
+    })
+    return {"stored": len(opps), "matched": sum(1 for o in opps if o["plan_matched"]),
+            "feeds": warn["feeds"], "plans": {k: v for k, v in plans.items() if k != "plans"}}
+
+
+@app.get("/api/opportunities")
+async def opportunities(request: Request, refresh: bool = False):
+    """Employers with money about to come loose, biggest first."""
+    await _active_token(request)
+    if not refresh:
+        doc = await _fs_get(FS_OPPS, "latest")
+        if doc:
+            return doc
+    warn = await _load_warn()
+    if not warn["events"]:
+        return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
+                "feeds": warn["feeds"],
+                "note": "No WARN feeds configured — see SETUP-prospecting.md."}
+    try:
+        plans = (await _load_plans()).get("plans") or {}
+    except Exception:
+        plans = {}
+    opps = prospecting.build_opportunities(
+        warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
+        states=_source_states() or None)
+    return {"built_at": int(time.time()), "count": len(opps),
+            "matched": sum(1 for o in opps if o["plan_matched"]),
+            "items": opps[:500], "feeds": warn["feeds"]}
 
 
 # ------------------- ZoomInfo through the MCP connector -------------------

@@ -23,7 +23,8 @@ Playwright's own download if that path is absent.
 The app is a single HTML file with no module boundary — `scoreLead` and
 `guessColumns` are not importable. Loading the page in Chromium and calling them
 there is the only way to test the code that actually ships, rather than a copy of
-it. Backend routes are the exception: `zi-oauth-test.py` drives FastAPI directly.
+it. Backend routes are the exception: `zi-oauth-test.py`, `edgar-test.py`, `zi-mcp-test.py`, `prospecting-test.py`
+and `opportunities-test.py` drive FastAPI (or the parsers) directly.
 
 ## Regression suites — these gate a deploy
 
@@ -40,6 +41,10 @@ it. Backend routes are the exception: `zi-oauth-test.py` drives FastAPI directly
 | `edgar-ui-test.js` | the 🏛 button — score change, the filing evidence shown, and a miss that is recorded rather than retried |
 | `zi-mcp-test.py` | ZoomInfo via the MCP connector — that both halves of the request are sent, the token is per-user, and failures are errors rather than empty lists |
 | `zi-mcp-ui-test.js` | saving and removing the MCP token, and that the credential never reaches localStorage or the lead-state document |
+| `prospecting-test.py` | the WARN and Form 5500 parsers — company-name normalisation, column aliasing, the join, and that an unmatched event survives without acquiring a made-up dollar figure |
+| `opportunities-test.py` | the source endpoints against a stub WARN feed and a stub zipped DOL file: the probe reports what came back, one dead feed does not sink the refresh, and a signed-out visitor gets nothing |
+| `research-prompt-test.js` | a real research-tool export end to end — what the app can and cannot read from it, that self-declared estimates never reach a scoring field, the generated research prompt, and pasting a Drive link |
+| `opps-ui-test.js` | the Money-in-motion modal — server ranking preserved, unpriced employers badged and dashed rather than estimated, refresh refetching, and the copy-search prompt |
 | `upgrade-test.js` | an older saved list still loads and rescores |
 | `hh-test.js` | household matching — telling a spouse apart from a wrong number |
 | `v3-test.js` | scoring and export against the v3 column layout |

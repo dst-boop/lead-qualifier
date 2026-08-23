@@ -924,3 +924,182 @@ consenting. It needs **no code change** — `MS_AUTHORITY` is built from
 `MS_TENANT_ID`, so `common` is a variable, not a branch. Worth remembering
 before anyone assumes a multi-firm future requires a rewrite.
 
+
+## 16. Money in motion — invert the pipeline, start from the event
+
+Everything before this section takes a list of people and asks whether any of
+them has money moving. Section 6's scoring model is that question made
+arithmetic, and section 11e observed that the search matters more than the
+model. This is the end of that thought: **the search should not be for people at
+all.**
+
+### The Boeing list proved the point
+
+87 real contacts, imported and scored. Tier A was not merely empty — it was
+*arithmetically unreachable*. Signals A (age) and E (prior experience) were
+structurally zero for the whole file, capping every lead at 35 against a Tier B
+threshold of 40. No amount of enrichment on that list would have produced a
+Tier A lead, because the list was assembled by employer and title, and neither
+of those is evidence that money is moving.
+
+The inference we were trying to make — *this person is 58 and a director, so
+perhaps they have a rollover* — is a guess dressed as a score.
+
+### The inversion
+
+Find the **event** that moves retirement money, then find the people it moves.
+
+Two free public sources, joined on employer name:
+
+- **WARN notices.** The federal WARN Act obliges employers of 100+ to give 60
+  days' written notice of a plant closing or mass layoff, and states publish
+  those notices. Employer, location, headcount, effective date. Forward-looking
+  by construction: the notice precedes the separation, and a 401(k) becomes
+  rollable when employment ends.
+- **Form 5500.** Every employer retirement plan files annually with the DOL.
+  Total participants and total plan assets, in a bulk download.
+
+Plan assets ÷ participants = average balance. Average balance × separated
+workers = **dollars in motion**, at a named employer, on a known date. That is
+the ranking, and it is evidence rather than inference.
+
+The product is not a lead. It is a *reason to build a lead list*, with a
+deadline. The existing machinery — ZoomInfo, Claude, the CSV importer, the
+scoring model — still does the people. It just no longer has to guess why.
+
+### Unmatched events are kept, flagged, and never priced
+
+When Form 5500 has no row for a WARN employer, the event stays in the list with
+`plan_matched: false` and a null balance, rendered as an em-dash and a badge.
+
+Two alternatives were rejected. **Dropping it** throws away a dated separation of
+several hundred people because a government CSV spells the employer differently
+— the event is real whether or not the join succeeded. **Estimating a balance**
+from a national average would put a fabricated number in the one column the
+entire feature ranks on; a ranking that cannot be trusted is worse than no
+ranking.
+
+The same reasoning governs the matching itself. Names are normalised —
+case, punctuation and corporate suffixes stripped, initialisms rejoined — but
+deliberately not fuzzy-matched. Loose matching attaches the wrong company's
+plan assets to a layoff, and a confidently wrong $40M is more damaging than an
+honest dash. This is the same rule section 11f settled for EDGAR, where
+`_norm_company` was changed to refuse on collision rather than silently keep the
+first candidate.
+
+### No live response has ever been seen from either source
+
+This must be stated plainly because it bounds how much the column mapping can be
+trusted. `dol.gov`, `data.gov`, `askebsa.dol.gov` and the state labor sites all
+return 000/403 through this environment's egress proxy — an organisation policy
+denial, and `/root/.ccr/README.md` is explicit that the response is to report the
+blocked host rather than route around it.
+
+So the WARN and Form 5500 column aliases were written from published field
+documentation (the DOL layout specifies header-row field names, `_CNT` integers,
+`_AMT` two-decimal amounts, mm/dd/yyyy dates, double-quote qualifier) and are
+verified only against fixtures built to match that documentation. The parsers
+themselves are well covered — 50 checks — but a passing parser test says nothing
+about whether New Jersey calls its headcount column what we expect.
+
+The design response is to make the gap visible and cheap to close rather than to
+pretend it is not there:
+
+- every URL is an environment variable, so nothing is hardcoded to a URL that
+  may not exist
+- the app fetches at run time from Cloud Run, which has ordinary egress
+- `/api/sources/probe` reports, per feed, the rows read, the columns matched,
+  and — the point of the endpoint — the required fields it **could not** match
+
+One request against the real feeds turns the guess into a fact, and each miss it
+reports is a one-line addition to an alias list. That is the intended first step
+after deploy, and `SETUP-prospecting.md` leads with it.
+
+### Limits worth recording
+
+- **Only mass separations.** An individual retiring at 59½ files no WARN notice.
+  Those still depend on the age signals — EDGAR for public-company officers, or
+  a graduation year on import.
+- **Subsidiary/parent mismatch.** The WARN filer is often a subsidiary while the
+  plan sponsor is the parent. Accepted as a miss, per the no-fuzzy-matching rule.
+- **Stale assets.** Form 5500 is annual with a long filing lag. The average
+  balance is an order of magnitude, not a quote.
+
+## 17. A research tool's output, measured
+
+Section 11e argued the search matters more than the model. Here is that claim
+tested against a real run, because the numbers are more useful than the
+argument.
+
+Do Browser was given a prospecting brief — the ICP, the six business lines, and
+the instruction to "provide enough information for the app to accurately sort
+and enhance the leads." It returned a Google Sheet: **155 people, all distinct,
+22 columns, no duplicates, no junk rows.** As a piece of automation it worked.
+
+### What the app can read from it
+
+Four columns of 22: Full Name, Current Title, Current Company, LinkedIn URL.
+
+There is no email, no phone, no mobile, no job start date, no graduation year,
+no years of experience, and no confirmed age. Run through the importer and
+scored, **every one of the 155 lands in Excluded with 20 points out of 80** —
+signal T and nothing else. The mobile gate holds all of them out of a tier
+regardless. The file cannot be worked: there is no way to contact anyone on it.
+
+### Most of the remaining columns are the job title, restated
+
+The sheet carries `Est. Age Range`, `Est. Annual Income`, `Est. Assets`,
+`401(k) Rollover Opportunity`, `Lead Category`, `Life Event Signal`, `Money in
+Motion Indicator`, `Lead Score (1-100)` and `Priority`. Cross-tabulated:
+
+- **Age.** Three distinct values across 155 people. 90 are `55–64`. Every
+  contact holding a "president" or "chief" title is `55–64` without exception.
+  The age is the seniority of the title, relabelled.
+- **The score.** The five derived fields collapse to **11 distinct combinations**
+  across 155 people, and the score is a pure function of them — not one bucket
+  carries two different scores. A "1–100 lead score" that takes 11 values
+  carries under 3.5 bits, all of it recomputable from the title string. 98 of
+  155 are "🔴 Hot".
+- **Money in Motion.** Defined as a job change in the last six months, evidenced
+  by the profile listing a previous role. It is not applied consistently even
+  against its own rule: 31 people who *do* have a previous company are marked
+  "No signal". `Years at Current Role`, the column that would make the claim
+  checkable, is empty for all 155.
+
+None of this is dishonesty on the tool's part. It was asked for age, income and
+assets; those facts are not on the pages it was reading; it produced the best
+available proxy and labelled it `Est.`. The brief never said a blank was
+acceptable, so it never left one.
+
+### Two changes, both narrow
+
+**A column that announces itself as an estimate is never auto-mapped.** Headers
+matching a leading estimate qualifier (`est`, `estimated`, `approx`, `assumed`,
+`inferred`, `predicted`, …) are claimed before the matching passes run, so no
+field can reach them, and the mapper says why rather than dropping them
+silently. Mapped to age, `Est. Age Range` would be worth 25 points — 31% of the
+total — awarded for a value derived from the job title that the score already
+counts under signal T. The column stays selectable by hand: overriding is the
+user's call, but the auto-mapper will not make it for them.
+
+This also protects the `Age` column on the unmerged `claude/wealth-fields`
+branch, where `Est. Age Range` would otherwise be a live partial match.
+
+**The app now generates the prompt.** `researchPrompt()` is built from
+`TEMPLATE_COLS` and the live ICP settings, for exactly the reason the CSV
+template is built from `FIELDS`: a prompt naming columns the importer does not
+read is worse than no prompt. It carries the schema verbatim, the ICP as
+configured, an explicit instruction to leave a cell blank rather than estimate
+it, a specific prohibition on inferring age from seniority, and a list of
+sources where the facts are actually recorded — proxy statements, licensing
+registers, alumni notes, WARN notices — rather than one profile site.
+
+The generated prompt is not a fix for the sheet already built. It is what makes
+the next run importable.
+
+### The general rule
+
+**A derived column is not data.** It costs nothing to produce, so it is produced
+in bulk, and it arrives looking exactly like the observed fact it stands in for.
+The only defence is the one applied here and in §16: refuse to consume it, keep
+the blank, and say why the blank is there.
