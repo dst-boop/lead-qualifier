@@ -138,6 +138,7 @@
 
   .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:var(--tierX-bg);color:var(--tierX);white-space:nowrap}
   .badge.camp-scs{background:#e8eef7;color:#33507a}
+  .badge.planchip{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
   .sellbadge.soon{background:var(--brass-soft);color:#7a5c15;border-color:#e0d2b0}
@@ -326,6 +327,7 @@
     <p class="stsub" id="sEnrich">Fill in what is missing before anyone calls.</p>
     <div class="stacts">
       <button class="pbtn primary" id="btnEnrichAll">Enrich these</button>
+      <button class="pbtn" id="btnPlans" title="Look up every employer's retirement plan in the DOL Form 5500 file — free, no credits, and puts an average balance on each lead">Price the employers (free)</button>
       <button class="pbtn" id="btnRetryBlocked" style="display:none">Retry blocked (0)</button>
     </div>
     <p class="srcnote" id="enrNote"></p>
@@ -2097,7 +2099,7 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${
       cbDue?`<div class="cbline ${cbDue}" title="${esc(L.callbackNote||'')}">&#9200; ${esc(cbLabel(L))}${L.callbackNote?' · '+esc(L.callbackNote):''}</div>`:''}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
@@ -2839,6 +2841,40 @@ document.getElementById('btnDeleteList').addEventListener('click',async()=>{
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
 })();
 
+/* ---- free enrichment: what the employer's plan is worth ----
+   The Form 5500 file was already being fetched to price WARN employers. The
+   same file prices any employer, so a lead whose only other data is a job
+   title gets a dollar figure attached to it for nothing. It is an order of
+   magnitude and it is labelled as one — the filing is annual and lags. */
+async function loadPlans(){
+  const btn=document.getElementById('btnPlans');
+  const names=[...new Set(state.leads.map(L=>(L.employer||'').trim()).filter(Boolean))];
+  if(!names.length){toast('No employers on this list yet.');return;}
+  btn.disabled=true;const was=btn.textContent;btn.textContent='Looking up plans…';
+  try{
+    const d=await api('/api/plans',{employers:names},'POST');
+    if(d.note){toast(d.note);return;}
+    let hit=0;
+    state.leads.forEach(L=>{
+      const p=d.plans[(L.employer||'').trim()];
+      if(!p)return;
+      L.plan={name:p.plan_name||'',avg:p.avg_balance||null,
+              participants:p.participants||null,year:p.plan_year||''};
+      hit++;
+    });
+    save();render();
+    toast(`Plan size found for ${hit} of ${state.leads.length} leads — ${d.matched} of ${d.asked} employers matched.`);
+  }catch(e){toast('Could not read the Form 5500 file: '+e.message);}
+  finally{btn.disabled=false;btn.textContent=was;}
+}
+function planChip(L){
+  if(!L.plan||!L.plan.avg)return '';
+  const v='$'+Math.round(L.plan.avg).toLocaleString();
+  return ` <span class="badge planchip" title="${esc(L.plan.name||'Retirement plan')} — average balance across ${
+    L.plan.participants?L.plan.participants.toLocaleString()+' participants':'the plan'}${
+    L.plan.year?', plan year '+esc(L.plan.year):''}. From the employer's Form 5500. An order of magnitude, not this person's balance.">~${v} avg</span>`;
+}
+
 /* ---- money-in-motion signals ----
    The rest of the app finds people. This watches the ones already found. Every
    source behind it is free and public, so it runs on the whole list rather
@@ -2888,6 +2924,7 @@ window.focusLead=id=>{
   filterTier='';expanded=id;render();
   document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
 };
+document.getElementById('btnPlans').addEventListener('click',loadPlans);
 document.getElementById('btnSignals').addEventListener('click',()=>{openModal('mSignals');loadSignals(false);});
 document.getElementById('sigMark').addEventListener('click',()=>loadSignals(true));
 document.getElementById('sigMail').addEventListener('click',async()=>{
