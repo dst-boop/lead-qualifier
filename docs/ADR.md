@@ -1024,3 +1024,82 @@ after deploy, and `SETUP-prospecting.md` leads with it.
   plan sponsor is the parent. Accepted as a miss, per the no-fuzzy-matching rule.
 - **Stale assets.** Form 5500 is annual with a long filing lag. The average
   balance is an order of magnitude, not a quote.
+
+## 17. A research tool's output, measured
+
+Section 11e argued the search matters more than the model. Here is that claim
+tested against a real run, because the numbers are more useful than the
+argument.
+
+Do Browser was given a prospecting brief — the ICP, the six business lines, and
+the instruction to "provide enough information for the app to accurately sort
+and enhance the leads." It returned a Google Sheet: **155 people, all distinct,
+22 columns, no duplicates, no junk rows.** As a piece of automation it worked.
+
+### What the app can read from it
+
+Four columns of 22: Full Name, Current Title, Current Company, LinkedIn URL.
+
+There is no email, no phone, no mobile, no job start date, no graduation year,
+no years of experience, and no confirmed age. Run through the importer and
+scored, **every one of the 155 lands in Excluded with 20 points out of 80** —
+signal T and nothing else. The mobile gate holds all of them out of a tier
+regardless. The file cannot be worked: there is no way to contact anyone on it.
+
+### Most of the remaining columns are the job title, restated
+
+The sheet carries `Est. Age Range`, `Est. Annual Income`, `Est. Assets`,
+`401(k) Rollover Opportunity`, `Lead Category`, `Life Event Signal`, `Money in
+Motion Indicator`, `Lead Score (1-100)` and `Priority`. Cross-tabulated:
+
+- **Age.** Three distinct values across 155 people. 90 are `55–64`. Every
+  contact holding a "president" or "chief" title is `55–64` without exception.
+  The age is the seniority of the title, relabelled.
+- **The score.** The five derived fields collapse to **11 distinct combinations**
+  across 155 people, and the score is a pure function of them — not one bucket
+  carries two different scores. A "1–100 lead score" that takes 11 values
+  carries under 3.5 bits, all of it recomputable from the title string. 98 of
+  155 are "🔴 Hot".
+- **Money in Motion.** Defined as a job change in the last six months, evidenced
+  by the profile listing a previous role. It is not applied consistently even
+  against its own rule: 31 people who *do* have a previous company are marked
+  "No signal". `Years at Current Role`, the column that would make the claim
+  checkable, is empty for all 155.
+
+None of this is dishonesty on the tool's part. It was asked for age, income and
+assets; those facts are not on the pages it was reading; it produced the best
+available proxy and labelled it `Est.`. The brief never said a blank was
+acceptable, so it never left one.
+
+### Two changes, both narrow
+
+**A column that announces itself as an estimate is never auto-mapped.** Headers
+matching a leading estimate qualifier (`est`, `estimated`, `approx`, `assumed`,
+`inferred`, `predicted`, …) are claimed before the matching passes run, so no
+field can reach them, and the mapper says why rather than dropping them
+silently. Mapped to age, `Est. Age Range` would be worth 25 points — 31% of the
+total — awarded for a value derived from the job title that the score already
+counts under signal T. The column stays selectable by hand: overriding is the
+user's call, but the auto-mapper will not make it for them.
+
+This also protects the `Age` column on the unmerged `claude/wealth-fields`
+branch, where `Est. Age Range` would otherwise be a live partial match.
+
+**The app now generates the prompt.** `researchPrompt()` is built from
+`TEMPLATE_COLS` and the live ICP settings, for exactly the reason the CSV
+template is built from `FIELDS`: a prompt naming columns the importer does not
+read is worse than no prompt. It carries the schema verbatim, the ICP as
+configured, an explicit instruction to leave a cell blank rather than estimate
+it, a specific prohibition on inferring age from seniority, and a list of
+sources where the facts are actually recorded — proxy statements, licensing
+registers, alumni notes, WARN notices — rather than one profile site.
+
+The generated prompt is not a fix for the sheet already built. It is what makes
+the next run importable.
+
+### The general rule
+
+**A derived column is not data.** It costs nothing to produce, so it is produced
+in bulk, and it arrives looking exactly like the observed fact it stands in for.
+The only defence is the one applied here and in §16: refuse to consume it, keep
+the blank, and say why the blank is there.

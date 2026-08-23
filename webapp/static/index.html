@@ -417,8 +417,11 @@
   <table class="maptable tmpl"><thead><tr><th>Column</th><th>Example</th><th>What it does</th></tr></thead><tbody id="tmplRows"></tbody></table>
   <h3>Also recognised if present</h3>
   <p class="hint" id="tmplExtra"></p>
+  <h3>Having someone else build the list</h3>
+  <p class="hint">If you are pointing a research tool at this &mdash; Do Browser, Claude, an assistant &mdash; copy the prompt below rather than describing the columns yourself. It is generated from the table above, so it always asks for the columns this app actually reads, and it tells the tool to leave a cell blank instead of estimating it. A list of 155 people with a guessed age column and no phone numbers scores 20 out of 80 and lands entirely in Excluded.</p>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mTemplate')">Close</button>
+    <button class="mbtn" id="btnCopyPrompt">Copy research prompt</button>
     <button class="mbtn save" id="btnDlTemplate">Download template CSV</button>
   </div>
 </div></div>
@@ -435,7 +438,7 @@
 <div class="overlay" id="mDrive"><div class="modal" style="max-width:560px">
   <h2>Pull from Google Drive</h2>
   <p class="hint">Export from ZoomInfo into Drive, then pick it here &mdash; no download, no upload. Spreadsheets only, newest first.</p>
-  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">File name contains<input type="text" id="drvName" placeholder="401(k) Rollover Leads"></label>
+  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">File name, or paste the sheet's link<input type="text" id="drvName" placeholder="401(k) Rollover Leads &mdash; or https://docs.google.com/spreadsheets/d/…"></label>
   <div id="drvList" style="margin-top:10px;max-height:300px;overflow:auto"></div>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mDrive')">Cancel</button>
@@ -920,10 +923,21 @@ function wordMatch(header,alias){
   }
   return false;
 }
+/* A column that announces itself as a guess is never auto-mapped onto a field
+   the score reads. A research tool handed back "Est. Age Range" filled in for
+   every one of 155 people — derived from job title, three distinct values, 90
+   of them "55-64" because the title said president. Mapped to age that is 25
+   points, 31% of the total, awarded for a string the tool made up. The column
+   is still selectable by hand, because that is the user's call to make; the
+   auto-mapper will not make it for them. */
+const DERIVED_RE=/^(est|estd|estimate|estimated|approx|approximate|assumed|inferred|implied|guessed|predicted|projected|likely|probable)\b/;
+function looksDerived(h){return DERIVED_RE.test(normHeader(h));}
 function guessColumns(headers){
   const low=headers.map(normHeader);
   const squashed=low.map(h=>h.replace(/ /g,''));
   const used=new Set(),map={};
+  // Claimed before any pass runs, so no field can reach them.
+  low.forEach((h,i)=>{if(DERIVED_RE.test(h))used.add(i);});
   FIELDS.forEach(([key,,syn])=>{
     for(const raw of syn){
       const a=normHeader(raw), i=low.indexOf(a);
@@ -1002,9 +1016,11 @@ function refreshMapState(){
   if(map.fullName>-1&&!(map.firstName>-1))bits.push(`One name column — it will be split into first and last on import.`);
   if(gaps.length)bits.push(`<span class="mapwarn">Missing: ${gaps.map(lab).join(', ')} — leads need a name to be worth calling.</span>`);
   if(noMobile)bits.push(`<span class="mapwarn">Missing: ${lab(TIER_GATE)} — every lead in this file will land in Excluded rather than a tier, whatever it scores.</span>`);
-  bits.push(unused.length
-    ? `Ignored ${unused.length} column${unused.length>1?'s':''}: <span class="mapunused">${unused.map(esc).join(', ')}</span>`
-    : `Every column in the file is being used.`);
+  const derived=unused.filter(looksDerived), plain=unused.filter(h=>!looksDerived(h));
+  if(plain.length)bits.push(`Ignored ${plain.length} column${plain.length>1?'s':''}: <span class="mapunused">${plain.map(esc).join(', ')}</span>`);
+  if(derived.length)bits.push(`<span class="mapwarn">Not imported \u2014 these columns say they are estimates, and the score only reads observed facts: `
+    +`<span class="mapunused">${derived.map(esc).join(', ')}</span>. Pick one by hand above if you know it is real.</span>`);
+  if(!unused.length)bits.push(`Every column in the file is being used.`);
   document.getElementById('mapSummary').innerHTML=bits.join('<br>');
 }
 function openMapper(fname){
@@ -1692,6 +1708,65 @@ function templateCSV(){
   const row2=['Ray','Okonjo','Senior Vice President','VP Level Exec','Halstead Marine','rokonjo@halsteadmarine.com','','(207) 555-0117','','Portland','ME','','2024-09-15','','1991','29','1.0',''];
   return [head,row1,row2].map(r=>r.map(v=>q(''+v)).join(',')).join('\r\n')+'\r\n';
 }
+/* ---- The prompt to hand a research tool ----
+   Built from TEMPLATE_COLS and the live ICP settings, for the same reason the
+   template is: a prompt that names columns the importer does not read is worse
+   than no prompt. A run against Do Browser came back with 155 people and 22
+   columns, four of which this app could read — no email, no phone, no date, no
+   real age — and every one of the 155 landed in Excluded with a score of 20 out
+   of 80. The tool did what it was asked. It was asked for the wrong thing. */
+function researchPrompt(opts){
+  const st=state.settings||DEFAULTS, o=opts||{};
+  const cols=TEMPLATE_COLS.map(([,h])=>h);
+  const gate=TEMPLATE_COLS.filter(([k])=>k==='mobilePhone'||k==='email').map(([,h])=>h);
+  const where=o.employer
+    ? `Find current and recent employees of ${o.employer}${o.state?` in ${o.state}`:''}.`
+    : `Find individuals in the United States${(st.exStates||'').trim()?`, excluding ${st.exStates}`:''}.`;
+  return [
+`You are researching prospects for a wealth management firm. The output is a lead list that gets imported into a scoring app, so the format below is not a suggestion.`,
+``,
+where,
+``,
+`WHO QUALIFIES`,
+`- Age ${st.ageMin} or older, or otherwise close to retirement. This is the single most valuable fact on the list.`,
+`- Senior enough to have accumulated a balance: ${st.titles}`,
+`- Not: ${st.exTitles}`,
+`- Nobody working in financial services, insurance or wealth management.`,
+`- Best of all: someone who has just left an employer, or is about to. That is when a 401(k) becomes rollable.`,
+``,
+`THE RULE THAT MATTERS MOST`,
+`Every cell must be something you actually found and can point to. If you did not find it, leave it blank.`,
+`Do not estimate, infer, approximate, or derive. In particular:`,
+`- Do not infer age from job title or seniority. A 41-year-old vice president is not 55-64.`,
+`- Do not infer income or assets from title, employer or industry.`,
+`- Do not add a score, priority, rating, category or "opportunity" column. The app scores the list; a score you supply is discarded, and a fabricated input to it is worse than a blank.`,
+`A blank cell costs nothing. A confident wrong one gets a real person called about a retirement they are twenty years away from.`,
+``,
+`WHERE THE FACTS COME FROM`,
+`Anything public and checkable: an SEC proxy statement (ages of officers and directors are a required disclosure), a company leadership page, a licensing or professional register, a bar or medical directory, an obituary or wedding announcement, a local news story, a university alumni note, a conference bio, a patent filing, a WARN notice. A profile page is one source among many, not the only one.`,
+``,
+`CONTACT DETAILS ARE NOT OPTIONAL`,
+`A person with no ${gate.join(' and no ')} cannot be worked, and this app files them as Excluded no matter how good they look. ${gate[gate.length-1]} in particular is the gate. Prefer twenty people you can call to two hundred you cannot.`,
+``,
+`OUTPUT`,
+`A Google Sheet. One header row, exactly these columns, exactly these names, in this order:`,
+``,
+cols.join(', '),
+``,
+`One row per person. No merged cells, no notes rows, no second header. Leave a cell empty rather than writing "unknown", "N/A" or "-".`,
+``,
+`WHAT EACH COLUMN IS FOR`,
+TEMPLATE_COLS.filter(([,,,why])=>why).map(([,h,,why])=>`- ${h}: ${why}`).join('\n'),
+``,
+`Stop and tell me the count when you have it, before adding anyone you are unsure about.`
+  ].join('\n');
+}
+function copyResearchPrompt(){
+  const txt=researchPrompt();
+  const done=()=>toast('Prompt copied — paste it into Do Browser, Claude, or any research tool.');
+  try{navigator.clipboard.writeText(txt).then(done,()=>prompt('Copy this:',txt));}
+  catch(e){prompt('Copy this:',txt);}
+}
 function openTemplate(){
   const rows=TEMPLATE_COLS.map(([,h,ex,why])=>
     `<tr><td><code>${esc(h)}</code></td><td>${esc(ex)}</td><td class="tmplwhy">${esc(why)}</td></tr>`).join('');
@@ -1764,6 +1839,7 @@ document.getElementById('btnOpps').addEventListener('click',()=>{openModal('mOpp
 document.getElementById('btnOppsRefresh').addEventListener('click',()=>loadOpps(true));
 document.getElementById('btnTemplate').addEventListener('click',openTemplate);
 document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
+document.getElementById('btnCopyPrompt').addEventListener('click',copyResearchPrompt);
 document.getElementById('btnDlTemplate').addEventListener('click',()=>{
   dl(new Blob([templateCSV()],{type:'text/csv'}),'lead-qualifier-template.csv');
 });
@@ -2005,11 +2081,23 @@ document.getElementById('btnDrive').addEventListener('click',()=>{
   openModal('mDrive');driveSearch();
 });
 document.getElementById('drvSearch').addEventListener('click',()=>driveSearch());
+/* A Drive URL, or the bare file id out of one. Pasting the link you already
+   have beats remembering what the file was called. */
+function driveIdFrom(text){
+  const t=(text||'').trim();
+  const m=t.match(/\/(?:spreadsheets|document|file)\/d\/([A-Za-z0-9_-]{20,})/)
+       || t.match(/[?&]id=([A-Za-z0-9_-]{20,})/);
+  if(m)return m[1];
+  return /^[A-Za-z0-9_-]{25,}$/.test(t)?t:null;
+}
 async function driveSearch(){
   const box=document.getElementById('drvList');
+  const typed=document.getElementById('drvName').value||'';
+  const direct=driveIdFrom(typed);
+  if(direct){box.innerHTML='<p class="hint">Opening that sheet…</p>';return driveLoad(direct);}
   box.innerHTML='<p class="hint">Searching…</p>';
   try{
-    const d=await api('/api/drive/find?name='+encodeURIComponent(document.getElementById('drvName').value||''),null,'GET');
+    const d=await api('/api/drive/find?name='+encodeURIComponent(typed),null,'GET');
     if(!d.files.length){box.innerHTML=`<p class="hint">No spreadsheet in Drive matching &ldquo;${esc(d.searched)}&rdquo;.</p>`;return;}
     box.innerHTML=d.files.map(f=>{
       const when=f.modifiedTime?new Date(f.modifiedTime).toLocaleString():'';
