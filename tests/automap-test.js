@@ -12,6 +12,13 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'dst@fpa.com',
   const errs=[]; p.on('pageerror',e=>errs.push('PAGEERROR: '+(e.stack||e.message)));
   p.on('console',m=>{if(m.type()==='error')errs.push('CONSOLE: '+m.text());});
   await p.route('**/api/me',r=>r.fulfill({json:me()}));
+  // The app reads its list index first; without this the unmocked call 401s
+  // against the real server and shows up as a console error.
+  await p.route('**/api/lists', r=>r.fulfill({json:{lists:[{id:'default',name:'My leads',count:0}],settings:{}}}));
+  await p.route('**/api/lists/*', r=>r.request().method()==='GET'
+    ? r.fulfill({json:{list:{id:'default',name:'My leads'},leads:[],settings:{}}})
+    : r.fulfill({json:{ok:true,lists:[{id:'default',name:'My leads',count:0}]}}));
+  await p.route('**/api/settings', r=>r.fulfill({json:{ok:true}}));
   await p.route('**/api/state',r=>r.fulfill({json:{found:false,settings:{},leads:[]}}));
   await p.goto('http://127.0.0.1:8099/',{waitUntil:'networkidle'});
   await p.waitForTimeout(500);

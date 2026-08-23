@@ -43,6 +43,21 @@
   .menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 11px;
         font-size:.85rem;color:var(--ink);border-radius:4px}
   .menu button:hover{background:var(--brass-soft)}
+  .menu button.danger{color:var(--tierX)}
+  .fromrow{display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;
+           letter-spacing:.05em;color:var(--ink-faint);margin-top:10px}
+  .fromrow select{padding:7px 9px;border:1px solid var(--line);border-radius:4px;font-size:.85rem;
+                  color:var(--ink);background:var(--panel);text-transform:none;letter-spacing:0}
+  .menuhead{font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);padding:6px 11px 3px}
+  .menusep{height:1px;background:var(--line);margin:5px 0}
+  .listrow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;
+           padding:7px 11px;font-size:.85rem;color:var(--ink);border-radius:4px}
+  .listrow:hover{background:var(--brass-soft)}
+  .listrow.on{font-weight:700}
+  .listrow .lc{margin-left:auto;padding-left:14px;font-family:var(--font-mono);font-size:.75rem;color:var(--ink-faint)}
+  .listrow .tick{width:12px;color:var(--brass)}
+  .tbtn.listbtn{background:#31445c;border-color:#31445c;color:#fff;font-weight:600;max-width:230px;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   /* ---------- The pipeline: source, enrich, qualify, track ---------- */
   .pipeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;padding:16px 22px 4px;align-items:start}
@@ -249,6 +264,19 @@
     <div class="sub">Financial Planners of America &mdash; source &middot; enrich &middot; qualify &middot; track</div>
   </div>
   <div class="topbtns">
+    <div class="menuwrap">
+      <button class="tbtn listbtn" id="btnLists" aria-haspopup="true" aria-expanded="false">
+        <span id="listName">My leads</span> &#9662;</button>
+      <div class="menu" id="listMenu" hidden>
+        <div class="menuhead">Your lists</div>
+        <div id="listRows"></div>
+        <div class="menusep"></div>
+        <button id="btnNewList">New empty list&hellip;</button>
+        <button id="btnCopyList">Duplicate this list&hellip;</button>
+        <button id="btnRenameList">Rename this list&hellip;</button>
+        <button id="btnDeleteList" class="danger">Delete this list</button>
+      </div>
+    </div>
     <button class="tbtn" id="btnExport">Export call list</button>
     <div class="menuwrap">
       <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
@@ -569,7 +597,9 @@
     <label>Time <input type="time" id="invTime" value="10:00"></label>
     <label>Duration (min) <input type="number" id="invDur"></label>
   </div>
-  <p class="hint">Signed in: the invite is sent instantly from your connected account (Google or O365) &mdash; on your calendar, in their inbox. Signed out: downloads an .ics for Outlook.</p>
+  <label class="fromrow" id="invFromRow" style="display:none">Send from
+    <select id="invFrom"></select></label>
+  <p class="hint">The invite lands on the chosen account's calendar, so that is the address the attendee sees. Signed out: downloads an .ics for Outlook.</p>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mInvite')">Cancel</button>
     <button class="mbtn save" id="btnMakeIcs">Create Outlook invite</button>
@@ -582,7 +612,9 @@
   <p class="hint" id="emWho"></p>
   <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint)">Template<select id="emSel"></select></label>
   <div class="recipe-pre" id="emPrev" style="margin-top:10px;max-height:200px;overflow:auto"></div>
-  <p class="hint">Signed in: sends immediately from your connected account (Gmail or O365) and logs the touch. Signed out: opens a pre-filled Outlook draft instead.</p>
+  <label class="fromrow" id="emFromRow" style="display:none">Send from
+    <select id="emFrom"></select></label>
+  <p class="hint">Sends immediately from the chosen address and logs the touch &mdash; it lands in that account's Sent items, exactly as if you had typed it there. Signed out: opens a pre-filled Outlook draft instead.</p>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mEmail')">Cancel</button>
     <button class="mbtn save" id="btnSendEmail">Open draft in Outlook</button>
@@ -603,6 +635,15 @@
   <div class="mfoot">
     <button class="mbtn" id="cfNo">Cancel</button>
     <button class="mbtn save" id="cfYes">Confirm</button>
+  </div>
+</div></div>
+
+<div class="overlay" id="mPrompt"><div class="modal" style="max-width:440px">
+  <h2 id="apTitle">Name</h2>
+  <input type="text" id="apInput" maxlength="60" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:4px;font-size:.95rem">
+  <div class="mfoot">
+    <button class="mbtn" onclick="apDone(false)">Cancel</button>
+    <button class="mbtn save" onclick="apDone(true)">Save</button>
   </div>
 </div></div>
 
@@ -700,6 +741,9 @@ let serverOk=false;
    read, nothing to write. 'lq-data' is the old shared key, kept only long
    enough to migrate one list onto its owner's account (see boot). */
 const LEGACY_KEY='lq-data';
+/* Which list was open last, per account, so reopening the app lands where you
+   left off rather than on whichever list sorts first. */
+function lastListKey(){const k=localKey();return k?k+':lastlist':null;}
 function localKey(){
   const who=(window.ME&&ME.signed_in&&ME.email)?String(ME.email).toLowerCase():'';
   return who?('lq-data:'+who):null;
@@ -720,14 +764,24 @@ async function localDrop(key){
   if(HAS_WS){try{await window.storage.delete(key);}catch(e){/* best effort */}return;}
   try{localStorage.removeItem(key);}catch(e){/* best effort */}
 }
+/* Which of the user's lists is open. Held on the client only as a pointer; the
+   lists themselves live on the server, one document each. */
+let activeList='', myLists=[];
 function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
-  const payload=JSON.stringify({settings:state.settings,leads:state.leads});
+  const payload=JSON.stringify({settings:state.settings,leads:state.leads,listId:activeList});
   // Always keep the local copy — it is the offline fallback and the thing that
   // survives a sign-out.
   try{await localSave(payload);}catch(e){console.error('local save failed',e);}
   if(serverState()&&serverOk){
-    try{await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');}
-    catch(e){console.error('server save failed',e);setSync('local only — '+e.message);}
+    try{
+      if(activeList){
+        const r=await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
+        myLists=r.lists||myLists;renderLists();
+        await api('/api/settings',{settings:state.settings},'PUT');
+      }else{
+        await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');
+      }
+    }catch(e){console.error('server save failed',e);setSync('local only — '+e.message);}
   }},400);}
 function adoptSaved(s){
   if(!s||!s.leads)return false;
@@ -766,13 +820,16 @@ async function boot(){
   let loaded=false;
   if(serverState()){
     try{
-      const d=await api('/api/state',null,'GET');
+      // The index first: names and counts only, so opening the app does not
+      // read every lead the user owns across every campaign they run.
+      const idx=await api('/api/lists',null,'GET');
       serverOk=true;
-      // Settings belong to the account even when no leads have been imported
-      // yet. Gating this on lead count meant signing in on a second machine
-      // restored default weights, templates and recipe without saying so.
-      if(d.found)loaded=adoptSaved(d);
-      if(d.found&&(d.leads||[]).length){setSync('synced to your account');}
+      myLists=idx.lists||[];
+      const want=(await localLoad(lastListKey()))||'';
+      activeList=(myLists.find(l=>l.id===want)||myLists[0]||{}).id||'';
+      const d=activeList?await api('/api/lists/'+encodeURIComponent(activeList),null,'GET'):{leads:[]};
+      loaded=adoptSaved({settings:idx.settings||{},leads:d.leads||[]});
+      if((d.leads||[]).length){setSync('synced to your account');}
       else{
         // Nothing on the account yet. Prefer this account's own browser cache;
         // fall back to the pre-namespacing shared key exactly once, then delete
@@ -781,12 +838,27 @@ async function boot(){
         if(!raw){raw=await localLoad(LEGACY_KEY);fromLegacy=!!raw;}
         if(raw&&adoptSaved(JSON.parse(raw))){
           loaded=true;
-          await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');
+          if(activeList)await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
+          await api('/api/settings',{settings:state.settings},'PUT');
           if(fromLegacy)await localDrop(LEGACY_KEY);
           setSync('browser list moved to your account');
         }else setSync('synced to your account');
       }
-    }catch(e){console.error('server load failed',e);setSync('local only — '+e.message);}
+      renderLists();
+    }catch(e){
+      // The list index is newer than the single-list endpoint it replaced. If
+      // it is unavailable — an older deployment, a transient error — fall back
+      // to reading the one list rather than dropping the user to local-only
+      // and appearing to have lost their leads.
+      console.info('list index unavailable, using the single-list endpoint:',e.message);
+      try{
+        const d=await api('/api/state',null,'GET');
+        serverOk=true;activeList='';myLists=[];
+        if(d.found)loaded=adoptSaved(d);
+        setSync('synced to your account');
+        renderLists();
+      }catch(e2){console.error('server load failed',e2);setSync('local only — '+e2.message);}
+    }
   }
   if(!loaded){
     try{
@@ -822,6 +894,19 @@ function appConfirm(msg,title){return new Promise(res=>{_cfResolve=res;
   document.getElementById('cfMsg').textContent=msg;
   document.getElementById('mConfirm').classList.add('open');});}
 function cfDone(v){document.getElementById('mConfirm').classList.remove('open');if(_cfResolve){_cfResolve(v);_cfResolve=null;}}
+/* Naming a list needs a text box, and window.prompt is blocked in some embeds
+   and looks like a browser warning in the rest. */
+let _apResolve=null;
+function appPrompt(title,value){return new Promise(res=>{_apResolve=res;
+  document.getElementById('apTitle').textContent=title;
+  const i=document.getElementById('apInput');i.value=value||'';
+  document.getElementById('mPrompt').classList.add('open');
+  setTimeout(()=>{i.focus();i.select();},30);});}
+function apDone(ok){
+  document.getElementById('mPrompt').classList.remove('open');
+  const v=document.getElementById('apInput').value.trim();
+  if(_apResolve){_apResolve(ok?v:'');_apResolve=null;}
+}
 
 /* =============== scoring =============== */
 function parseStart(v){
@@ -2086,12 +2171,55 @@ window.callLead=async(id,f)=>{const L=byId(id);const n=normPhone(L[f]);
 function merge(t,L){const s=state.settings;
   return (''+(t||'')).split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName)
     .split('{employer}').join(L.employer).split('{yourName}').join(s.orgName||'');}
+/* ---- who it goes out as ----
+   The advisor has more than one work address: a firm domain on Google, an
+   employer mailbox on Microsoft, an alias hanging off either. Which one is
+   right depends on the message, so it is a per-send choice with the last one
+   remembered rather than a setting buried in preferences. */
+let senders=[], senderLoaded=false;
+async function loadSenders(){
+  if(senderLoaded||!(window.ME&&ME.signed_in))return;
+  senderLoaded=true;
+  try{const d=await api('/api/senders',null,'GET');senders=d.senders||[];}
+  catch(e){senders=[];}
+  fillSenders();
+}
+function senderLabel(x){
+  const tag=x.provider==='google'?'Gmail':'Outlook';
+  return `${x.address} (${tag}${x.kind==='alias'?' alias':''})`;
+}
+function fillSenders(){
+  const chosen=state.settings.sendAs||'';
+  [['emFrom','emFromRow'],['invFrom','invFromRow']].forEach(([sid,rid])=>{
+    const sel=document.getElementById(sid), row=document.getElementById(rid);
+    if(!sel||!row)return;
+    // One address is not a choice; showing a dropdown with a single option
+    // just asks the user to confirm something they cannot change.
+    row.style.display=senders.length>1?'':'none';
+    sel.innerHTML=senders.map(x=>
+      `<option value="${esc(x.id)}" ${x.id===chosen?'selected':''}>${esc(senderLabel(x))}</option>`).join('');
+    if(!senders.some(x=>x.id===chosen)&&senders.length)sel.value=senders[0].id;
+  });
+}
+function chosenSender(id){
+  const sel=document.getElementById(id);
+  return (sel&&sel.value)||state.settings.sendAs||'';
+}
+function rememberSender(v){
+  if(!v||state.settings.sendAs===v)return;
+  state.settings.sendAs=v;save();
+}
 let emailFor=null;
 window.emailLead=id=>{emailFor=id;const L=byId(id);
   document.getElementById('emWho').textContent=`${L.firstName} ${L.lastName} — ${L.email}`;
   const sel=document.getElementById('emSel');
   sel.innerHTML=[1,2,3].map(i=>`<option value="${i}">${esc(state.settings['e'+i+'n']||('Template '+i))}</option>`).join('');
-  emPrev();openModal('mEmail');};
+  emPrev();loadSenders();fillSenders();
+  // The button did what the modal says, but not what the button said: signed in
+  // it sends, and it was still labelled "Open draft in Outlook".
+  document.getElementById('btnSendEmail').textContent=
+    (window.ME&&ME.signed_in)?'Send now':'Open draft in Outlook';
+  openModal('mEmail');};
 function emPrev(){const L=byId(emailFor);if(!L)return;const i=document.getElementById('emSel').value;
   document.getElementById('emPrev').textContent='Subject: '+merge(state.settings['e'+i+'s'],L)+'\n\n'+merge(state.settings['e'+i+'b'],L);}
 document.getElementById('emSel').addEventListener('change',emPrev);
@@ -2099,9 +2227,12 @@ document.getElementById('btnSendEmail').addEventListener('click',async()=>{
   const L=byId(emailFor);if(!L)return;const s=state.settings;const i=document.getElementById('emSel').value;
   const subj=merge(s['e'+i+'s'],L),body=merge(s['e'+i+'b'],L);
   if(window.ME&&ME.signed_in){
-    try{await api('/api/send-email',{to:L.email,subject:subj,body:body});
-      logAct(emailFor,'email','Sent: '+(s['e'+i+'n']||('Template '+i)));
-      closeModal('mEmail');toast('Email sent from your connected account.');
+    const from=chosenSender('emFrom');
+    try{await api('/api/send-email',{to:L.email,subject:subj,body:body,sender:from});
+      rememberSender(from);
+      const who=(senders.find(x=>x.id===from)||{}).address;
+      logAct(emailFor,'email','Sent: '+(s['e'+i+'n']||('Template '+i))+(who?' (from '+who+')':''));
+      closeModal('mEmail');toast(who?('Email sent from '+who+'.'):'Email sent from your connected account.');
     }catch(e){toast('Send failed: '+e.message);}
     return;
   }
@@ -2131,6 +2262,9 @@ window.openInvite=id=>{inviteFor=id;const L=byId(id);
   const d=new Date(Date.now()+86400000);
   document.getElementById('invDate').value=d.toISOString().slice(0,10);
   document.getElementById('invDur').value=state.settings.dur;
+  loadSenders();fillSenders();
+  document.getElementById('btnMakeIcs').textContent=
+    (window.ME&&ME.signed_in)?'Send invite':'Download .ics for Outlook';
   openModal('mInvite');};
 document.getElementById('btnMakeIcs').addEventListener('click',async()=>{
   const L=byId(inviteFor);if(!L)return;
@@ -2142,9 +2276,12 @@ document.getElementById('btnMakeIcs').addEventListener('click',async()=>{
   if(window.ME&&ME.signed_in){
     const fl=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':00';
     const mg=str=>(''+str).split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName).split('{yourName}').join(s.orgName||'your advisor');
-    try{await api('/api/create-event',{attendee:L.email,subject:mg(s.subj),body:mg(s.body),start:fl(dt),end:fl(end),timezone:'America/New_York'});
-      logAct(inviteFor,'invite','Sent for '+dt.toLocaleString());
-      closeModal('mInvite');toast('Invite sent \u2014 on your calendar and in their inbox.');
+    const from=chosenSender('invFrom');
+    try{await api('/api/create-event',{attendee:L.email,subject:mg(s.subj),body:mg(s.body),start:fl(dt),end:fl(end),timezone:'America/New_York',sender:from});
+      rememberSender(from);
+      const who=(senders.find(x=>x.id===from)||{}).address;
+      logAct(inviteFor,'invite','Sent for '+dt.toLocaleString()+(who?' (from '+who+')':''));
+      closeModal('mInvite');toast(who?('Invite sent from '+who+'.'):'Invite sent \u2014 on your calendar and in their inbox.');
     }catch(e){toast('Invite failed: '+e.message);}
     return;
   }
@@ -2458,6 +2595,80 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
 ['q','fStatus','fSort','fEmailFirst','fSellable'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
+/* ---- named lists ----
+   An advisor runs more than one campaign at a time and the lists should not
+   see each other. Each is a separate document on the server; this is only the
+   switcher. */
+function renderLists(){
+  const btn=document.getElementById('btnLists');
+  if(!btn)return;
+  const on=!!(serverState()&&activeList&&myLists.length);
+  btn.parentElement.style.display=on?'':'none';
+  if(!on)return;
+  const cur=myLists.find(l=>l.id===activeList)||myLists[0]||{};
+  document.getElementById('listName').textContent=cur.name||'My leads';
+  btn.title=myLists.length>1?`${myLists.length} lists — click to switch`:'Your lists';
+  document.getElementById('listRows').innerHTML=myLists.map(l=>
+    `<button class="listrow ${l.id===activeList?'on':''}" onclick="switchList('${esc(l.id)}')">`
+    +`<span class="tick">${l.id===activeList?'✓':''}</span>`
+    +`<span>${esc(l.name)}</span><span class="lc">${l.count||0}</span></button>`).join('');
+  document.getElementById('btnDeleteList').disabled=myLists.length<2;
+}
+window.switchList=async id=>{
+  if(id===activeList)return;
+  // Flush whatever is pending before leaving, or the last few edits land on
+  // the list being opened instead of the one being left.
+  clearTimeout(_pt);
+  try{
+    if(activeList)await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
+    const d=await api('/api/lists/'+encodeURIComponent(id),null,'GET');
+    activeList=id;
+    const k=lastListKey();
+    if(k)try{HAS_WS?await window.storage.set(k,id):localStorage.setItem(k,id);}catch(e){}
+    state.leads=(d.leads||[]);
+    state.leads.forEach(L=>{if(!L.activity)L.activity=[];if(!L.status)L.status='New';
+      if(!L.id)L.id='r'+Math.random().toString(36).slice(2,10);});
+    rescoreAll();renderLists();render();
+    toast('Opened “'+((myLists.find(l=>l.id===id)||{}).name||'list')+'”.');
+  }catch(e){toast('Could not switch lists: '+e.message);}
+};
+async function makeList(copy){
+  const name=await appPrompt(copy?'Name for the duplicate':'Name the new list',
+                             copy?'Copy of '+((myLists.find(l=>l.id===activeList)||{}).name||''):'');
+  if(!name)return;
+  try{
+    if(activeList)await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
+    const r=await api('/api/lists',{name,copy_from:copy?activeList:''},'POST');
+    myLists=r.lists;await switchList(r.list.id);
+  }catch(e){toast('Could not create the list: '+e.message);}
+}
+document.getElementById('btnNewList').addEventListener('click',()=>makeList(false));
+document.getElementById('btnCopyList').addEventListener('click',()=>makeList(true));
+document.getElementById('btnRenameList').addEventListener('click',async()=>{
+  const cur=myLists.find(l=>l.id===activeList)||{};
+  const name=await appPrompt('Rename this list',cur.name||'');
+  if(!name)return;
+  try{const r=await api('/api/lists/'+encodeURIComponent(activeList),{name},'PATCH');
+    myLists=r.lists;renderLists();}
+  catch(e){toast('Could not rename: '+e.message);}
+});
+document.getElementById('btnDeleteList').addEventListener('click',async()=>{
+  const cur=myLists.find(l=>l.id===activeList)||{};
+  if(!await appConfirm(`Delete “${cur.name}” and its ${cur.count||0} leads? This cannot be undone.`,'Delete list'))return;
+  try{const r=await api('/api/lists/'+encodeURIComponent(activeList),null,'DELETE');
+    myLists=r.lists;activeList='';await switchList(myLists[0].id);}
+  catch(e){toast('Could not delete: '+e.message);}
+});
+(function(){
+  const b=document.getElementById('btnLists'), m=document.getElementById('listMenu');
+  const close=()=>{m.hidden=true;b.setAttribute('aria-expanded','false');};
+  b.addEventListener('click',e=>{e.stopPropagation();
+    m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));});
+  m.addEventListener('click',()=>setTimeout(close,0));
+  document.addEventListener('click',close);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+})();
+
 /* ---- the new controls ---- */
 document.getElementById('btnSync').addEventListener('click',()=>syncFromSheet(true));
 document.getElementById('btnBuildOpen').addEventListener('click',()=>{
@@ -2491,6 +2702,8 @@ if(!HAS_WS){
   // the call list — collapse it and let it be opened when wanted.
   document.querySelector('details.buildpanel').removeAttribute('open');
 }
+document.getElementById('apInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter')apDone(true); if(e.key==='Escape')apDone(false);});
 document.getElementById('cfYes').addEventListener('click',()=>cfDone(true));
 document.getElementById('cfNo').addEventListener('click',()=>cfDone(false));
 document.getElementById('btnPaste').addEventListener('click',()=>{document.getElementById('pasteText').value='';openModal('mPaste');});
@@ -2538,7 +2751,14 @@ async function loadMe(){
           ? ` \u00b7 ZoomInfo connected \u00b7 <a href="/auth/zoominfo/disconnect" ${A}>Disconnect</a>`
           : ` \u00b7 <a href="/auth/zoominfo/login" ${A}>Connect ZoomInfo</a>`)
       : '';
-    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'}) \u2014 email & invites send from this account<span id="syncNote"></span>${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
+    // Linking the other provider does not sign you out of this one — both sets
+    // of tokens sit on the same session, which is what makes a From picker
+    // possible at all.
+    const pr=ME.providers||{};
+    const other=ME.provider==='google'
+      ? (pr.microsoft&&!ME.linked_microsoft?` \u00b7 <a href="/auth/login" ${A}>Add an Outlook address</a>`:'')
+      : (pr.google&&!ME.linked_google?` \u00b7 <a href="/auth/google/login" ${A}>Add a Google address</a>`:'');
+    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'})<span id="syncNote"></span>${other}${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
     const l=[];const pr=ME.providers||{};
     if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);

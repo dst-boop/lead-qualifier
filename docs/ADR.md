@@ -1261,3 +1261,84 @@ Default sort was score, so a 75-point lead with no mobile sat above a callable
 Tier A, per §11 — but it is not a call, and it was occupying the first thing the
 advisor looks at every morning. Tier X now sorts last regardless of score, and
 the tier chips remain one click away.
+
+## 20. Several lists per user, and several addresses to send from
+
+### One document per list, not one per user
+
+Leads were stored as a single array on `lead_state/{email}`. An advisor runs
+more than one campaign at a time — a rollover pull, an SCS pull, the people who
+came off one employer's WARN notice — and they should not see each other.
+
+The obvious change is to add a `listId` to each lead and keep one array. That is
+wrong for a reason worth recording: Firestore documents cap at 1MB, the importer
+caps at 5,000 rows, and putting four campaigns in one document means the fourth
+import fails because of the first three. Instead each list is its own document,
+keyed `email__listId`, with an index of names and counts on the state document.
+
+That also makes opening the app cheap. The index is a few hundred bytes; only
+the list actually being opened is read.
+
+Isolation comes from the key being derived server-side from the signed-in email
+and never accepted from the browser. Two users can both hold a list called
+`default`; neither can address the other's. §12's rule — a lead list belongs to
+one account — is unchanged, and `lists-test.py` asserts it directly.
+
+### Migration leaves the original in place
+
+On first read, an existing single list becomes a list named "My leads" and the
+leads are copied into their own document. **The original array is not deleted.**
+Nothing writes to it again, so if this migration is wrong the original is still
+there to read. Deleting it would save a few kilobytes and remove the only copy
+of the thing being migrated.
+
+The client also falls back to the old `/api/state` endpoint when the list index
+is unavailable. An older deployment or a transient error should degrade to the
+previous behaviour, not to browser-only storage that looks like data loss.
+
+### Settings are per user, lists are per list
+
+Weights, ICP, templates and org details moved to `PUT /api/settings` and live
+once. The alternative — settings per list — sounds flexible and means changing a
+scoring weight silently leaves three other lists scored on the old model.
+
+### Which address the mail goes out as
+
+The session could already hold Google and Microsoft tokens at once; nothing
+exposed that. `_active_token` picked one by `session["provider"]` and every send
+went out as whichever account had signed in last.
+
+`GET /api/senders` now enumerates what this session can actually send as: the
+Google primary, any **verified** Gmail send-as alias, and the Microsoft mailbox.
+Unverified aliases are excluded because Gmail refuses them at send time —
+offering one produces a failure at the worst moment rather than at the menu.
+
+Both `/api/send-email` and `/api/create-event` take a `sender` id. For a Gmail
+alias the `From` header is set; for a primary address it is left alone and the
+provider fills it in. A calendar invite has no alias to set — it is owned by the
+calendar it is created on, so choosing a sender chooses whose calendar it lands
+on and therefore what the attendee sees.
+
+**An unknown sender id is a 400, never a fallback.** The tempting behaviour is
+to shrug and send from the default. Sending from the wrong address is a mistake
+only the recipient notices, and by then it has already happened.
+
+The picker is hidden when only one address is available. A dropdown with a
+single option asks the user to confirm a choice they do not have.
+
+### A scope was added, and old sessions will not have it
+
+Listing aliases needs `gmail.settings.basic`. Accounts that signed in before
+this shipped do not have it, so the call 403s — handled as "primary only"
+rather than as an error, with the fix (sign out and back in) documented. Adding
+a scope silently breaks nothing but silently gains nothing either; it has to be
+said out loud somewhere, and `SETUP-lists-and-senders.md` says it.
+
+### An unrelated label bug found while testing
+
+Both send buttons read "Open draft in Outlook" and "Create Outlook invite"
+regardless of sign-in state, while the code behind them sent immediately when
+signed in. The modal text was correct and the button contradicted it. Fixed to
+"Send now" / "Send invite" when signed in. Worth recording only because no test
+caught it and no test could have: every assertion was about behaviour, and the
+defect was entirely in what the button claimed that behaviour was.
