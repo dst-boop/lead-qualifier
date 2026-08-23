@@ -169,63 +169,6 @@ const startedYearsAgo = y => `${YEAR - y}-06-01`;
     return document.getElementById('btnRetryBlocked').style.display;});
   ck('  ...and the button hides when nothing is parked', cleared==='none', cleared);
 
-  // --- JSON batch -------------------------------------------------------------
-  const imported=await p.evaluate(y=>{
-    state.leads=[];
-    document.getElementById('jsonText').value=JSON.stringify([
-      {firstName:'Ray',lastName:'Okonjo',jobTitle:'Senior Manager',company:'IBM',
-       positionStartDate:`${y-24}-06-01`,email:'r@ibm.com',mobilePhone:'2075550117',personId:'900001'},
-      {"Full Name":'Dana Ellsworth',"Job Title":'Director',"Company Name":'Boeing',
-       "Job Start Date":`${y-31}-06-01`,personId:'900002'},
-      {lastName:'',firstName:''}
-    ]);
-    document.getElementById('jcampS').checked=true;
-    document.getElementById('jcampR').checked=false;
-    document.getElementById('jsonGo').click();
-    return state.leads.map(L=>({n:L.firstName+' '+L.lastName,c:L.campaign,emp:L.employer,
-      t:L.title,tier:L.tier,score:L.score,cid:L.contactId,enr:L.enriched,
-      sell:sellable(L).k,ten:Math.round(tenureYears(L))}));},YEAR);
-  ck('two leads import, the nameless one is dropped', imported.length===2, JSON.stringify(imported.map(x=>x.n)));
-  ck('camelCase keys map', imported[0].emp==='IBM'&&imported[0].t==='Senior Manager');
-  ck('  ...so do CSV-style keys', imported[1].emp==='Boeing'&&imported[1].t==='Director');
-  ck('a full name is split', imported[1].n==='Dana Ellsworth');
-  ck('personId becomes the ZoomInfo id', imported[0].cid==='900001'&&imported[1].cid==='900002');
-  ck('the campaign is stamped on each lead', imported.every(x=>x.c==='scs'));
-  ck('tenure survives the import', imported[0].ten===24&&imported[1].ten===31, JSON.stringify(imported.map(x=>x.ten)));
-  ck('a lead with contact details counts as enriched', imported[0].enr===true);
-  ck('  ...one without does not, so it stays enrichable', imported[1].enr===false);
-
-  // a stamped lead keeps its own rules after the switch moves
-  const afterSwitch=await p.evaluate(()=>{
-    state.settings.campaign='rollover';
-    state.leads.forEach(scoreLead);
-    return state.leads.map(L=>({c:leadCampaign(L),hasV:!!(L.signals||[]).find(s=>s.k==='V')}));});
-  ck('a stamped SCS lead keeps SCS rules after the switch moves',
-     afterSwitch.every(x=>x.c==='scs'&&x.hasV), JSON.stringify(afterSwitch));
-
-  const blockedImport=await p.evaluate(()=>{
-    state.leads=[];
-    document.getElementById('jsonText').value=JSON.stringify([{firstName:'Z',lastName:'Q',personId:'7'}]);
-    document.getElementById('jcampBlocked').checked=true;
-    document.getElementById('jsonGo').click();
-    return {n:blockedLeads().length,enr:state.leads[0].enriched};});
-  ck('a batch can arrive already marked credit-blocked',
-     blockedImport.n===1&&blockedImport.enr===false, JSON.stringify(blockedImport));
-
-  const bad=await p.evaluate(()=>{
-    document.getElementById('btnPasteJson').click();
-    document.getElementById('jsonText').value='{ not json';
-    document.getElementById('jsonGo').click();
-    return document.getElementById('jsonMsg').textContent;});
-  ck('malformed JSON is reported, not swallowed', /not valid JSON/.test(bad), bad);
-  const wrapped=await p.evaluate(()=>{
-    state.leads=[];
-    document.getElementById('jsonText').value='{"leads":[{"firstName":"W","lastName":"R"}]}';
-    document.getElementById('jcampBlocked').checked=false;
-    document.getElementById('jsonGo').click();
-    return state.leads.length;});
-  ck('a {leads:[…]} wrapper is unwrapped', wrapped===1, String(wrapped));
-
   // --- the 59½ filter ---------------------------------------------------------
   const filt=await p.evaluate(()=>{
     state.leads=[

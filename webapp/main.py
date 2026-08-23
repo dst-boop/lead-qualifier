@@ -1979,7 +1979,10 @@ async def put_state(body: LeadState, request: Request):
 
 # ------------------------- Google Drive import -------------------------
 
-DRIVE_DEFAULT_NAME = os.environ.get("DRIVE_LEADS_FILE", "401(k) Rollover Leads")
+# The sheet the research tool writes into. Named rather than picked, because the
+# whole point is that the advisor never goes looking for it: the tool appends
+# rows on its own schedule and the app notices.
+DRIVE_DEFAULT_NAME = os.environ.get("DRIVE_LEADS_FILE", "Wealth Management Lead Prospecting")
 
 
 async def _google_only(request: Request) -> str:

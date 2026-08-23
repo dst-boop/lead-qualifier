@@ -44,7 +44,7 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',
   ck('standalone warning is shown', await shown('envWarn'));
   ck('Build list is hidden', !(await shown('btnBuild')));
   ck('ziMcpReady() is false', await p.evaluate(()=>ziMcpReady())===false);
-  await p.click('#btnSettings');await p.waitForTimeout(400);
+  await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
   ck('settings explains it is not connected',
      /Not connected/.test(await p.textContent('#ziMcpState')), await p.textContent('#ziMcpState'));
   ck('the token box is a password field',
@@ -78,7 +78,7 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',
   ck('an empty result surfaces the reason', /rejected the token/.test(err||''), JSON.stringify(err));
 
   // --- removing it -----------------------------------------------------------
-  await p.click('#btnSettings');await p.waitForTimeout(400);
+  await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
   await p.click('#lnkZiMcpClear');await p.waitForTimeout(500);
   ck('remove sends an empty token', saved==='', JSON.stringify(saved));
   ck('  ...Build list hides again', !(await shown('btnBuild')));
@@ -87,7 +87,7 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',
   // --- no Anthropic key on the deployment ------------------------------------
   who=me({features:feat({zi_mcp:false})});
   await load();
-  await p.click('#btnSettings');await p.waitForTimeout(400);
+  await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
   ck('unavailable when the service has no key',
      /Unavailable/.test(await p.textContent('#ziMcpState')), await p.textContent('#ziMcpState'));
 
@@ -96,7 +96,7 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',
   await load();
   ck('a saved token is honoured on load', await shown('btnBuild'));
   ck('  ...no standalone warning', !(await shown('envWarn')));
-  await p.click('#btnSettings');await p.waitForTimeout(400);
+  await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
   ck('  ...and settings says connected',
      /Connected/.test(await p.textContent('#ziMcpState')), await p.textContent('#ziMcpState'));
 

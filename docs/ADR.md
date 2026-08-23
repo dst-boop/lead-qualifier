@@ -1184,3 +1184,80 @@ person IDs, take a `retryBlocked` flag, and surface as a counted button in the
 header. Before this, a capped batch disappeared into a status line and the leads
 looked enriched-and-empty, which is the failure mode that costs the most: not an
 error, but a silent hole in a list you believe is complete.
+
+## 19. Four stages, and a sheet that reads itself
+
+The app had eleven equal-weight buttons across the top and no statement of what
+it was for. Every capability added since §11 arrived as another button, which is
+what happens when the layout has no opinion. The stated priorities are:
+
+1. Source leads
+2. Enrich leads
+3. Qualify leads
+4. Track leads
+
+That is a pipeline, and the screen now says so: four cards, in that order, each
+showing how many leads are waiting in it and offering only the actions that move
+them on. Everything else — settings, coverage, backups, template, recipe — went
+behind a single **More** menu. A row of eleven equal-weight buttons is a menu
+with extra steps and none of the affordances.
+
+The counts are the point. "6 prospects, 0 waiting to enrich, 2 worth working, 1
+meeting set" answers *what should I do now* without opening anything.
+
+### Sourcing had to become automatic to count as sourcing
+
+The research tool appends rows to a named Google Sheet on its own schedule. What
+the app previously required of that arrangement: open a picker, search Drive by
+name, pick the file, review a 28-row column mapper, press import. Five
+deliberate actions to receive work that had already been done.
+
+So the sheet is read **on load**, mapped by the same `guessColumns` any CSV goes
+through, and new rows are added. No picker, no dialog, no button. The advisor
+opens the app and the leads are there.
+
+The name is a constant (`Wealth Management Lead Prospecting`, overridable via
+`DRIVE_LEADS_FILE`) precisely so nobody has to go looking. A configurable thing
+nobody configures is a default with extra steps.
+
+### Dedupe on four identities, because email is usually absent
+
+Re-reading is the normal case, not an edge case: the sheet grows and every check
+re-reads rows already imported. The old importer keyed on `contactId|email`,
+which is right for a ZoomInfo export and useless for a research tool's output —
+§17 measured that output and found **no email column at all**. Every row would
+have re-imported on every check.
+
+`dedupeKeys()` now emits up to four keys per lead — contact ID, email, LinkedIn
+URL (normalised for trailing slashes and query strings), and name-plus-employer
+— and a match on any one is enough. The URL is what actually carries these
+rows; the others are for the exports that have them.
+
+### Saying what was ignored, because nobody saw the mapper
+
+The manual importer shows its work in the mapping screen. The automatic path has
+no screen, so the same information moves into one line under the Source stage:
+how many were added, how many were already there, whether the sheet lacks a
+phone or email column, and how many self-declared estimate columns were
+excluded.
+
+Silence would have been the easy choice and the wrong one. A sheet with no phone
+column produces a list where every lead is Excluded, and without that line it
+looks like a scoring problem rather than a missing column.
+
+### The JSON importer is removed
+
+It was added one commit earlier and it was the wrong feature. It existed because
+a batch of leads had been produced in a conversation and needed a way in; the
+right answer to that is the sheet, which is where the conversation should be
+writing in the first place. Asking a financial advisor to paste a JSON array is
+not a workflow, and a second import path with its own key-aliasing logic is a
+second place for the two to drift apart.
+
+### An excluded lead no longer heads the call list
+
+Default sort was score, so a 75-point lead with no mobile sat above a callable
+65. That bucket is deliberately valuable — one enrichment turns it back into a
+Tier A, per §11 — but it is not a call, and it was occupying the first thing the
+advisor looks at every morning. Tier X now sorts last regardless of score, and
+the tier chips remain one click away.
