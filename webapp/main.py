@@ -14,6 +14,7 @@ Environment variables:
   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET          (see SETUP-google.md)
   WHITEPAGES_API_KEY [/ WHITEPAGES_BASE_URL]       (see SETUP-whitepages.md)
   ZI_CLIENT_ID / ZI_CLIENT_SECRET                  per-user ZoomInfo (see SETUP-zoominfo.md)
+  EDGAR_USER_AGENT                                 required for SEC lookups (see SETUP-edgar.md)
   ZI_AUTH_URL / ZI_TOKEN_URL / ZI_API_BASE / ZI_SCOPES   override the defaults
   ANTHROPIC_API_KEY [/ CLAUDE_MODEL]               enables the AI QC button
   USE_FIRESTORE=0                                  force memory mode (see SETUP-firestore.md)
@@ -22,10 +23,12 @@ Environment variables:
   APP_BASE_URL   Public URL of this app, no trailing slash
 """
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from email.message import EmailMessage
@@ -47,6 +50,18 @@ MS_TENANT_ID = os.environ.get("MS_TENANT_ID", "common")
 MS_AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 MS_SCOPES = ["User.Read", "Mail.Send", "Calendars.ReadWrite"]
 GRAPH = "https://graph.microsoft.com/v1.0"
+
+# --- SEC EDGAR (public filings) ---
+# The one automated source in this app that is explicitly permitted rather than
+# merely tolerated: the SEC asks for a descriptive User-Agent carrying a contact
+# address and a ceiling of 10 requests a second, and grants access on that basis.
+# Both obligations are honoured here — EDGAR_USER_AGENT has no default, because
+# sending a made-up one is how a firm gets its IP range blocked.
+EDGAR_USER_AGENT = os.environ.get("EDGAR_USER_AGENT", "")
+EDGAR_DATA = os.environ.get("EDGAR_DATA", "https://data.sec.gov").rstrip("/")
+EDGAR_WWW = os.environ.get("EDGAR_WWW", "https://www.sec.gov").rstrip("/")
+EDGAR_FTS = os.environ.get("EDGAR_FTS", "https://efts.sec.gov").rstrip("/")
+EDGAR_MAX_RPS = float(os.environ.get("EDGAR_MAX_RPS", "8"))   # SEC ceiling is 10
 
 # --- ZoomInfo (per-user OAuth) ---
 # Each advisor connects their own ZoomInfo seat, so searches and enrichment are
@@ -664,6 +679,7 @@ async def me(request: Request):
         "ai_qc": bool(ANTHROPIC_API_KEY),
         "server_state": storage_backend() == "firestore",
         "zoominfo": _zi_configured(),
+        "edgar": bool(EDGAR_USER_AGENT and ANTHROPIC_API_KEY),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -1161,6 +1177,264 @@ async def zi_debug(request: Request, path: str = "lookup/inputfields/contact/sea
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, headers={"Authorization": f"Bearer {token}"})
     return {"url": url, "status": r.status_code, "body": r.text[:4000]}
+
+
+# ------------------------- SEC EDGAR -------------------------
+# Why this exists: signal A (age) is the single largest hole in the scoring
+# model, and for officers and directors of public companies age is a *required
+# public disclosure* — Regulation S-K Item 401 obliges the proxy statement to
+# list names, ages and positions. That is a free, exact answer for exactly the
+# segment the ICP targets, from a source that permits automated access.
+#
+# It answers for nobody else. A private-company owner or a long-tenured engineer
+# will not be in a proxy statement, and this returns "not found" for them rather
+# than a guess.
+
+_edgar_last = [0.0]
+_edgar_lock = asyncio.Lock()
+
+
+async def _edgar_get(url: str, as_json: bool = True):
+    """One rate-limited EDGAR request, with the User-Agent the SEC asks for."""
+    if not EDGAR_USER_AGENT:
+        raise HTTPException(
+            status_code=500,
+            detail="EDGAR_USER_AGENT is not set. The SEC requires a descriptive "
+                   "User-Agent with a contact email; see SETUP-edgar.md.",
+        )
+    # Serialised and spaced rather than burst-and-apologise: exceeding 10/sec
+    # gets the whole IP range throttled, which would take the app down with it.
+    async with _edgar_lock:
+        gap = 1.0 / EDGAR_MAX_RPS
+        wait = gap - (time.monotonic() - _edgar_last[0])
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _edgar_last[0] = time.monotonic()
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
+        r = await cx.get(url, headers={
+            "User-Agent": EDGAR_USER_AGENT,
+            "Accept-Encoding": "gzip, deflate",
+        })
+    if r.status_code == 403:
+        raise HTTPException(status_code=502,
+                            detail="SEC returned 403 — usually a missing or rejected "
+                                   "User-Agent. Check EDGAR_USER_AGENT names your firm "
+                                   "and carries a contact email.")
+    if r.status_code == 429:
+        raise HTTPException(status_code=502,
+                            detail="SEC rate-limited this address. Lower EDGAR_MAX_RPS and retry.")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"SEC {r.status_code} for {url}: {r.text[:200]}")
+    if not as_json:
+        return r.text
+    try:
+        return r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail=f"SEC returned non-JSON for {url}: {r.text[:200]}")
+
+
+def _norm_company(s: str) -> str:
+    """Company names for comparison — 'The Boeing Company' and 'Boeing' match."""
+    t = (s or "").lower()
+    for junk in (" incorporated", " corporation", " company", " holdings", " group",
+                 " inc.", " inc", " corp.", " corp", " co.", " llc", " lp", " plc", " ltd"):
+        t = t.replace(junk, " ")
+    return " ".join(t.replace("the ", " ").replace(",", " ").replace(".", " ").split())
+
+
+_edgar_tickers: dict = {}
+_edgar_exact: dict = {}
+
+
+async def _edgar_company_cik(employer: str) -> Optional[dict]:
+    """CIK for an employer name, from the SEC's own published company list."""
+    global _edgar_tickers, _edgar_exact
+    if not _edgar_tickers:
+        data = await _edgar_get(f"{EDGAR_WWW}/files/company_tickers.json")
+        # Shape is {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}, ...}
+        # Every key holds a *list*. Stripping legal suffixes collapses "Acme
+        # Industrial Corp" and "Acme Industrial Holdings" onto the same key, and
+        # keeping only the first would quietly return the wrong company — and so
+        # the wrong person's age. Collisions have to stay visible to be refused.
+        for row in (data.values() if isinstance(data, dict) else data):
+            title = (row or {}).get("title") or ""
+            if not title:
+                continue
+            entry = {
+                "cik": str(row.get("cik_str") or "").zfill(10),
+                "name": title,
+                "ticker": row.get("ticker") or "",
+            }
+            _edgar_tickers.setdefault(_norm_company(title), []).append(entry)
+            _edgar_exact.setdefault(" ".join(title.lower().split()), entry)
+    raw = " ".join((employer or "").lower().split())
+    want = _norm_company(employer)
+    if not want:
+        return None
+    # The full legal name is unambiguous by definition, so it is tried first —
+    # otherwise "Acme Industrial Corp" would be refused for colliding with
+    # "Acme Industrial Holdings" once the suffixes are stripped.
+    if raw in _edgar_exact:
+        return _edgar_exact[raw]
+
+    def _one(rows):
+        """A match only counts when it points at a single company."""
+        if not rows:
+            return None
+        ciks = {r["cik"] for r in rows}
+        return rows[0] if len(ciks) == 1 else None
+
+    if want in _edgar_tickers:
+        return _one(_edgar_tickers[want])
+    # One fallback: a name that extends or is extended by what we were given.
+    hits = [r for k, rows in _edgar_tickers.items()
+            if k.startswith(want + " ") or want.startswith(k + " ")
+            for r in rows]
+    return _one(hits)
+
+
+async def _edgar_latest_proxy(cik: str) -> Optional[dict]:
+    """The most recent DEF 14A for a CIK, as {url, filed, accession}."""
+    subs = await _edgar_get(f"{EDGAR_DATA}/submissions/CIK{cik}.json")
+    recent = ((subs or {}).get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    for i, form in enumerate(forms):
+        if form != "DEF 14A":
+            continue
+        acc = (recent.get("accessionNumber") or [])[i].replace("-", "")
+        doc = (recent.get("primaryDocument") or [])[i]
+        if not acc or not doc:
+            continue
+        return {
+            "url": f"{EDGAR_WWW}/Archives/edgar/data/{int(cik)}/{acc}/{doc}",
+            "filed": (recent.get("filingDate") or [])[i],
+            "accession": (recent.get("accessionNumber") or [])[i],
+        }
+    return None
+
+
+def _strip_html(html: str) -> str:
+    """Filing text without the markup. Proxy statements are laid out by dozens of
+    different filing agents, so no structural assumption survives — the text is
+    flattened and the reading is left to Claude rather than to a regex that would
+    silently match the wrong table cell."""
+    out = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    out = re.sub(r"(?s)<[^>]+>", " ", out)
+    out = (out.replace("&nbsp;", " ").replace("&amp;", "&")
+              .replace("&lt;", "<").replace("&gt;", ">").replace("&#160;", " "))
+    return re.sub(r"\s+", " ", out).strip()
+
+
+class EdgarRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    employer: str = ""
+
+
+@app.post("/api/edgar")
+async def edgar(req: EdgarRequest, request: Request):
+    """Age and role for one lead, from their employer's latest proxy statement.
+
+    Free and unlimited — no credits, no vendor. It only answers for officers and
+    directors of public companies, and says so plainly when it cannot.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=500,
+                            detail="Reading a proxy statement needs ANTHROPIC_API_KEY "
+                                   "(the same key the AI QC button uses).")
+    name = f"{req.first_name} {req.last_name}".strip()
+    if not name or not req.employer.strip():
+        raise HTTPException(status_code=400,
+                            detail="A name and an employer are both required — "
+                                   "the employer is how the filing is found.")
+
+    company = await _edgar_company_cik(req.employer)
+    if not company:
+        return {"found": False,
+                "reason": f"No public company on file matching “{req.employer}”. "
+                          f"Private employers do not file proxy statements."}
+
+    proxy = await _edgar_latest_proxy(company["cik"])
+    if not proxy:
+        return {"found": False, "company": company,
+                "reason": f"{company['name']} has no DEF 14A on file."}
+
+    text = await _edgar_get(proxy["url"], as_json=False)
+    flat = _strip_html(text)
+    # Proxy statements run long; the officer and director tables sit in the first
+    # part, and this keeps the request affordable.
+    flat = flat[:180_000]
+
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = (
+        "You are reading a US proxy statement (SEC form DEF 14A). Find this person "
+        "and report only what the document actually states.\n\n"
+        f"Person: {name}\nCompany: {company['name']}\n\n"
+        "Reply with one JSON object and nothing else:\n"
+        '{"found": true|false, "age": <integer or null>, "title": "<as printed or null>", '
+        '"as_of": "<year the age was stated, or null>", "quote": "<the sentence or table row '
+        'the age came from, max 200 chars, or null>"}\n\n'
+        "Rules: only report an age printed in the document for THIS person. Never "
+        "estimate, infer from career length, or carry an age across from a similarly "
+        "named person. If the name does not appear, or appears without an age, return "
+        'found=false. A wrong age here silently mis-scores a lead, so prefer '
+        "found=false over a guess.\n\nDOCUMENT:\n" + flat
+    )
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=700,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:200]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:200]}")
+
+    body = "".join(b.text for b in msg.content if b.type == "text")
+    a, z = body.find("{"), body.rfind("}")
+    if a == -1 or z == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON object.")
+    try:
+        got = json.loads(body[a:z + 1])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+
+    age = got.get("age")
+    if not isinstance(age, int) or not (18 <= age <= 100):
+        age = None                       # a number outside a working life is a misread
+    return {
+        "found": bool(got.get("found")) and age is not None,
+        "age": age,
+        "title": got.get("title") or "",
+        "as_of": got.get("as_of") or proxy["filed"][:4],
+        "quote": (got.get("quote") or "")[:200],
+        "company": company,
+        "filing": proxy,
+        "reason": "" if age else f"{name} is not listed with an age in that proxy statement.",
+    }
+
+
+@app.get("/api/edgar-debug")
+async def edgar_debug(request: Request, url: str = ""):
+    """Raw EDGAR round-trip — the URL called, the status, the first of the body.
+
+    EDGAR is unreachable from the environment this was written in, so no response
+    from it has ever been seen here. This is the probe that will show what it
+    actually returns.
+    """
+    await _active_token(request)
+    if not EDGAR_USER_AGENT:
+        return {"error": "EDGAR_USER_AGENT is not set on this service."}
+    target = url or f"{EDGAR_WWW}/files/company_tickers.json"
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
+        try:
+            r = await cx.get(target, headers={"User-Agent": EDGAR_USER_AGENT})
+        except Exception as e:
+            return {"url": target, "error": f"{type(e).__name__}: {e}"}
+    return {"url": target, "status": r.status_code,
+            "content_type": r.headers.get("content-type", ""),
+            "body": r.text[:4000]}
 
 
 @app.get("/api/wp-debug")

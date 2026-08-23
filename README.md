@@ -77,7 +77,8 @@ Pushing to `main` is the deploy.
 | `MS_CLIENT_ID` / `MS_CLIENT_SECRET` / `MS_TENANT_ID` | Microsoft sign-in — requires an app registered by Equitable IT, [setup](SETUP-microsoft.md) |
 | `WHITEPAGES_API_KEY` | Phone verification and enrichment — [setup](SETUP-whitepages.md) |
 | `ZI_CLIENT_ID` / `ZI_CLIENT_SECRET` | Each user connects their own ZoomInfo seat — [setup](SETUP-zoominfo.md) |
-| `ANTHROPIC_API_KEY` | AI quality control — [setup](SETUP-ai-qc.md) |
+| `ANTHROPIC_API_KEY` | AI quality control, and reading SEC filings — [setup](SETUP-ai-qc.md) |
+| `EDGAR_USER_AGENT` | Free exact age for public-company officers from SEC proxy statements — [setup](SETUP-edgar.md) |
 | `USE_FIRESTORE=0` | Force memory mode — [setup](SETUP-firestore.md) |
 
 The UI only offers what the deployment has keys for, so an unconfigured
