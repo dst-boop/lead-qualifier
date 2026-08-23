@@ -142,6 +142,11 @@
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
   .sellbadge.soon{background:var(--brass-soft);color:#7a5c15;border-color:#e0d2b0}
   .sellbadge.unknown{background:transparent;color:var(--ink-faint);border-color:var(--line)}
+  .cbline{font-size:.72rem;margin-top:3px;color:var(--ink-faint);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cbline.due{color:var(--tierX);font-weight:600}
+  .cbline.soon{color:var(--tierB)}
+  .abtn.cb.due{border-color:var(--tierX);color:var(--tierX);font-weight:700}
+  .abtn.cb.soon{border-color:#e0d2b0;color:#7a5c15}
 
   select.status{padding:4px 6px;border-radius:4px;border:1px solid var(--line);font-size:.78rem;font-weight:600;background:#fff}
   select.status.sNew{color:var(--ink-soft)}
@@ -277,6 +282,7 @@
         <button id="btnDeleteList" class="danger">Delete this list</button>
       </div>
     </div>
+    <button class="tbtn" id="btnTeam" title="Leaderboard and contests across your firm">Team</button>
     <button class="tbtn" id="btnExport">Export call list</button>
     <div class="menuwrap">
       <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
@@ -284,6 +290,7 @@
         <button id="btnCoverage">Data coverage</button>
         <button id="btnSettings">ICP settings</button>
         <button id="btnTemplate">CSV template &amp; research prompt</button>
+        <button id="btnShareList">Share this list&hellip;</button>
         <button id="btnRecipe">Search recipe</button>
         <button id="btnDrive" style="display:none">Pick a different sheet&hellip;</button>
         <button id="btnQC" style="display:none">AI quality control</button>
@@ -333,6 +340,7 @@
   <div class="stage" id="stTrack">
     <div class="sthead"><span class="stnum">4</span><h2>Track</h2><span class="stcount" id="cTrack">&mdash;</span></div>
     <p class="stsub" id="sTrack">Worked, and what came of it.</p>
+    <div class="stacts" style="margin-top:0"><button class="pbtn" id="btnDue" style="display:none"></button></div>
     <div class="trackrow" id="trackRow"></div>
   </div>
 </section>
@@ -399,6 +407,7 @@
   </select>
   <label class="toggle"><input type="checkbox" id="fEmailFirst"> Email-first (DNC) only</label>
   <label class="toggle"><input type="checkbox" id="fSellable"> 59&frac12;+ only</label>
+  <label class="toggle"><input type="checkbox" id="fDue"> Callbacks due</label>
 </section>
 
 <section class="tablewrap">
@@ -659,6 +668,67 @@
 </div></div>
 
 <!-- Log a note -->
+<!-- Callback reminder -->
+<div class="overlay" id="mCallback"><div class="modal" style="max-width:440px">
+  <h2>Call back</h2>
+  <p class="hint" id="cbWho"></p>
+  <div class="mgrid">
+    <label>Date <input type="date" id="cbDate"></label>
+    <label>Time <input type="time" id="cbTime" value="10:00"></label>
+  </div>
+  <label style="display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);margin-top:10px">What to pick up on
+    <input type="text" id="cbNote" maxlength="140" placeholder="Reviewing the old Boeing 401(k) with his wife first"></label>
+  <p class="hint">It appears in <b>Due now</b> the moment it falls due, and the lead moves to Call Back.</p>
+  <div class="mfoot" style="justify-content:space-between">
+    <button class="mbtn" id="cbClear" style="color:var(--tierX)">Clear</button>
+    <span>
+      <button class="mbtn" onclick="closeModal('mCallback')">Cancel</button>
+      <button class="mbtn save" id="cbSave">Set reminder</button>
+    </span>
+  </div>
+</div></div>
+
+<!-- Share a list -->
+<div class="overlay" id="mShare"><div class="modal" style="max-width:520px">
+  <h2>Share this list</h2>
+  <p class="hint" id="shWho"></p>
+  <div id="shRows"></div>
+  <div class="mgrid" style="margin-top:10px">
+    <label>Colleague's email <input type="email" id="shEmail" placeholder="name@financialplannersofamerica.com"></label>
+    <label>Access <select id="shRole"><option value="editor">Can edit</option><option value="viewer">Can view</option></select></label>
+  </div>
+  <p class="hint">They see it in their own list switcher, marked as yours. Only this list — nothing else on your account.</p>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mShare')">Done</button>
+    <button class="mbtn save" id="shAdd">Share</button>
+  </div>
+</div></div>
+
+<!-- Leaderboard & contests -->
+<div class="overlay" id="mTeam"><div class="modal" style="max-width:760px">
+  <h2>Team</h2>
+  <div class="mgrid" style="margin-bottom:8px">
+    <label>Period <select id="lbDays"><option value="1">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option></select></label>
+  </div>
+  <table class="maptable" style="table-layout:auto"><thead><tr>
+    <th>#</th><th>Advisor</th><th style="text-align:right">Calls</th><th style="text-align:right">Emails</th>
+    <th style="text-align:right">Invites</th><th style="text-align:right">Meetings</th><th style="text-align:right">Points</th>
+  </tr></thead><tbody id="lbRows"></tbody></table>
+  <p class="hint">Points: a call or an email is 1, an invite 3, a meeting set 10 &mdash; deliberately lopsided, so nobody wins by dialling numbers they never meant to talk to.</p>
+  <h3>Contests</h3>
+  <div id="btlBox"></div>
+  <div class="mgrid" style="margin-top:8px">
+    <label>Name <input type="text" id="btlName" maxlength="60" placeholder="Friday dials"></label>
+    <label>Against <input type="text" id="btlWho" placeholder="sam@fpa.com, vic@fpa.com"></label>
+    <label>Scored on <select id="btlMetric"><option value="points">Points</option><option value="calls">Calls</option><option value="emails">Emails</option><option value="invites">Invites</option><option value="meetings">Meetings set</option></select></label>
+    <label>Days <input type="number" id="btlDays" value="1" min="1" max="31"></label>
+  </div>
+  <div class="mfoot">
+    <button class="mbtn" onclick="closeModal('mTeam')">Close</button>
+    <button class="mbtn save" id="btlStart">Start a contest</button>
+  </div>
+</div></div>
+
 <div class="overlay" id="mNote"><div class="modal" style="max-width:440px">
   <h2>Log a note</h2>
   <textarea id="noteText" rows="3" style="width:100%"></textarea>
@@ -1881,21 +1951,25 @@ function filtered(){
   const st=document.getElementById('fStatus').value;
   const ef=document.getElementById('fEmailFirst').checked;
   const sf=(document.getElementById('fSellable')||{}).checked;
+  const df=(document.getElementById('fDue')||{}).checked;
   let out=state.leads.filter(L=>
     (!filterTier||L.tier===filterTier)&&
     (!st||L.status===st)&&
     (!ef||truthy(L.mobileDnc))&&
     (!sf||sellable(L).k==='yes')&&
+    (!df||(L.callbackAt&&L.callbackAt<=Date.now()))&&
     (!q||[L.firstName,L.lastName,L.employer,L.title,L.state].join(' ').toLowerCase().includes(q)));
   const s=document.getElementById('fSort').value;
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
     :s==='state'?(a.state||'').localeCompare(b.state||'')
     :s==='updated'?b.updatedAt-a.updatedAt
-    // Excluded leads sort last whatever they score. A 75-point lead with no
-    // mobile is genuinely valuable — that is why the bucket exists — but it is
-    // not a call, and putting it at the top of a call list wastes the first
-    // thing the advisor looks at every morning.
-    :((a.tier==='X')-(b.tier==='X'))||(b.score-a.score)||callFirst(b)-callFirst(a));
+    // The default sort answers "who do I call now", in three steps.
+    // A promise beats a score: someone you told you would ring back today
+    // outranks a stranger who happens to score higher.
+    // Then Excluded last whatever it scores — a 75-point lead with no mobile is
+    // genuinely valuable, which is why the bucket exists, but it is not a call.
+    :((b.callbackAt&&b.callbackAt<=Date.now()?1:0)-(a.callbackAt&&a.callbackAt<=Date.now()?1:0))
+      ||((a.tier==='X')-(b.tier==='X'))||(b.score-a.score)||callFirst(b)-callFirst(a));
   return out;
 }
 /* A lead is "waiting to be enriched" when the app can still do something about
@@ -1946,11 +2020,18 @@ function renderPipeline(){
     ['X','tX','Excluded · no mobile',counts.X]
   ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('');
 
-  // 4 — Track
+  // 4 — Track. A callback that has come due is the most time-sensitive thing
+  // on the screen, so it sits above the status chips rather than inside them.
+  const due=dueLeads().length;
+  const db=$('btnDue');
+  db.style.display=due?'':'none';
+  db.textContent=due?`${due} callback${due===1?'':'s'} due now`:'';
+  db.className='pbtn'+(due?' primary':'');
   $('cTrack').textContent=set;
-  $('sTrack').textContent=worked
+  const upcoming=leads.filter(L=>L.callbackAt&&L.callbackAt>Date.now()).length;
+  $('sTrack').textContent=(worked
     ? `${worked} lead${worked===1?'':'s'} worked · ${set} meeting${set===1?'':'s'} set`
-    : 'Nobody worked yet.';
+    : 'Nobody worked yet.')+(upcoming?` · ${upcoming} callback${upcoming===1?'':'s'} scheduled`:'');
   const byStatus={};leads.forEach(L=>{if(L.status&&L.status!=='New')byStatus[L.status]=(byStatus[L.status]||0)+1;});
   const order=['Called','Call Back','Set','Not Interested','Has Advisor'];
   $('trackRow').innerHTML=order.filter(k=>byStatus[k]).map(k=>
@@ -1988,6 +2069,7 @@ function render(){
   rows.innerHTML=list.map(L=>{
     const tape=(L.signals||[]).filter(s=>'ARTECV'.includes(s.k)).map(s=>`<span class="sig ${s.hit?'hit':''} ${s.hit&&!s.conf?'inferred':''}" title="${esc(s.label)}">${s.k}</span>`).join('');
     const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
+    const cbDue=callbackDue(L);
     const inv=L.email?'' :'disabled title="No email on file"';
     return `<tr class="lead">
       <td><span class="tierchip ${L.tier}" title="${esc(L.tier==='X'?(L.exclReason||'Excluded'):(L.enriched===false?'Provisional — enrich to firm up':''))}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${
@@ -1997,7 +2079,8 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}</td>
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${
+      cbDue?`<div class="cbline ${cbDue}" title="${esc(L.callbackNote||'')}">&#9200; ${esc(cbLabel(L))}${L.callbackNote?' · '+esc(L.callbackNote):''}</div>`:''}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
       <td>${phBtn(L,'directPhone')}</td>
@@ -2008,9 +2091,10 @@ function render(){
       <td><div class="act">
         ${L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady())?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
         ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
-        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: home city/state, home value, mobile numbers on file (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
+        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: confirmed age, home address, mobile numbers, properties owned (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
+        <button class="abtn cb ${cbDue||''}" onclick="setCallback('${L.id}')" title="${L.callbackAt?esc('Call back '+cbLabel(L)+(L.callbackNote?' — '+L.callbackNote:'')):'Set a callback reminder'}">${L.callbackAt?'&#9200;':'&#9200;+'}</button>
         <button class="abtn" onclick="toggleDetail('${L.id}')">${expanded===L.id?'Close':'More'}</button>
       </div></td></tr>`
       +(expanded===L.id?detailRow(L):'');
@@ -2100,11 +2184,69 @@ window.setNote=(id,v)=>{const L=byId(id);L.notes=v;L.updatedAt=Date.now();save()
 window.setField=(id,k,v)=>{const L=byId(id);L[k]=v.trim();L.updatedAt=Date.now();scoreLead(L);save();render();};
 const byId=id=>state.leads.find(L=>L.id===id);
 
+/* =============== callbacks =============== */
+/* "Call me back Thursday" is the single most common outcome of a call, and
+   until now the app had nowhere to put it — the status went to Call Back and
+   the date lived in someone's head. A callback is a date, an optional note,
+   and a queue that surfaces it when it is due. */
+function callbackDue(L){
+  if(!L.callbackAt)return null;
+  const ms=L.callbackAt-Date.now();
+  if(ms<=0)return 'due';
+  if(ms<36*3600000)return 'soon';
+  return 'later';
+}
+function dueLeads(){
+  return state.leads.filter(L=>L.callbackAt&&L.callbackAt<=Date.now()
+    &&!['Not Interested','Has Advisor','Set'].includes(L.status));
+}
+function cbLabel(L){
+  if(!L.callbackAt)return '';
+  const d=new Date(L.callbackAt);
+  // Whole calendar days apart, not a rounded difference of timestamps: a
+  // callback due at 5pm two days ago is "2d ago", and measuring from today's
+  // midnight made it "yesterday".
+  const midnight=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const days=Math.round((midnight(d)-midnight(new Date()))/86400000);
+  const when=days===0?'today':days===1?'tomorrow':days===-1?'yesterday'
+    :days<0?`${-days}d ago`:`in ${days}d`;
+  return d.toLocaleDateString([],{month:'numeric',day:'numeric'})+' '
+    +d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · '+when;
+}
+let cbFor=null;
+window.setCallback=async id=>{
+  cbFor=id;const L=byId(id);if(!L)return;
+  const d=L.callbackAt?new Date(L.callbackAt):(()=>{const x=new Date();x.setDate(x.getDate()+3);x.setHours(10,0,0,0);return x;})();
+  document.getElementById('cbWho').textContent=`${L.firstName} ${L.lastName}${L.employer?' — '+L.employer:''}`;
+  document.getElementById('cbDate').value=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+  document.getElementById('cbTime').value=pad(d.getHours())+':'+pad(d.getMinutes());
+  document.getElementById('cbNote').value=L.callbackNote||'';
+  document.getElementById('cbClear').style.display=L.callbackAt?'':'none';
+  openModal('mCallback');
+};
+document.getElementById('cbSave').addEventListener('click',()=>{
+  const L=byId(cbFor);if(!L)return;
+  const dt=new Date(document.getElementById('cbDate').value+'T'+document.getElementById('cbTime').value);
+  if(isNaN(dt)){toast('Pick a date and time.');return;}
+  L.callbackAt=dt.getTime();
+  L.callbackNote=document.getElementById('cbNote').value.trim();
+  // A callback and a status of New contradict each other on the same row.
+  if(L.status==='New')L.status='Call Back';
+  logAct(cbFor,'callback','Set for '+dt.toLocaleString()+(L.callbackNote?' — '+L.callbackNote:''));
+  closeModal('mCallback');render();
+  toast('Callback set for '+dt.toLocaleString()+'.');
+});
+document.getElementById('cbClear').addEventListener('click',()=>{
+  const L=byId(cbFor);if(!L)return;
+  L.callbackAt=null;L.callbackNote='';
+  logAct(cbFor,'callback','Cleared');
+  closeModal('mCallback');render();
+});
 /* =============== activity log & counters =============== */
 function logAct(id,k,d){const L=byId(id);if(!L)return;L.activity.push({t:Date.now(),k,d:d||''});L.updatedAt=Date.now();save();
   if(expanded===id)render();else renderStats();}
 window.quickNote=id=>{noteFor=id;document.getElementById('noteText').value='';openModal('mNote');};
-const ACT_LABEL={call:'Call',email:'Email',li:'LinkedIn',invite:'Invite',set:'Meeting set',note:'Note'};
+const ACT_LABEL={call:'Call',email:'Email',li:'LinkedIn',invite:'Invite',set:'Meeting set',note:'Note',callback:'Callback'};
 function advisorList(){return (state.settings.advisors||'').split(',').map(x=>x.trim()).filter(Boolean);}
 function funnelStats(){
   const s=state.settings;const conv=(+s.contact/100)*(+s.meetRate/100);
@@ -2593,7 +2735,7 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
-['q','fStatus','fSort','fEmailFirst','fSellable'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+['q','fStatus','fSort','fEmailFirst','fSellable','fDue'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
 /* ---- named lists ----
    An advisor runs more than one campaign at a time and the lists should not
@@ -2611,8 +2753,15 @@ function renderLists(){
   document.getElementById('listRows').innerHTML=myLists.map(l=>
     `<button class="listrow ${l.id===activeList?'on':''}" onclick="switchList('${esc(l.id)}')">`
     +`<span class="tick">${l.id===activeList?'✓':''}</span>`
-    +`<span>${esc(l.name)}</span><span class="lc">${l.count||0}</span></button>`).join('');
-  document.getElementById('btnDeleteList').disabled=myLists.length<2;
+    +`<span>${esc(l.name)}${l.owner?`<br><span class="hint">shared by ${esc(l.owner)}${l.role==='viewer'?' · view only':''}</span>`:''}</span>`
+    +`<span class="lc">${l.count||0}</span></button>`).join('');
+  // A list someone shared with you is not yours to rename, duplicate-in-place
+  // or delete. Leaving it is the equivalent action, and it is a different verb.
+  const own=isOwner();
+  ['btnRenameList','btnShareList'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display=own?'':'none';});
+  const del=document.getElementById('btnDeleteList');
+  del.textContent=own?'Delete this list':'Leave this shared list';
+  del.disabled=own&&myLists.filter(l=>!l.owner).length<2;
 }
 window.switchList=async id=>{
   if(id===activeList)return;
@@ -2653,6 +2802,9 @@ document.getElementById('btnRenameList').addEventListener('click',async()=>{
   catch(e){toast('Could not rename: '+e.message);}
 });
 document.getElementById('btnDeleteList').addEventListener('click',async()=>{
+  // The same button, two verbs: your own list is deleted, someone else's is
+  // left. Routing here rather than swapping handlers keeps one listener.
+  if(!isOwner())return leaveList();
   const cur=myLists.find(l=>l.id===activeList)||{};
   if(!await appConfirm(`Delete “${cur.name}” and its ${cur.count||0} leads? This cannot be undone.`,'Delete list'))return;
   try{const r=await api('/api/lists/'+encodeURIComponent(activeList),null,'DELETE');
@@ -2668,6 +2820,128 @@ document.getElementById('btnDeleteList').addEventListener('click',async()=>{
   document.addEventListener('click',close);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
 })();
+
+/* ---- sharing ----
+   A list belongs to whoever built it. Sharing hands one named colleague access
+   to that one list; there is no firm-wide pool and nothing else on the account
+   travels with it. */
+function currentList(){return myLists.find(l=>l.id===activeList)||{};}
+function isOwner(){const l=currentList();return !l.owner;}
+document.getElementById('btnShareList').addEventListener('click',async()=>{
+  const l=currentList();
+  document.getElementById('shWho').textContent=l.name?`“${l.name}” — ${l.count||0} leads`:'';
+  document.getElementById('shEmail').value='';
+  await renderShares();
+  openModal('mShare');
+});
+async function renderShares(){
+  const box=document.getElementById('shRows');
+  box.innerHTML='<p class="hint">Loading…</p>';
+  try{
+    const d=await api('/api/lists/'+encodeURIComponent(activeList)+'/shares',null,'GET');
+    box.innerHTML=(d.shares||[]).length
+      ? d.shares.map(sh=>`<div class="sigrow"><span>${esc(sh.email)} <span class="hint">${sh.role==='viewer'?'can view':'can edit'}</span></span>`
+        +`<button class="abtn" onclick="unshare('${esc(sh.email)}')">Remove</button></div>`).join('')
+      : '<p class="hint">Not shared with anyone yet.</p>';
+  }catch(e){box.innerHTML=`<p class="hint" style="color:var(--tierX)">${esc(e.message)}</p>`;}
+}
+window.unshare=async who=>{
+  try{await api('/api/lists/'+encodeURIComponent(activeList)+'/shares/'+encodeURIComponent(who),null,'DELETE');
+    renderShares();toast('Access removed.');}
+  catch(e){toast('Could not remove: '+e.message);}
+};
+document.getElementById('shAdd').addEventListener('click',async()=>{
+  const email=document.getElementById('shEmail').value.trim();
+  if(!email||!/@/.test(email)){toast('Enter their email address.');return;}
+  try{
+    await api('/api/lists/'+encodeURIComponent(activeList)+'/shares',
+              {email,role:document.getElementById('shRole').value},'POST');
+    document.getElementById('shEmail').value='';
+    renderShares();toast('Shared with '+email+'.');
+  }catch(e){toast('Could not share: '+e.message);}
+});
+window.leaveList=async()=>{
+  const l=currentList();
+  if(!await appConfirm(`Remove your access to “${l.name}”? ${l.owner} keeps the list.`,'Leave list'))return;
+  try{
+    await api('/api/lists/'+encodeURIComponent(activeList)+'/shares/'+encodeURIComponent(ME.email||''),null,'DELETE');
+    myLists=myLists.filter(x=>x.id!==activeList);activeList='';
+    if(myLists.length)await switchList(myLists[0].id); else location.reload();
+  }catch(e){toast('Could not leave: '+e.message);}
+};
+
+/* ---- the team board ----
+   Counters, not leads. Drawing a leaderboard should not mean reading every
+   lead in the firm, and a count leaks a number where a lead leaks a prospect. */
+async function pushStats(){
+  if(!(window.ME&&ME.signed_in&&ME.features&&ME.features.server_state))return;
+  const d=new Date();d.setHours(0,0,0,0);const d0=d.getTime();
+  let calls=0,emails=0,invites=0,meetings=0;
+  state.leads.forEach(L=>(L.activity||[]).forEach(a=>{
+    if(a.t<d0)return;
+    if(a.k==='call')calls++;
+    else if(a.k==='email')emails++;
+    else if(a.k==='invite')invites++;
+    else if(a.k==='set')meetings++;
+  }));
+  try{await api('/api/stats',{calls,emails,invites,meetings},'PUT');}catch(e){/* not fatal */}
+}
+function lbName(e){return (e||'').split('@')[0].replace(/[._]/g,' ');}
+async function loadTeam(){
+  const days=+document.getElementById('lbDays').value||7;
+  document.getElementById('lbRows').innerHTML='<tr><td colspan="7" class="hint">Loading…</td></tr>';
+  try{
+    const d=await api('/api/leaderboard?days='+days,null,'GET');
+    document.getElementById('lbRows').innerHTML=(d.rows||[]).map(r=>
+      `<tr${r.you?' style="background:var(--brass-soft)"':''}>`
+      +`<td>${r.rank}</td><td><b>${esc(lbName(r.email))}</b>${r.you?' <span class="hint">(you)</span>':''}`
+      +`<br><span class="hint">${esc(r.email)}</span></td>`
+      +`<td style="text-align:right">${r.calls}</td><td style="text-align:right">${r.emails}</td>`
+      +`<td style="text-align:right">${r.invites}</td><td style="text-align:right">${r.meetings}</td>`
+      +`<td style="text-align:right"><b>${r.points}</b></td></tr>`).join('')
+      ||'<tr><td colspan="7" class="hint">Nothing recorded yet.</td></tr>';
+  }catch(e){document.getElementById('lbRows').innerHTML=`<tr><td colspan="7" class="hint">${esc(e.message)}</td></tr>`;}
+  loadBattles();
+}
+async function loadBattles(){
+  const box=document.getElementById('btlBox');
+  try{
+    const d=await api('/api/battles',null,'GET');
+    box.innerHTML=(d.battles||[]).length?d.battles.map(b=>{
+      const rows=b.rows.map(r=>`<div class="sigrow${r.you?' hit':''}"><span>${r.rank}. ${esc(lbName(r.email))}${r.you?' (you)':''}</span><span class="pts">${r.points}</span></div>`).join('');
+      return `<div style="margin:8px 0;border:1px solid var(--line);border-radius:6px;padding:9px 11px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <b>${esc(b.name)}</b>
+          <span class="hint">${esc(b.metric)} · ${b.days}d from ${esc(b.start_day)}${b.over?' · finished':''}</span>
+          ${b.created_by===(ME.email||'')?`<button class="abtn" style="margin-left:auto" onclick="endBattle('${esc(b.id)}')">End</button>`:''}
+        </div>${rows}</div>`;}).join('')
+      :'<p class="hint">No contests running.</p>';
+  }catch(e){box.innerHTML=`<p class="hint">${esc(e.message)}</p>`;}
+}
+window.endBattle=async id=>{
+  if(!await appConfirm('End this contest? The scores stop being tracked.','End contest'))return;
+  try{await api('/api/battles/'+encodeURIComponent(id),null,'DELETE');loadBattles();}
+  catch(e){toast('Could not end it: '+e.message);}
+};
+document.getElementById('btlStart').addEventListener('click',async()=>{
+  const name=document.getElementById('btlName').value.trim();
+  const who=document.getElementById('btlWho').value.split(/[,;\s]+/).map(x=>x.trim()).filter(x=>/@/.test(x));
+  if(!name){toast('Give the contest a name.');return;}
+  if(!who.length){toast('Enter at least one colleague’s email.');return;}
+  try{
+    await api('/api/battles',{name,opponents:who,metric:document.getElementById('btlMetric').value,
+                              days:+document.getElementById('btlDays').value||1},'POST');
+    document.getElementById('btlName').value='';document.getElementById('btlWho').value='';
+    loadBattles();toast('Contest started.');
+  }catch(e){toast('Could not start it: '+e.message);}
+});
+document.getElementById('btnDue').addEventListener('click',()=>{
+  const f=document.getElementById('fDue');f.checked=true;
+  document.getElementById('fStatus').value='';render();
+  document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
+});
+document.getElementById('lbDays').addEventListener('change',loadTeam);
+document.getElementById('btnTeam').addEventListener('click',()=>{openModal('mTeam');pushStats().then(loadTeam);});
 
 /* ---- the new controls ---- */
 document.getElementById('btnSync').addEventListener('click',()=>syncFromSheet(true));
