@@ -924,3 +924,103 @@ consenting. It needs **no code change** — `MS_AUTHORITY` is built from
 `MS_TENANT_ID`, so `common` is a variable, not a branch. Worth remembering
 before anyone assumes a multi-firm future requires a rewrite.
 
+
+## 16. Money in motion — invert the pipeline, start from the event
+
+Everything before this section takes a list of people and asks whether any of
+them has money moving. Section 6's scoring model is that question made
+arithmetic, and section 11e observed that the search matters more than the
+model. This is the end of that thought: **the search should not be for people at
+all.**
+
+### The Boeing list proved the point
+
+87 real contacts, imported and scored. Tier A was not merely empty — it was
+*arithmetically unreachable*. Signals A (age) and E (prior experience) were
+structurally zero for the whole file, capping every lead at 35 against a Tier B
+threshold of 40. No amount of enrichment on that list would have produced a
+Tier A lead, because the list was assembled by employer and title, and neither
+of those is evidence that money is moving.
+
+The inference we were trying to make — *this person is 58 and a director, so
+perhaps they have a rollover* — is a guess dressed as a score.
+
+### The inversion
+
+Find the **event** that moves retirement money, then find the people it moves.
+
+Two free public sources, joined on employer name:
+
+- **WARN notices.** The federal WARN Act obliges employers of 100+ to give 60
+  days' written notice of a plant closing or mass layoff, and states publish
+  those notices. Employer, location, headcount, effective date. Forward-looking
+  by construction: the notice precedes the separation, and a 401(k) becomes
+  rollable when employment ends.
+- **Form 5500.** Every employer retirement plan files annually with the DOL.
+  Total participants and total plan assets, in a bulk download.
+
+Plan assets ÷ participants = average balance. Average balance × separated
+workers = **dollars in motion**, at a named employer, on a known date. That is
+the ranking, and it is evidence rather than inference.
+
+The product is not a lead. It is a *reason to build a lead list*, with a
+deadline. The existing machinery — ZoomInfo, Claude, the CSV importer, the
+scoring model — still does the people. It just no longer has to guess why.
+
+### Unmatched events are kept, flagged, and never priced
+
+When Form 5500 has no row for a WARN employer, the event stays in the list with
+`plan_matched: false` and a null balance, rendered as an em-dash and a badge.
+
+Two alternatives were rejected. **Dropping it** throws away a dated separation of
+several hundred people because a government CSV spells the employer differently
+— the event is real whether or not the join succeeded. **Estimating a balance**
+from a national average would put a fabricated number in the one column the
+entire feature ranks on; a ranking that cannot be trusted is worse than no
+ranking.
+
+The same reasoning governs the matching itself. Names are normalised —
+case, punctuation and corporate suffixes stripped, initialisms rejoined — but
+deliberately not fuzzy-matched. Loose matching attaches the wrong company's
+plan assets to a layoff, and a confidently wrong $40M is more damaging than an
+honest dash. This is the same rule section 11f settled for EDGAR, where
+`_norm_company` was changed to refuse on collision rather than silently keep the
+first candidate.
+
+### No live response has ever been seen from either source
+
+This must be stated plainly because it bounds how much the column mapping can be
+trusted. `dol.gov`, `data.gov`, `askebsa.dol.gov` and the state labor sites all
+return 000/403 through this environment's egress proxy — an organisation policy
+denial, and `/root/.ccr/README.md` is explicit that the response is to report the
+blocked host rather than route around it.
+
+So the WARN and Form 5500 column aliases were written from published field
+documentation (the DOL layout specifies header-row field names, `_CNT` integers,
+`_AMT` two-decimal amounts, mm/dd/yyyy dates, double-quote qualifier) and are
+verified only against fixtures built to match that documentation. The parsers
+themselves are well covered — 50 checks — but a passing parser test says nothing
+about whether New Jersey calls its headcount column what we expect.
+
+The design response is to make the gap visible and cheap to close rather than to
+pretend it is not there:
+
+- every URL is an environment variable, so nothing is hardcoded to a URL that
+  may not exist
+- the app fetches at run time from Cloud Run, which has ordinary egress
+- `/api/sources/probe` reports, per feed, the rows read, the columns matched,
+  and — the point of the endpoint — the required fields it **could not** match
+
+One request against the real feeds turns the guess into a fact, and each miss it
+reports is a one-line addition to an alias list. That is the intended first step
+after deploy, and `SETUP-prospecting.md` leads with it.
+
+### Limits worth recording
+
+- **Only mass separations.** An individual retiring at 59½ files no WARN notice.
+  Those still depend on the age signals — EDGAR for public-company officers, or
+  a graduation year on import.
+- **Subsidiary/parent mismatch.** The WARN filer is often a subsidiary while the
+  plan sponsor is the parent. Accepted as a miss, per the no-fuzzy-matching rule.
+- **Stale assets.** Form 5500 is annual with a long filing lag. The average
+  balance is an order of magnitude, not a quote.

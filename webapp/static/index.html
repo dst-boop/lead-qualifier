@@ -205,6 +205,7 @@
     <button class="tbtn" id="btnRecipe">Build list</button>
     <button class="tbtn primary" id="btnDrive" style="display:none" title="Read the latest export straight out of Google Drive">Pull from Drive</button>
     <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="tbtn" id="btnCsv" data-t="Import a CSV export" onclick="document.getElementById('csvFile').click()">Import CSV</button></label>
+    <button class="tbtn" id="btnOpps" style="display:none" title="Employers with a dated mass separation, priced by the size of their 401(k) plan">Money in motion</button>
     <button class="tbtn" id="btnTemplate" title="See the columns the app reads, or download a blank CSV to fill in">CSV template</button>
     <button class="tbtn" id="btnExport">Export call list (CSV)</button>
     <button class="tbtn" id="btnBackup">Backup</button>
@@ -390,6 +391,21 @@
       <button class="mbtn" onclick="closeModal('mImport')">Cancel</button>
       <button class="mbtn save" id="btnDoImport">Import &amp; score</button>
     </div>
+  </div>
+</div></div>
+
+<!-- Money in motion -->
+<div class="overlay" id="mOpps"><div class="modal" style="max-width:960px">
+  <h2>Money in motion</h2>
+  <p class="hint">Employers who have filed a WARN notice &mdash; a mass layoff or closure, with a legally required date &mdash; matched to the size of their retirement plan from the Form 5500 they file with the Department of Labor. Both are public. <b>Dollars in motion is the plan-wide average balance times the number of workers leaving</b>: an order of magnitude for ranking, not a forecast.</p>
+  <p class="hint" id="oppsMeta"></p>
+  <table class="maptable" style="table-layout:auto"><thead><tr>
+    <th>Employer</th><th>Where</th><th>Date</th><th style="text-align:right">Leaving</th>
+    <th style="text-align:right">Avg balance</th><th style="text-align:right">In motion</th><th></th>
+  </tr></thead><tbody id="oppsRows"></tbody></table>
+  <div class="mfoot" style="justify-content:space-between">
+    <button class="mbtn" id="btnOppsRefresh">Refresh from source</button>
+    <button class="mbtn save" onclick="closeModal('mOpps')">Close</button>
   </div>
 </div></div>
 
@@ -1683,6 +1699,69 @@ function openTemplate(){
   document.getElementById('tmplExtra').innerHTML=TEMPLATE_EXTRA.map(h=>`<code>${esc(h)}</code>`).join(', ');
   openModal('mTemplate');
 }
+/* ---- Money in motion ----
+   The rest of the app scores a list. This is where the list comes from: a dated
+   separation event at a named employer, priced by the plan they are leaving. */
+const money0=n=>n===null||n===undefined?'—':'$'+Math.round(n).toLocaleString();
+function oppWhen(o){
+  if(!o.effective_date)return '—';
+  const d=o.days_until;
+  const rel=d===null||d===undefined?'':(d>0?` (in ${d}d)`:d===0?' (today)':` (${-d}d ago)`);
+  return esc(o.effective_date)+rel;
+}
+/* A prompt for the employer, ready to paste into Claude or the build panel.
+   The employer and the date are the parts that matter — everything else is the
+   standing ICP. */
+function oppPrompt(o){
+  return `Find current and recent employees of ${o.employer}`
+    +(o.state?` in ${o.state}`:'')
+    +`. They are affected by a mass separation effective ${o.effective_date||'shortly'}`
+    +(o.workers?`, which covers ${o.workers} people`:'')
+    +`.
+
+Prioritise: age 55+, senior individual contributors and managers as well as executives, `
+    +`and anyone with long tenure at this employer — they hold the largest 401(k) balances.
+
+`
+    +`Return: First Name, Last Name, Job Title, Management Level, Company Name, Email Address, `
+    +`Mobile Phone, Business Phone, City, State, Job Start Date, Years at Current Employer, `
+    +`Graduation Year, LinkedIn URL. Leave a cell blank rather than estimating it.`;
+}
+function renderOpps(d){
+  const meta=document.getElementById('oppsMeta');
+  const items=d.items||[];
+  const total=items.reduce((a,o)=>a+(o.dollars_in_motion||0),0);
+  meta.innerHTML = d.note ? esc(d.note)
+    : `<b>${items.length}</b> employers · <b>${items.filter(o=>o.plan_matched).length}</b> priced from a Form 5500 · `
+      +`<b>${money0(total)}</b> in motion across them`
+      +(d.built_at?` · built ${new Date(d.built_at*1000).toLocaleString()}`:'');
+  document.getElementById('oppsRows').innerHTML = items.length ? items.map(o=>`<tr>
+    <td><b>${esc(o.employer)}</b>${o.plan_matched?'':' <span class="badge none">no plan on file</span>'}
+        ${o.plan_name?`<br><span class="hint">${esc(o.plan_name)}</span>`:''}</td>
+    <td>${esc([o.city,o.state].filter(Boolean).join(', '))||'—'}</td>
+    <td>${oppWhen(o)}</td>
+    <td style="text-align:right">${o.workers===null||o.workers===undefined?'—':o.workers.toLocaleString()}</td>
+    <td style="text-align:right">${money0(o.avg_balance)}</td>
+    <td style="text-align:right"><b>${money0(o.dollars_in_motion)}</b></td>
+    <td style="text-align:right"><button class="abtn" onclick="copyOppPrompt('${esc(o.id)}')">Copy search</button></td>
+  </tr>`).join('') : `<tr><td colspan="7" class="hint">Nothing yet.</td></tr>`;
+  window.__opps=items;
+}
+window.copyOppPrompt=id=>{
+  const o=(window.__opps||[]).find(x=>x.id===id);if(!o)return;
+  const txt=oppPrompt(o);
+  const done=()=>toast('Search copied — paste it into Claude, or into Build list.');
+  try{navigator.clipboard.writeText(txt).then(done,()=>{prompt('Copy this:',txt);});}
+  catch(e){prompt('Copy this:',txt);}
+};
+async function loadOpps(refresh){
+  document.getElementById('oppsMeta').textContent=refresh?'Fetching from source…':'Loading…';
+  document.getElementById('oppsRows').innerHTML='';
+  try{renderOpps(await api('/api/opportunities'+(refresh?'?refresh=true':''),null,'GET'));}
+  catch(e){document.getElementById('oppsMeta').textContent='Could not load: '+e.message;}
+}
+document.getElementById('btnOpps').addEventListener('click',()=>{openModal('mOpps');loadOpps(false);});
+document.getElementById('btnOppsRefresh').addEventListener('click',()=>loadOpps(true));
 document.getElementById('btnTemplate').addEventListener('click',openTemplate);
 document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
 document.getElementById('btnDlTemplate').addEventListener('click',()=>{
@@ -1812,6 +1891,10 @@ async function api(url,payload,method){
 async function loadMe(){
   try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
   try{applyZiMcpAvailability();ziMcpStateLine();}catch(e){/* pre-render, harmless */}
+  try{
+    const b=document.getElementById('btnOpps');
+    if(b&&ME.signed_in&&ME.features&&ME.features.opportunities)b.style.display='';
+  }catch(e){}
   const bar=document.getElementById('authbar');bar.style.display='block';
   const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
   if(ME.signed_in){
