@@ -38,6 +38,8 @@ it. Backend routes are the exception: `zi-oauth-test.py` drives FastAPI directly
 | `zi-oauth-test.py` | the per-user ZoomInfo OAuth flow against a stub that validates PKCE properly |
 | `edgar-test.py` | SEC lookups: the required User-Agent, the rate limit, ambiguous company names, and every way an age can fail to be real |
 | `edgar-ui-test.js` | the 🏛 button — score change, the filing evidence shown, and a miss that is recorded rather than retried |
+| `zi-mcp-test.py` | ZoomInfo via the MCP connector — that both halves of the request are sent, the token is per-user, and failures are errors rather than empty lists |
+| `zi-mcp-ui-test.js` | saving and removing the MCP token, and that the credential never reaches localStorage or the lead-state document |
 | `upgrade-test.js` | an older saved list still loads and rescores |
 | `hh-test.js` | household matching — telling a spouse apart from a wrong number |
 | `v3-test.js` | scoring and export against the v3 column layout |

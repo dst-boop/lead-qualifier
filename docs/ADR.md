@@ -758,6 +758,56 @@ half-built alongside this.
 
 ---
 
+## 11g. The MCP server is a different door from the API
+
+The DevPortal entitlement never arrived, and §11d's OAuth work is stranded behind
+it. That looked like the end of programmatic ZoomInfo access. It is not: **the
+REST API and the MCP server are separate doors, and only the first needs the
+entitlement.**
+
+Anthropic's Messages API can hold a connection to a remote MCP server and make
+the calls itself. The app asks Claude, Claude calls ZoomInfo carrying the user's
+own token, and the app never speaks ZoomInfo's protocol. The seat is still the
+user's, the credits are still theirs, and no DevPortal app exists anywhere in the
+picture.
+
+### The bridge had been broken, not merely limited
+
+`callClaude()` sent `mcp_servers` alone. Both halves are mandatory — the server
+must also be referenced by an `mcp_toolset` entry in `tools`, under the
+`mcp-client-2025-11-20` beta — and omitting the toolset is *"rejected as a
+validation error"*. So the in-Claude path was failing outright, and the message it
+showed on failure ("only works inside Claude") pointed at the wrong cause. It also
+pinned `claude-sonnet-4-6`.
+
+The lesson is the older one from §12 restated: this was written against a
+remembered API shape rather than the current contract, and the misleading error
+message meant it read as an environment limitation for weeks.
+
+### Where the credential lives, and where it must not
+
+The token goes in the **session document**, which KMS covers, alongside the Google
+and Microsoft refresh tokens. It is explicitly kept out of `state.settings`,
+because everything there is written to `localStorage` and PUT to the lead-state
+document — a credential in a synced settings blob would be a credential in plain
+text in the browser. A test asserts it reaches neither.
+
+### Unverified, and honestly so
+
+`mcp.zoominfo.com` is unreachable from here (403 at the egress gateway), so **no
+live MCP response has been seen**. What is asserted is our half of the contract:
+both request halves present, the beta flag sent, the token scoped per user, and
+failures raised rather than returned as empty lists. `/api/zi/mcp-debug` asks
+Claude to list the ZoomInfo tools it can reach — one request settles whether the
+token works.
+
+The remaining unknown is **where a user obtains an MCP token**. If ZoomInfo
+exposes one, pasting it is enough. If their server uses OAuth, §11d's flow can be
+repointed at it — tested machinery, changed endpoints — but that was not built
+blind against a server this environment cannot reach.
+
+---
+
 ## 12. Working practice
 
 Two rules earned the hard way, both worth keeping.

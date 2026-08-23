@@ -1,4 +1,62 @@
-# ZoomInfo — each user signs into their own seat
+# ZoomInfo — two doors, and only one needs an API entitlement
+
+**Read this first if the DevPortal turned you away.** ZoomInfo's REST API and its
+MCP server are separate doors. The REST integration below needs an API
+entitlement on the subscription. The **MCP connector does not** — it takes a
+token of its own, and Anthropic makes the connection on your behalf.
+
+## The MCP route (no DevPortal, no entitlement)
+
+Save your **ZoomInfo MCP token** under **ICP settings → ZoomInfo access**. From
+then on, Build list and Enrich work in an ordinary browser: the backend asks
+Claude, and Claude opens the connection to ZoomInfo's MCP server carrying *your*
+token. The app never speaks ZoomInfo's protocol at all.
+
+The token is stored on your account rather than in the browser, encrypted at
+rest with the same KMS key as your Google and Microsoft refresh tokens, and is
+never sent back to the page — the settings screen reports only whether one
+exists. It is deliberately kept out of `state.settings`, because everything in
+there is written to localStorage and synced to the lead-state document.
+
+**Without a saved token**, Build and Enrich still work while the app is running
+*inside* Claude, using whichever ZoomInfo connector is enabled on that Claude
+account. That path was broken until now and is fixed here — see below.
+
+### Configuration
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | **required** — the same key AI QC uses |
+| `ZI_MCP_URL` | *(optional)* defaults to `https://mcp.zoominfo.com/mcp` |
+| `ZI_MCP_MODEL` | *(optional)* defaults to `CLAUDE_MODEL` |
+
+### The bug this fixed
+
+The in-Claude bridge sent `mcp_servers` with no matching `mcp_toolset` entry in
+`tools`, and without the `mcp-client-2025-11-20` beta. Both halves are mandatory:
+*"Omitting the `mcp_toolset` entry is rejected as a validation error."* The call
+had been malformed, not merely limited to running inside Claude.
+
+### Not verified
+
+`mcp.zoominfo.com` is unreachable from the environment this was written in — the
+egress gateway answers 403 to CONNECT — so **no live MCP response has been seen**.
+The request shape is built from Anthropic's documented contract and asserted in
+`tests/zi-mcp-test.py`; whether ZoomInfo's server accepts your token is the part
+only you can answer. `/api/zi/mcp-debug` asks Claude to list the ZoomInfo tools
+it can reach and returns what came back — one request settles it.
+
+### Where the token comes from
+
+This is the open question. If ZoomInfo publishes an MCP token in your account
+settings, paste it. If their MCP server uses OAuth instead, the flow in the next
+section can be repointed at it — the machinery is already built and tested, and
+only the endpoints and a client registration would change. That work was not done
+blind against a server this environment cannot reach.
+
+---
+
+# ZoomInfo REST API — each user signs into their own seat
 
 Every advisor connects their **own** ZoomInfo account. Searches, enrichment and
 credits are attributed and billed to the person who ran them, not to one shared

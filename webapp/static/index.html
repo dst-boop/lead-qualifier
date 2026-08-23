@@ -360,6 +360,13 @@
   <div class="mcol" style="display:grid;gap:10px">
     <label>Recipe <a href="#" id="lnkResetRecipe" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--brass)">reset to default</a><textarea id="sRecipe" rows="6"></textarea></label>
   </div>
+  <h3>ZoomInfo access</h3>
+  <div class="mcol" style="display:grid;gap:10px">
+    <p class="hint" style="margin:0" id="ziMcpState"></p>
+    <label>ZoomInfo MCP token<input type="password" id="sZiMcp" autocomplete="off" placeholder="paste to connect — leave blank to keep the saved one"></label>
+    <p class="hint" style="margin:0">Saved to your account, not to this browser, and encrypted at rest with the same key as your Google and Microsoft tokens. It is never sent back to the page. With one saved, Build&nbsp;list and Enrich work in any browser; without one they only work while this app runs inside Claude.
+    <a href="#" id="lnkZiMcpClear" style="color:var(--brass)">Remove saved token</a></p>
+  </div>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mSettings')">Cancel</button>
     <button class="mbtn save" id="btnSaveSettings">Save &amp; re-score all leads</button>
@@ -1091,7 +1098,7 @@ function ziNormalize(c,batch,ctx){
     mobileDnc:pick(c,'mobilePhoneDoNotCall','mobileDoNotCall'),
     directDnc:pick(c,'directPhoneDoNotCall','doNotCall')};
 }
-const OUTSIDE_MSG='ZoomInfo build & enrich only work while this app is running inside Claude (open it from the chat or the published artifact link — do not download the file and open it in a browser). Everything else — CSV import, scoring, calling, export — works anywhere.';
+const OUTSIDE_MSG='To use ZoomInfo here, save your ZoomInfo MCP token under ICP settings — then build & enrich work in any browser. Without one, they only work while this app is running inside Claude, using the connector on your Claude account. Everything else — CSV import, scoring, calling, export — works anywhere.';
 /* Two routes to ZoomInfo, in order of preference:
    1. The signed-in user's own connected seat, proxied by our backend. Calls are
       attributed and billed to them, and it works in an ordinary browser.
@@ -1110,13 +1117,35 @@ async function ziSearch(path,body,method){
   return r.json();
 }
 
-async function callClaude(prompt){
+/* Two ways to reach ZoomInfo, and neither needs the DevPortal API entitlement.
+   The REST API and the MCP server are separate doors; only the first needs it.
+
+   1. Your own MCP token, saved to your account. The backend asks Claude, Claude
+      opens the connection to ZoomInfo carrying your token, and this works in an
+      ordinary browser.
+   2. The connector in your Claude account, used when the app is running inside
+      Claude. Nothing to save, but only available in that context. */
+function ziMcpReady(){return !!(window.ME&&ME.zi_mcp_connected);}
+
+async function callClaudeViaServer(prompt){
+  const d=await api('/api/zi/mcp',{prompt:prompt,max_tokens:8000});
+  if(!(d.results||[]).length){
+    throw new Error(d.text||'ZoomInfo returned nothing. Check the saved MCP token under ICP settings.');
+  }
+  return d.results.map(t=>deepParse(t));
+}
+
+async function callClaudeInPage(prompt){
   let r;
   try{
-    r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
-      messages:[{role:'user',content:prompt}],
-      mcp_servers:[{type:'url',url:'https://mcp.zoominfo.com/mcp',name:'zoominfo'}]})});
+    r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
+      headers:{'Content-Type':'application/json','anthropic-beta':'mcp-client-2025-11-20'},
+      body:JSON.stringify({model:'claude-opus-5',max_tokens:8000,
+        messages:[{role:'user',content:prompt}],
+        mcp_servers:[{type:'url',url:'https://mcp.zoominfo.com/mcp',name:'zoominfo'}],
+        /* Mandatory second half. Sending mcp_servers on its own is rejected as a
+           validation error, which is what this call had been doing. */
+        tools:[{type:'mcp_toolset',mcp_server_name:'zoominfo'}]})});
   }catch(e){throw new Error(OUTSIDE_MSG);}
   const data=await r.json();
   if(data.error)throw new Error(data.error.message||'API error');
@@ -1128,6 +1157,13 @@ async function callClaude(prompt){
   const payloads=[];
   results.forEach(b=>(b.content||[]).forEach(c=>{if(c.text)payloads.push(deepParse(c.text));}));
   return payloads;
+}
+
+/* A saved token wins: it is the path that works everywhere. */
+async function callClaude(prompt){
+  if(ziMcpReady())return callClaudeViaServer(prompt);
+  if(HAS_WS)return callClaudeInPage(prompt);
+  throw new Error(OUTSIDE_MSG);
 }
 document.getElementById('btnBuild').addEventListener('click',async()=>{
   const btn=document.getElementById('btnBuild'),st=document.getElementById('bStatus');
@@ -1335,7 +1371,7 @@ function render(){
       <td><select class="status s${L.status.replace(/\s/g,'')}" onchange="setStatus('${L.id}',this.value)">
         ${['New','Called','Call Back','Not Interested','Has Advisor','Set'].map(s=>`<option ${s===L.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td><div class="act">
-        ${L.enriched===false&&L.contactId&&window.__inClaude?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
+        ${L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady())?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
         ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
         ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: home city/state, home value, mobile numbers on file (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
@@ -1687,8 +1723,42 @@ document.getElementById('btnRecipe').addEventListener('click',()=>{
 document.getElementById('btnSettings').addEventListener('click',()=>{
   SFIELDS.forEach(([el,key])=>document.getElementById(el).value=state.settings[key]);
   openModal('mSettings');});
-document.getElementById('btnSaveSettings').addEventListener('click',()=>{
+/* The MCP token is deliberately NOT in SFIELDS. Everything in state.settings is
+   written to localStorage and PUT to /api/state; a credential belongs in the
+   session document instead, where KMS covers it. */
+function ziMcpStateLine(){
+  const el=document.getElementById('ziMcpState');if(!el)return;
+  el.innerHTML = !(window.ME&&ME.features&&ME.features.zi_mcp)
+    ? 'Unavailable — this deployment has no Anthropic API key.'
+    : ziMcpReady()
+      ? '<b style="color:var(--tierA)">Connected.</b> Build &amp; enrich work in any browser.'
+      : (HAS_WS ? 'Not connected — running inside Claude, so the connector on your Claude account is being used instead.'
+                : '<b style="color:var(--tierX)">Not connected.</b> Build &amp; enrich are unavailable until a token is saved or the app is opened inside Claude.');
+}
+async function saveZiMcpToken(tok){
+  await api('/api/zi/mcp-token',{token:tok});
+  ME.zi_mcp_connected=!!tok;
+  ziMcpStateLine();
+  if(!HAS_WS){
+    document.getElementById('btnBuild').style.display=tok?'':'none';
+    document.getElementById('btnEnrich').style.display=tok?'':'none';
+    document.getElementById('envWarn').style.display=tok?'none':'block';
+  }
+  render();
+}
+document.getElementById('lnkZiMcpClear').addEventListener('click',async e=>{
+  e.preventDefault();
+  try{await saveZiMcpToken('');document.getElementById('sZiMcp').value='';toast('ZoomInfo token removed.');}
+  catch(err){toast('Could not remove it: '+err.message);}
+});
+document.getElementById('btnSaveSettings').addEventListener('click',async()=>{
   SFIELDS.forEach(([el,key])=>state.settings[key]=document.getElementById(el).value);
+  const tok=document.getElementById('sZiMcp').value.trim();
+  if(tok){
+    // Blank means "leave the saved one alone", so only a non-empty box writes.
+    try{await saveZiMcpToken(tok);document.getElementById('sZiMcp').value='';toast('ZoomInfo token saved.');}
+    catch(err){toast('Token not saved: '+err.message);}
+  }
   rescoreAll();closeModal('mSettings');render();toast('Settings saved — all leads re-scored.');});
 
 /* =============== modal & filter plumbing =============== */
@@ -1722,6 +1792,13 @@ document.getElementById('noteSave').addEventListener('click',()=>{
   if(v&&noteFor){logAct(noteFor,'note',v);render();}
   closeModal('mNote');});
 (function(){try{if(!HAS_WS)document.getElementById('envWarn').style.display='block';}catch(e){}})();
+/* Re-check once /api/me lands: a saved token turns the live buttons back on in
+   an ordinary browser, so the standalone warning no longer applies. */
+function applyZiMcpAvailability(){
+  if(HAS_WS||!ziMcpReady())return;
+  ['btnBuild','btnEnrich'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='';});
+  const w=document.getElementById('envWarn');if(w)w.style.display='none';
+}
 /* =============== unified backend (sign-in, real send, verify, AI QC, assign) =============== */
 window.ME={signed_in:false,features:{},providers:{}};
 async function api(url,payload,method){
@@ -1734,6 +1811,7 @@ async function api(url,payload,method){
 }
 async function loadMe(){
   try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
+  try{applyZiMcpAvailability();ziMcpStateLine();}catch(e){/* pre-render, harmless */}
   const bar=document.getElementById('authbar');bar.style.display='block';
   const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
   if(ME.signed_in){
