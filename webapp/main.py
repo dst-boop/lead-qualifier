@@ -51,6 +51,15 @@ MS_AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 MS_SCOPES = ["User.Read", "Mail.Send", "Calendars.ReadWrite"]
 GRAPH = "https://graph.microsoft.com/v1.0"
 
+# --- ZoomInfo via the MCP connector ---
+# The DevPortal REST API and the MCP server are different doors. The REST API
+# needs an entitlement this subscription does not carry; the MCP server takes a
+# token of its own. Anthropic's MCP connector will hold that token and make the
+# connection server-side, so the app never speaks ZoomInfo's protocol at all —
+# it asks Claude, and Claude calls ZoomInfo with the user's own credentials.
+ZI_MCP_URL = os.environ.get("ZI_MCP_URL", "https://mcp.zoominfo.com/mcp")
+ZI_MCP_MODEL = os.environ.get("ZI_MCP_MODEL", "")   # defaults to CLAUDE_MODEL at call time
+
 # --- SEC EDGAR (public filings) ---
 # The one automated source in this app that is explicitly permitted rather than
 # merely tolerated: the SEC asks for a descriptive User-Agent carrying a contact
@@ -680,6 +689,7 @@ async def me(request: Request):
         "server_state": storage_backend() == "firestore",
         "zoominfo": _zi_configured(),
         "edgar": bool(EDGAR_USER_AGENT and ANTHROPIC_API_KEY),
+        "zi_mcp": bool(ANTHROPIC_API_KEY),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -696,6 +706,8 @@ async def me(request: Request):
                         "name": d.get("name"), "email": d.get("email"),
                         "providers": providers, "features": features,
                         "zi_connected": bool(session.get("zoominfo")),
+                    "zi_mcp_connected": bool(_zi_mcp_token(session)),
+                        "zi_mcp_connected": bool(_zi_mcp_token(session)),
                         "storage": storage, "encryption": encryption}
     token = _ms_token(session)
     if token:
@@ -1177,6 +1189,143 @@ async def zi_debug(request: Request, path: str = "lookup/inputfields/contact/sea
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, headers={"Authorization": f"Bearer {token}"})
     return {"url": url, "status": r.status_code, "body": r.text[:4000]}
+
+
+# ------------------- ZoomInfo through the MCP connector -------------------
+# The REST integration above needs a DevPortal entitlement this subscription does
+# not have. This route needs none: Anthropic's MCP connector opens the connection
+# to ZoomInfo's MCP server server-side, carrying the user's own token, and the
+# app only ever talks to Claude.
+#
+# Two halves are mandatory and the app previously sent only one. `mcp_servers`
+# alone is rejected as a validation error — every server must also be referenced
+# by an `mcp_toolset` entry in `tools`, under the mcp-client-2025-11-20 beta.
+
+MCP_BETA = "mcp-client-2025-11-20"
+
+
+def _zi_mcp_token(session: dict) -> str:
+    return (session.get("zi_mcp") or {}).get("token") or ""
+
+
+class ZIMcpRequest(BaseModel):
+    prompt: str
+    max_tokens: int = 4000
+
+
+class ZIMcpToken(BaseModel):
+    token: str = ""
+
+
+@app.post("/api/zi/mcp-token")
+async def zi_mcp_token_set(req: ZIMcpToken, request: Request):
+    """Store (or clear) this user's ZoomInfo MCP token.
+
+    It lives in the session document, which is KMS-encrypted when KMS_KEY_NAME is
+    set — the same protection the Google and Microsoft refresh tokens get. It is
+    never returned to the browser afterwards; /api/me reports only whether one
+    exists.
+    """
+    await _active_token(request)
+    tok = (req.token or "").strip()
+    if tok:
+        request.state.session["zi_mcp"] = {"token": tok, "saved_at": int(time.time())}
+    else:
+        request.state.session.pop("zi_mcp", None)
+    return {"connected": bool(tok)}
+
+
+@app.post("/api/zi/mcp")
+async def zi_mcp(req: ZIMcpRequest, request: Request):
+    """Ask Claude to run a ZoomInfo query with this user's MCP token.
+
+    Returns the tool results raw. Like /api/zi/search this is deliberately not a
+    parser — the client shapes it, so a change at ZoomInfo's end shows up as odd
+    data rather than a silently empty list.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=500,
+                            detail="ANTHROPIC_API_KEY is not set on this service.")
+    token = _zi_mcp_token(request.state.session)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No ZoomInfo MCP token saved. Add one under ICP settings, or "
+                   "run the app inside Claude to use the connector there.")
+
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        msg = await client.beta.messages.create(
+            model=ZI_MCP_MODEL or CLAUDE_MODEL,
+            max_tokens=max(256, min(req.max_tokens, 16000)),
+            betas=[MCP_BETA],
+            mcp_servers=[{
+                "type": "url",
+                "url": ZI_MCP_URL,
+                "name": "zoominfo",
+                "authorization_token": token,
+            }],
+            # Required. Without it the request is rejected outright.
+            tools=[{"type": "mcp_toolset", "mcp_server_name": "zoominfo"}],
+            messages=[{"role": "user", "content": req.prompt}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502,
+                            detail=f"Claude API error {e.status_code}: {str(e)[:300]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:300]}")
+
+    if getattr(msg, "stop_reason", "") == "refusal":
+        raise HTTPException(status_code=502, detail="Claude declined this ZoomInfo request.")
+
+    results, text = [], []
+    for block in msg.content:
+        btype = getattr(block, "type", "")
+        if btype == "mcp_tool_result":
+            for part in (getattr(block, "content", None) or []):
+                t = getattr(part, "text", None)
+                if t:
+                    results.append(t)
+        elif btype == "text":
+            text.append(block.text)
+    return {"results": results, "text": " ".join(text)[:2000],
+            "stop_reason": getattr(msg, "stop_reason", "")}
+
+
+@app.get("/api/zi/mcp-debug")
+async def zi_mcp_debug(request: Request):
+    """Smallest possible round-trip through the connector — does the token work?
+
+    mcp.zoominfo.com is unreachable from the environment this was written in, so
+    this is how the first real answer arrives.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        return {"error": "ANTHROPIC_API_KEY is not set on this service."}
+    token = _zi_mcp_token(request.state.session)
+    if not token:
+        return {"error": "No ZoomInfo MCP token saved for this account.",
+                "mcp_url": ZI_MCP_URL}
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        msg = await client.beta.messages.create(
+            model=ZI_MCP_MODEL or CLAUDE_MODEL, max_tokens=600, betas=[MCP_BETA],
+            mcp_servers=[{"type": "url", "url": ZI_MCP_URL, "name": "zoominfo",
+                          "authorization_token": token}],
+            tools=[{"type": "mcp_toolset", "mcp_server_name": "zoominfo"}],
+            messages=[{"role": "user", "content":
+                       "List the ZoomInfo tools you can call. Names only, no commentary."}],
+        )
+    except Exception as e:
+        return {"mcp_url": ZI_MCP_URL, "error": f"{type(e).__name__}: {str(e)[:600]}"}
+    return {
+        "mcp_url": ZI_MCP_URL,
+        "model": ZI_MCP_MODEL or CLAUDE_MODEL,
+        "stop_reason": getattr(msg, "stop_reason", ""),
+        "block_types": [getattr(b, "type", "?") for b in msg.content],
+        "text": " ".join(b.text for b in msg.content if getattr(b, "type", "") == "text")[:2000],
+    }
 
 
 # ------------------------- SEC EDGAR -------------------------
