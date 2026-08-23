@@ -1498,3 +1498,71 @@ index, and arithmetic on a date. Between this and §16, the app now has an
 event-driven prospecting engine and an event-driven watchlist, and the only
 paid dependency in either is the enrichment that turns a name into a phone
 number.
+
+## 23. Free enrichment, and what "legally accessible" is a property of
+
+Two things were asked for together: leverage every free data source, and build
+the scraping tool that had been agreed months earlier and never written. They
+turn out to be one decision and one piece of engineering.
+
+### The free source that was already paid for
+
+`FORM5500_URL` was fetched to price WARN employers (§16). The same file prices
+*any* employer — assets over participants is an average balance — and doing so
+puts a dollar figure on a lead whose only other data is a job title. The
+marginal cost is zero: one request, one parse, already happening.
+
+The number is a plain average across an entire plan, and the whole value of it
+depends on that surviving contact with a hurried advisor. So the chip reads
+`~$658,333 avg`, with the tilde and the word doing work, and the tooltip names
+the plan, the participant count it averages over, the plan year, and says
+outright that it is not this person's balance. An unmatched employer gets **no
+chip** rather than a zero — §17's rule again.
+
+One lookup per employer, not per lead.
+
+### "Legally accessible" is a property of a relationship, not of a page
+
+This is the load-bearing idea in `webapp/harvest.py`. Whether data may be
+fetched is not decided by whether it is visible; it is decided by the terms
+under which the publisher offers it. Three of those are machine-readable or
+close to it, and all three are encoded in the module rather than left to the
+caller's judgement:
+
+- **robots.txt** — the published statement of what automated clients may fetch.
+  Honoured, cached per origin. **If it cannot be read, the answer is no.** An
+  unreachable rulebook is not permission, and the conservative reading costs
+  only the pages of a broken host.
+- **Identity** — `HARVEST_USER_AGENT` has no default and the endpoint refuses
+  without it. The SEC states this requirement explicitly and §11f already met
+  it there; the generalisation is to identify yourself everywhere, not only
+  where you are told to.
+- **Rate** — one request per origin at a time, a second apart minimum.
+
+Then a denylist for sites whose *terms* prohibit automated access regardless of
+robots.txt. LinkedIn is the one that matters, because it is where this kind of
+research starts and its robots.txt would not stop us — the agreement does. The
+refusal names the site and offers the alternative. Putting it in the tool makes
+it a property of the app rather than of whoever is using it that day.
+
+### It fetches; it does not crawl
+
+One URL, named by a person, once. No frontier, no link-following, no recursion.
+That is the difference between reading a page you were pointed at and operating
+a robot over someone else's site, and it is enforced by the absence of code
+rather than by restraint.
+
+### A bug the tests found, worth recording
+
+`robots.txt` was being fetched from the *hostname* rather than the origin, so
+the port was dropped. Any site on a non-standard port therefore failed to
+answer, and the failure surfaced as "this host has no robots.txt" — which under
+the old logic would have meant *allowed*. A permission check that fails open
+when it cannot reach the rules is the worst possible failure mode, and it was
+one line: `urlparse().hostname` where `netloc` was meant.
+
+The same test file then caught its own version of the mistake: a check named
+"an unreadable robots.txt means no" was passing because the URL tripped the
+private-address guard first and never reached the robots path at all. Both are
+the same lesson — a passing assertion proves something passed, not that it
+proved what its name says.

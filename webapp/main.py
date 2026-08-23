@@ -42,7 +42,7 @@ import msal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from webapp import prospecting, signals
+from webapp import harvest, prospecting, signals
 from pydantic import BaseModel, EmailStr
 
 # --- Microsoft ---
@@ -2550,6 +2550,81 @@ async def save_settings(body: SettingsSave, request: Request):
     idx = await _ensure_lists(email)
     await _write_index(email, body.settings, idx["lists"], idx["legacy_leads"])
     return {"ok": True}
+
+
+# ------------------------- free enrichment -------------------------
+# Two things that cost nothing and were already half-built.
+#
+# The Form 5500 file was fetched to price WARN employers. The same file prices
+# *any* employer: assets over participants is an average balance, and that puts
+# a dollar figure on a lead whose only other data is a job title. It is an
+# order of magnitude, not a quote, and it is labelled as one.
+#
+# And a fetcher for a page a person names — a company leadership page, a
+# licensing register, an obituary. See webapp/harvest.py for why "legally
+# accessible" is encoded in the tool rather than left to the user.
+
+HARVEST_USER_AGENT = os.environ.get("HARVEST_USER_AGENT", "")
+
+
+class PlanRequest(BaseModel):
+    employers: list = []
+
+
+@app.post("/api/plans")
+async def employer_plans(body: PlanRequest, request: Request):
+    """Retirement-plan size for named employers, from the DOL Form 5500 file.
+
+    Bulk on purpose: the file is large and fetched once, so asking about forty
+    employers costs exactly what asking about one does.
+    """
+    await _active_token(request)
+    if not FORM5500_URL:
+        return {"plans": {}, "note": "FORM5500_URL is not set — see SETUP-prospecting.md."}
+    try:
+        plans = (await _load_plans()).get("plans") or {}
+    except Exception as e:
+        raise HTTPException(status_code=502,
+                            detail=f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}")
+    out = {}
+    for name in (body.employers or [])[:500]:
+        key = prospecting.norm_company(name or "")
+        p = plans.get(key)
+        if not p:
+            continue
+        # avg_balance is computed by the parser, so the WARN pricing and this
+        # lookup cannot drift into two different definitions of the same number.
+        out[name] = {k: p.get(k) for k in
+                     ("plan_name", "participants", "assets", "avg_balance", "sponsor",
+                      "state", "plan_year")}
+    return {"plans": out, "asked": len(body.employers or []), "matched": len(out)}
+
+
+class HarvestRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/harvest")
+async def harvest_page(body: HarvestRequest, request: Request):
+    """One public page, fetched on the publisher's stated terms.
+
+    Not a crawler: it fetches the URL given, once, and follows nothing.
+    """
+    await _active_token(request)
+    if not HARVEST_USER_AGENT:
+        raise HTTPException(
+            status_code=400,
+            detail="HARVEST_USER_AGENT is not set. Fetching a page without identifying "
+                   "who is asking is exactly what this app will not do — see "
+                   "SETUP-harvest.md.")
+    async with httpx.AsyncClient() as cx:
+        got = await harvest.fetch(cx, (body.url or "").strip(), HARVEST_USER_AGENT)
+    if not got.get("ok"):
+        raise HTTPException(status_code=422, detail=got.get("reason") or "Could not read that page.")
+    # A whole page is more than any caller here needs and more than is polite to
+    # keep; the useful part is what a person will read.
+    got["text"] = got["text"][:40_000]
+    return got
 
 
 # ------------------------- money-in-motion signals -------------------------

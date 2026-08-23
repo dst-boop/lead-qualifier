@@ -43,6 +43,8 @@ and `opportunities-test.py` drive FastAPI (or the parsers) directly.
 | `zi-mcp-ui-test.js` | saving and removing the MCP token, and that the credential never reaches localStorage or the lead-state document |
 | `prospecting-test.py` | the WARN and Form 5500 parsers — company-name normalisation, column aliasing, the join, and that an unmatched event survives without acquiring a made-up dollar figure |
 | `opportunities-test.py` | the source endpoints against a stub WARN feed and a stub zipped DOL file: the probe reports what came back, one dead feed does not sink the refresh, and a signed-out visitor gets nothing |
+| `harvest-test.py` | the page fetcher — mostly refusals, because fetching is four lines and deciding whether you may is the part worth writing down: the terms denylist, private addresses, robots.txt, rate limiting |
+| `plans-ui-test.js` | pricing employers from Form 5500 — one lookup per employer, and the chip staying honest that it is a plan average and not this person's balance |
 | `signals-test.py` | the money-in-motion detectors — mostly the *absence* of a signal: the 45-year-old, the person who passed 59½ three years ago, the manager who is not the officer an 8-K names, and anyone who has already said no |
 | `signals-api-test.py` | the signals endpoint — one EDGAR round-trip per employer rather than per lead, and a dead feed degrading to the signals that do not need it |
 | `signals-ui-test.js` | the watchlist surface — what is new, that marking seen sticks, and that an inferred age is never dressed up as a confirmed one |
