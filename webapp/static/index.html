@@ -340,7 +340,10 @@
   <div class="stage" id="stTrack">
     <div class="sthead"><span class="stnum">4</span><h2>Track</h2><span class="stcount" id="cTrack">&mdash;</span></div>
     <p class="stsub" id="sTrack">Worked, and what came of it.</p>
-    <div class="stacts" style="margin-top:0"><button class="pbtn" id="btnDue" style="display:none"></button></div>
+    <div class="stacts" style="margin-top:0">
+      <button class="pbtn" id="btnDue" style="display:none"></button>
+      <button class="pbtn" id="btnSignals" title="Check every lead against the free public feeds: who is about to turn 59½, whose employer has filed a WARN notice or an officer-departure 8-K">Check for events</button>
+    </div>
     <div class="trackrow" id="trackRow"></div>
   </div>
 </section>
@@ -668,6 +671,21 @@
 </div></div>
 
 <!-- Log a note -->
+<!-- Money-in-motion signals -->
+<div class="overlay" id="mSignals"><div class="modal" style="max-width:860px">
+  <h2>Money in motion &mdash; your list</h2>
+  <p class="hint">Every lead checked against the free public record: who is about to reach 59&frac12;, whose employer has filed a mass-separation notice, and whose employer has filed an 8-K reporting an officer departure. Nothing here costs a credit.</p>
+  <p class="hint" id="sigMeta"></p>
+  <div id="sigRows"></div>
+  <div class="mfoot" style="justify-content:space-between">
+    <button class="mbtn" id="sigMark">Mark all as seen</button>
+    <span>
+      <button class="mbtn" id="sigMail">Email me this</button>
+      <button class="mbtn save" onclick="closeModal('mSignals')">Close</button>
+    </span>
+  </div>
+</div></div>
+
 <!-- Callback reminder -->
 <div class="overlay" id="mCallback"><div class="modal" style="max-width:440px">
   <h2>Call back</h2>
@@ -2820,6 +2838,72 @@ document.getElementById('btnDeleteList').addEventListener('click',async()=>{
   document.addEventListener('click',close);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
 })();
+
+/* ---- money-in-motion signals ----
+   The rest of the app finds people. This watches the ones already found. Every
+   source behind it is free and public, so it runs on the whole list rather
+   than being rationed a lead at a time like the paid enrichments. */
+let sigLast=null;
+const SIG_ICON={warn:'⚠',age:'◑',filing:'\u{1f3db}',tenure:'⏳'};
+const SIG_WHAT={warn:'Mass separation',age:'Turning 59½',filing:'SEC filing',tenure:'Tenure'};
+async function loadSignals(mark){
+  const meta=document.getElementById('sigMeta'), box=document.getElementById('sigRows');
+  meta.textContent='Checking the public record…';box.innerHTML='';
+  try{
+    const d=await api('/api/signals',{leads:state.leads,mark_seen:!!mark,
+      min_tenure:+state.settings.scsMinTenure||18});
+    sigLast=d;
+    renderSignals(d);
+  }catch(e){meta.textContent='Could not check: '+e.message;}
+}
+function renderSignals(d){
+  const items=d.signals||[];
+  document.getElementById('sigMeta').innerHTML=
+    `<b>${items.length}</b> event${items.length===1?'':'s'} across ${d.checked} lead${d.checked===1?'':'s'}`
+    +(d.new?` · <b style="color:var(--tierA)">${d.new} new since you last looked</b>`:' · nothing new')
+    +((d.notes||[]).length?`<br><span class="mapwarn">${d.notes.map(esc).join(' ')}</span>`:'');
+  document.getElementById('sigRows').innerHTML=items.length?items.map(s=>`
+    <div class="sigrow ${s.new?'hit':''}" style="align-items:flex-start">
+      <span>
+        <b>${SIG_ICON[s.kind]||''} ${esc(s.name)}</b>
+        ${s.new?'<span class="badge auto">NEW</span>':''}
+        ${s.confirmed?'':'<span class="badge none">unconfirmed</span>'}
+        <br><span>${esc(s.headline)}</span>
+        <br><span class="hint">${esc(s.detail)}</span>
+        <br><span class="hint">${SIG_WHAT[s.kind]||s.kind} · ${
+          /^https?:/.test(s.source)?`<a href="${esc(s.source)}" target="_blank" rel="noopener">source filing</a>`:esc(s.source)}</span>
+      </span>
+      <span style="white-space:nowrap">
+        <button class="abtn" onclick="closeModal('mSignals');focusLead('${esc(s.lead_id)}')">Open</button>
+        <button class="abtn" onclick="setCallback('${esc(s.lead_id)}')">&#9200;</button>
+      </span>
+    </div>`).join('')
+    :`<p class="hint">Nothing moving. Every lead was checked against the WARN feeds, the SEC filing index and their own age.</p>`;
+}
+window.focusLead=id=>{
+  const L=byId(id);if(!L)return;
+  document.getElementById('q').value=((L.firstName||'')+' '+(L.lastName||'')).trim();
+  ['fSellable','fDue','fEmailFirst'].forEach(k=>{const el=document.getElementById(k);if(el)el.checked=false;});
+  document.getElementById('fStatus').value='';
+  filterTier='';expanded=id;render();
+  document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
+};
+document.getElementById('btnSignals').addEventListener('click',()=>{openModal('mSignals');loadSignals(false);});
+document.getElementById('sigMark').addEventListener('click',()=>loadSignals(true));
+document.getElementById('sigMail').addEventListener('click',async()=>{
+  if(!sigLast||!(sigLast.signals||[]).length){toast('Nothing to send.');return;}
+  const lines=sigLast.signals.map(s=>
+    `${s.new?'NEW  ':'     '}${s.name}${s.employer?' — '+s.employer:''}\n`
+    +`     ${s.headline}\n     ${s.detail}\n     ${s.source}\n`);
+  const body=`Money in motion across your list — ${sigLast.signals.length} event(s), `
+    +`${sigLast.new} new.\n\n`+lines.join('\n')
+    +`\nChecked ${sigLast.checked} leads against state WARN notices, SEC filings and age on file.\n`;
+  try{
+    await api('/api/send-email',{to:ME.email,subject:`Money in motion — ${sigLast.new} new`,
+      body,sender:state.settings.sendAs||''});
+    toast('Sent to '+ME.email+'.');
+  }catch(e){toast('Could not send: '+e.message);}
+});
 
 /* ---- sharing ----
    A list belongs to whoever built it. Sharing hands one named colleague access

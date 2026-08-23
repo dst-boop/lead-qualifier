@@ -80,6 +80,7 @@ Pushing to `main` is the deploy.
 | *(none)* | ZoomInfo via the MCP connector — no entitlement, paste a token in ICP settings — [setup](SETUP-zoominfo.md) |
 | `ANTHROPIC_API_KEY` | AI quality control, and reading SEC filings — [setup](SETUP-ai-qc.md) |
 | `EDGAR_USER_AGENT` | Free exact age for public-company officers from SEC proxy statements — [setup](SETUP-edgar.md) |
+| *(none)* | Money-in-motion tracking — 59½, WARN notices, officer-departure 8-Ks — [setup](SETUP-signals.md) |
 | `TEAM_BY_DOMAIN` | Treat an email domain as one firm, for sharing and the leaderboard. Default on — [setup](SETUP-team.md) |
 | `FIRESTORE_LISTS_COLLECTION` | Where named lead lists are stored, one document each. Default `lead_lists` — [setup](SETUP-lists-and-senders.md) |
 | `DRIVE_LEADS_FILE` | Name of the Google Sheet the app reads automatically. Default `Wealth Management Lead Prospecting` — [setup](SETUP-sourcing.md) |
