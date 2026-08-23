@@ -162,5 +162,77 @@ ck("ids are stable across rebuilds",
    P.build_opportunities(w["events"], pl["plans"], today=TODAY)[0]["id"]
    == P.build_opportunities(w["events"], pl["plans"], today=TODAY)[0]["id"])
 
+# --- against a real New York WARN file --------------------------------------
+# The header below is verbatim from New York's published WARN data. Everything
+# in this block was written after running the parser over the real file and
+# finding it returned an effective date for none of the fifty rows: NY files
+# "Layoff Date" as prose and puts the date in "Closing Date". A null effective
+# date is not cosmetic — it is the field the sixty-days-early premise rests on.
+NY_HDR = ("Company,Business Type,County,Total Employees,Number Affected,Date of Notice,"
+          "Layoff Date,Closing Date,Reason for Dislocation,Classification,"
+          "Reason Stated for Filing,Union,Contact,Phone,FEIN NUM,Event Number,Case_ID")
+NY_ROWS = [
+    # the ordinary case: prose in Layoff Date, a real date in Closing Date
+    ('"Acitrezza, LLC (Agata & Valentina store) 64 University Place New York, NY 10003",'
+     'Specialty Food,New York,59,59,2/11/2021,'
+     '"Separations will occur on May 12, 2021 or during the 14-day period beginning on that date.",'
+     '5/12/2021,Economic,Plant Closing,Plant Closing,None,X,555,45-1196450,2020-0423,9525'),
+    # no closing date, and the prose names exactly one
+    ('Halstead Marine LLC 12 Commercial St Portland,Marine,Cumberland,120,58,3/01/2021,'
+     '"Six employees will be permanently separated on 5/2/2021.",'
+     '-----,Economic,Layoff,Layoff,None,X,555,11-1111111,2021-0001,1'),
+    # no closing date, and the prose names several — unresolvable
+    ('Ridgeline Capital,Finance,Westchester,300,11,1/15/2021,'
+     '"A total of 11 employee separations have been postponed from 1/29/2021 - 2/12/2021 '
+     'to 3/17/2021 - 3/31/2021.",'
+     '----,Economic,Layoff,Layoff,None,X,555,22-2222222,2021-0002,2'),
+    # nothing anywhere
+    ('Cordova Industrial Group Inc,Manufacturing,Essex,900,412,4/01/2021,'
+     'To be determined,To be determined,Economic,Layoff,Layoff,None,X,555,33-3333333,2021-0003,3'),
+]
+ny = P.parse_warn_csv(NY_HDR + "\n" + "\n".join(NY_ROWS), "NY")
+ev = {e["employer"]: e for e in ny["events"]}
+
+ck("the real NY header maps employer, headcount and notice date",
+   ny["mapped"]["employer"] == "Company" and ny["mapped"]["workers"] == "Number Affected"
+   and ny["mapped"]["notice_date"] == "Date of Notice", ny["mapped"])
+ck("NY publishes no city or state column", set(ny["unmapped"]) == {"city", "state"}, ny["unmapped"])
+ck("  ...so the feed's own state fills it in", all(e["state"] == "NY" for e in ny["events"]))
+
+ck("the address glued to the company name is cut off",
+   "Acitrezza, LLC (Agata & Valentina store)" in ev, sorted(ev))
+ck("  ...leaving a key a plan sponsor could match",
+   "university" not in ev["Acitrezza, LLC (Agata & Valentina store)"]["employer_key"],
+   ev["Acitrezza, LLC (Agata & Valentina store)"]["employer_key"])
+ck("  ...and the original is kept, since it is the only address given",
+   "New York, NY 10003" in ev["Acitrezza, LLC (Agata & Valentina store)"]["employer_raw"])
+
+ck("a prose layoff date defers to the real closing date",
+   ev["Acitrezza, LLC (Agata & Valentina store)"]["effective_date"] == "2021-05-12",
+   ev["Acitrezza, LLC (Agata & Valentina store)"]["effective_date"])
+ck("a placeholder closing date falls back to a single date in the prose",
+   ev["Halstead Marine LLC"]["effective_date"] == "2021-05-02",
+   ev["Halstead Marine LLC"]["effective_date"])
+ck("prose naming several dates yields none — no rule picks the right one",
+   ev["Ridgeline Capital"]["effective_date"] is None,
+   ev["Ridgeline Capital"]["effective_date"])
+ck("  ...and the sentence is handed back for a person to read",
+   "postponed" in ev["Ridgeline Capital"]["date_note"], ev["Ridgeline Capital"]["date_note"][:60])
+ck("no date anywhere is simply no date",
+   ev["Cordova Industrial Group Inc"]["effective_date"] is None)
+ck("  ...with no invented note either",
+   ev["Cordova Industrial Group Inc"]["date_note"] == "",
+   ev["Cordova Industrial Group Inc"]["date_note"])
+
+ck("a company name with no address is left alone",
+   P.company_from_cell("Michael Page International Inc.") == "Michael Page International Inc.")
+ck("  ...and a cut that would leave nothing keeps the original",
+   P.company_from_cell("3M") == "3M", P.company_from_cell("3M"))
+ck("one date in a sentence is read", P.date_from_prose("separated effective 2/11/2021")[0] == "2021-02-11")
+ck("  ...two are refused", P.date_from_prose("from 1/29/2021 to 3/17/2021")[0] is None)
+ck("  ...and the sentence comes back instead",
+   "1/29/2021" in P.date_from_prose("from 1/29/2021 to 3/17/2021")[1])
+
+
 print(("\nFAILURES: %d of %d" % (fail, TOTAL[0])) if fail else "\nall %d checks passed" % TOTAL[0])
 sys.exit(1 if fail else 0)

@@ -149,6 +149,71 @@ WARN_ALIASES = {
 FEEDS: list[dict] = []
 
 
+# Columns to try for the effective date, in order, when the first one does not
+# yield a date. New York files "Layoff Date" as prose — "Separations will occur
+# on May 12, 2021 or during the 14-day period beginning on that date" — and puts
+# the actual date in "Closing Date". A null effective date is not a cosmetic
+# loss: it is the field the whole sixty-days-early premise rests on.
+DATE_FALLBACKS = ["closing date", "layoff date", "effective date", "separation date",
+                  "last day of work", "planned starting date", "date of layoff"]
+
+# An employer cell that carries the address with it. NY writes
+# "Acitrezza, LLC (Agata & Valentina store) 64 University Place New York, NY 10003",
+# and normalising that produces a key no Form 5500 sponsor will ever match, so
+# the WARN half and the plan half silently stop joining.
+_ADDR_CUT = re.compile(
+    r"\s+\d{1,6}[A-Za-z]?\s+(?=[A-Z0-9])"        # " 64 University Place"
+    r"|\s+(?:P\.?O\.?\s*Box|One|Two|Three)\s+\d*\s*[A-Z]"
+    r"|\s{2,}"                                     # runs of space, often a line break
+    r"|\n", re.I)
+
+
+def company_from_cell(cell: str) -> str:
+    """The company name out of a cell that may have an address glued to it.
+
+    Conservative: it only cuts where a street address plainly begins, and if
+    that would leave nothing it keeps the original. A name that is merely long
+    is left alone — over-trimming would break the join in the other direction.
+    """
+    t = (cell or "").strip()
+    if not t:
+        return ""
+    m = _ADDR_CUT.search(t)
+    head = t[:m.start()].strip(" ,;-") if m else t
+    return head if len(head) >= 3 else t
+
+
+_PROSE_DATE = re.compile(
+    r"\b(\d{1,2}/\d{1,2}/\d{2,4}|[A-Z][a-z]+\s+\d{1,2},\s*\d{4})\b")
+
+
+def date_from_prose(text: str) -> tuple:
+    """(date, note) from a sentence, but only when it names exactly one date.
+
+    New York's date columns are often prose: "A total of 198 employees that were
+    furloughed on 3/22/2020 have been permanently separated effective 2/11/2021",
+    or "postponed from 1/29/2021 - 2/12/2021 to 3/17/2021 - 3/31/2021". The first
+    has one meaning; the second has four dates and no rule picks the right one
+    without guessing.
+
+    So: one date, use it. More than one, refuse and hand the sentence back for a
+    person to read. A wrong effective date is not a smaller version of a missing
+    one — it drives a countdown on a real call, and the advisor has no way to
+    tell it was invented.
+    """
+    t = (text or "").strip()
+    if not t:
+        return None, ""
+    found = []
+    for m in _PROSE_DATE.findall(t):
+        d = to_date(m)
+        if d and d not in found:
+            found.append(d)
+    if len(found) == 1:
+        return found[0], ""
+    return None, (t[:300] if found else "")
+
+
 def parse_warn_csv(text: str, default_state: str = "") -> dict:
     """WARN rows out of a CSV, plus what the matcher did with the columns."""
     rows = list(csv.reader(io.StringIO(text)))
@@ -162,20 +227,47 @@ def parse_warn_csv(text: str, default_state: str = "") -> dict:
         i = idx.get(key)
         return row[i].strip() if i is not None and i < len(row) else ""
 
+    # Every column that might carry a usable date, in preference order, so a
+    # prose "Layoff Date" can defer to a real "Closing Date".
+    date_cols = [i for i in (pick_column(headers, [a]) for a in DATE_FALLBACKS)
+                 if i is not None]
+    if idx.get("effective_date") is not None:
+        date_cols = [idx["effective_date"]] + [i for i in date_cols if i != idx["effective_date"]]
+
     for row in rows[1:]:
         if not any(c.strip() for c in row):
             continue
-        employer = cell(row, "employer")
-        if not employer:
+        raw = cell(row, "employer")
+        if not raw:
             continue
+        eff, note = None, ""
+        for i in date_cols:
+            if i < len(row):
+                eff = to_date(row[i].strip())
+                if eff:
+                    break
+        if not eff:
+            # Nothing parsed as a date, so try reading it out of the sentence.
+            for i in date_cols:
+                if i < len(row):
+                    eff, note = date_from_prose(row[i])
+                    if eff or note:
+                        break
+        employer = company_from_cell(raw)
         events.append({
             "employer": employer,
+            # The original is kept: it carries the address, which is the only
+            # location this file gives when there is no city column.
+            "employer_raw": raw if raw != employer else "",
             "employer_key": norm_company(employer),
             "city": cell(row, "city"),
             "state": cell(row, "state") or default_state,
             "county": cell(row, "county"),
             "workers": to_int(cell(row, "workers")),
-            "effective_date": to_date(cell(row, "effective_date")),
+            "effective_date": eff,
+            # What the filing said when no single date could be read out of it.
+            # Shown rather than dropped: a human can read "postponed to March".
+            "date_note": note,
             "notice_date": to_date(cell(row, "notice_date")),
             "reason": cell(row, "reason"),
         })

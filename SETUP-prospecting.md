@@ -66,6 +66,37 @@ gcloud run services update lead-qualifier --region us-east1 \
   --set-env-vars 'WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
 ```
 
+## What New York's file actually looks like
+
+The parser has now been run against **real published New York WARN data**, and
+two things it assumed were wrong:
+
+**The date is not in "Layoff Date".** New York files that column as prose —
+*"Separations will occur on May 12, 2021 or during the 14-day period beginning
+on that date"* — and puts the usable date in **Closing Date**. Before this was
+found, the parser returned an effective date for **none** of the rows, which
+quietly removes the entire point of a feed that is meant to arrive 60 days
+early.
+
+The parser now tries every date-ish column in turn, and if none parses it reads
+a date out of the sentence — **but only when the sentence names exactly one.**
+Several of New York's rows read like *"postponed from 1/29/2021 – 2/12/2021 to
+3/17/2021 – 3/31/2021"*, and no rule picks the right one of those four without
+guessing. Those come back with no date and the sentence attached, for a person
+to read. A wrong effective date is not a smaller version of a missing one: it
+drives a countdown on a real call and nothing on screen would say it was
+invented.
+
+**The company name carries its address.** New York writes
+`Acitrezza, LLC (Agata & Valentina store) 64 University Place New York, NY 10003`
+in the company column. Normalised, that produces a key no Form 5500 sponsor will
+ever match — so every New York event would have shown as *"no plan on file"*.
+The name is now cut where the street address begins, and the full string kept
+alongside, since it is the only location the file gives.
+
+**New York publishes no city or state column** — only county. That is what the
+`state` field in your feed entry is for.
+
 ## Do the probe first — the column names are not guessed at correctly
 
 **No live WARN feed or Form 5500 file has ever been fetched by this code.** The
