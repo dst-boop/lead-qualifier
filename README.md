@@ -86,6 +86,7 @@ Pushing to `main` is the deploy.
 | `FIRESTORE_LISTS_COLLECTION` | Where named lead lists are stored, one document each. Default `lead_lists` — [setup](SETUP-lists-and-senders.md) |
 | `DRIVE_LEADS_FILE` | Name of the Google Sheet the app reads automatically. Default `Wealth Management Lead Prospecting` — [setup](SETUP-sourcing.md) |
 | *(none)* | SCS campaign — long tenure, 59½, in-service distributions — [setup](SETUP-scs.md) |
+| `PLANS_CACHE_SECONDS` / `WARN_CACHE_SECONDS` | How long a fetched source is reused. Defaults 24h / 6h — [setup](SETUP-prospecting.md) |
 | `FORM5500_SCHEDULE_URLS` | Schedule H/I — where plan assets actually live; the 5500 file has none — [setup](SETUP-prospecting.md) |
 | `WARN_FEEDS` / `FORM5500_URL` | Money in motion — employers with a dated mass separation, priced by their 401(k) plan — [setup](SETUP-prospecting.md) |
 | `USE_FIRESTORE=0` | Force memory mode — [setup](SETUP-firestore.md) |

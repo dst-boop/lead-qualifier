@@ -1429,8 +1429,41 @@ async def _get(url: str, *, as_bytes: bool = False, timeout: int = 120,
     return r.content if as_bytes else r.text
 
 
-async def _load_warn(drive_token: str = "") -> dict:
+# ---- source cache ----
+# Both loaders download and parse an entire file. Without this, every click of
+# "Price the employers", every "Check for events", and every opportunities
+# refresh re-fetched about 36MB and re-parsed a few hundred thousand rows —
+# per user, per click. Against a government host that is also impolite.
+#
+# In process rather than in Firestore: the parsed index is large and cheap to
+# rebuild, and Cloud Run scaling to zero simply means the next request pays for
+# it once. A cold start re-fetching is the correct behaviour, not a miss.
+_SRC_CACHE: dict[str, tuple] = {}
+PLANS_TTL = int(os.environ.get("PLANS_CACHE_SECONDS", "86400"))   # filed monthly
+WARN_TTL = int(os.environ.get("WARN_CACHE_SECONDS", "21600"))     # notices land daily
+
+
+def _cache_get(key: str, ttl: int):
+    hit = _SRC_CACHE.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    return None
+
+
+def _cache_put(key: str, value):
+    # One entry per distinct source configuration, and only a handful can ever
+    # exist, so nothing needs evicting except by age.
+    _SRC_CACHE[key] = (time.time(), value)
+    return value
+
+
+async def _load_warn(drive_token: str = "", fresh: bool = False) -> dict:
     """Every configured WARN feed, normalised. Reports per-feed what happened."""
+    key = "warn|" + WARN_FEEDS
+    if not fresh:
+        got = _cache_get(key, WARN_TTL)
+        if got is not None:
+            return {**got, "cached": True}
     events, report = [], []
     for feed in _warn_feeds():
         fid = feed.get("id") or feed.get("state") or feed["url"][:40]
@@ -1453,7 +1486,7 @@ async def _load_warn(drive_token: str = "") -> dict:
         events.extend(parsed["events"])
         report.append({"id": fid, "events": len(parsed["events"]),
                        "mapped": parsed["mapped"], "unmapped": parsed["unmapped"]})
-    return {"events": events, "feeds": report}
+    return _cache_put(key, {"events": events, "feeds": report})
 
 
 async def _drive_token_for(request: Request) -> str:
@@ -1473,7 +1506,7 @@ async def _fetch_source(ref: str, token: str, want: str) -> str:
     return blob.decode("utf-8", errors="replace")
 
 
-async def _load_plans(drive_token: str = "") -> dict:
+async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
     """Form 5500 sponsors, with assets joined in from Schedule H or I.
 
     The 5500 file itself carries no money — only participant counts — so
@@ -1482,6 +1515,11 @@ async def _load_plans(drive_token: str = "") -> dict:
     """
     if not FORM5500_URL:
         return {"plans": {}, "note": "FORM5500_URL is not set."}
+    key = "plans|" + FORM5500_URL + "|" + ",".join(FORM5500_SCHEDULE_URLS) + "|" + SOURCE_STATES
+    if not fresh:
+        got = _cache_get(key, PLANS_TTL)
+        if got is not None:
+            return {**got, "cached": True}
     text = await _fetch_source(FORM5500_URL, drive_token, FORM5500_CSV_IN_ZIP)
     parsed = prospecting.parse_5500_csv(text, states=_source_states() or None)
     out = {"plans": parsed["plans"], "rows": parsed.get("rows"),
@@ -1491,13 +1529,13 @@ async def _load_plans(drive_token: str = "") -> dict:
     priced = sum(1 for p in parsed["plans"].values() if p.get("avg_balance"))
     if priced:
         out["priced"] = priced
-        return out
+        return _cache_put(key, out)
 
     if not FORM5500_SCHEDULE_URLS:
         out["note"] = ("The 5500 file has participant counts but no assets — assets are "
                        "on Schedule H and Schedule I, which are separate downloads. Set "
                        "FORM5500_SCHEDULE_URLS or nothing can be priced.")
-        return out
+        return _cache_put(key, out)
 
     assets, notes = {}, []
     for ref in FORM5500_SCHEDULE_URLS:
@@ -1522,7 +1560,7 @@ async def _load_plans(drive_token: str = "") -> dict:
     elif not rep["filled"]:
         out["note"] = ("Schedule files loaded but nothing joined — the ACK_ID values do "
                        "not line up with the 5500 file. Check both are the same year.")
-    return out
+    return _cache_put(key, out)
 
 
 @app.get("/api/sources/probe")
@@ -1540,7 +1578,7 @@ async def sources_probe(request: Request, which: str = "all"):
         feeds = _warn_feeds()
         out["warn"] = {"configured": len(feeds)}
         if feeds:
-            got = await _load_warn(await _drive_token_for(request))
+            got = await _load_warn(await _drive_token_for(request), fresh=True)
             out["warn"]["feeds"] = got["feeds"]
             out["warn"]["sample"] = got["events"][:3]
     if which in ("all", "5500"):
@@ -1548,7 +1586,7 @@ async def sources_probe(request: Request, which: str = "all"):
             out["form5500"] = {"error": "FORM5500_URL is not set."}
         else:
             try:
-                got = await _load_plans(await _drive_token_for(request))
+                got = await _load_plans(await _drive_token_for(request), fresh=True)
                 sample = list(got["plans"].items())[:3]
                 out["form5500"] = {"rows_read": got.get("rows"), "kept": got.get("kept"),
                                    "mapped": got.get("mapped"), "unmapped": got.get("unmapped"),
@@ -1574,12 +1612,13 @@ async def sources_refresh(request: Request):
     what turns a set of buttons into something that watches.
     """
     await _active_token(request)
-    warn = await _load_warn(await _drive_token_for(request))
+    tok = await _drive_token_for(request)
+    warn = await _load_warn(tok, fresh=True)
     if not warn["events"]:
         return {"stored": 0, "feeds": warn["feeds"],
                 "note": "No WARN events. Set WARN_FEEDS, then check /api/sources/probe."}
     try:
-        plans = await _load_plans(await _drive_token_for(request))
+        plans = await _load_plans(tok, fresh=True)
     except Exception as e:
         plans = {"plans": {}, "note": f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}"}
     opps = prospecting.build_opportunities(
@@ -1603,13 +1642,13 @@ async def opportunities(request: Request, refresh: bool = False):
         doc = await _fs_get(FS_OPPS, "latest")
         if doc:
             return doc
-    warn = await _load_warn(await _drive_token_for(request))
+    warn = await _load_warn(await _drive_token_for(request), fresh=refresh)
     if not warn["events"]:
         return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
                 "feeds": warn["feeds"],
                 "note": "No WARN feeds configured — see SETUP-prospecting.md."}
     try:
-        plans = (await _load_plans(await _drive_token_for(request))).get("plans") or {}
+        plans = (await _load_plans(await _drive_token_for(request), fresh=refresh)).get("plans") or {}
     except Exception:
         plans = {}
     opps = prospecting.build_opportunities(
