@@ -2216,7 +2216,8 @@ function render(){
         ${['New','Called','Call Back','Not Interested','Has Advisor','Set'].map(s=>`<option ${s===L.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td><div class="act">
         ${L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady())?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
-        ${(!L.pv&&(L.mobilePhone||L.directPhone)&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
+        ${(canVerify(L)&&!L.pv)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
+        ${(canVerify(L)&&L.pv&&!L.hd)?`<button class="abtn" onclick="verifyLead('${L.id}',true)" title="Checked before the app read the whole record. Re-checking pulls their date of birth, other names, every line and every email &mdash; the same lookup, read properly. (1 lookup)">&#128222;&#43;</button>`:''}
         ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: confirmed age, home address, mobile numbers, properties owned (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
@@ -2260,6 +2261,8 @@ function detailRow(L){
       ${(L.hd.coOwners&&L.hd.coOwners.length)?`<div class="hint" style="margin-top:3px">Deed names: ${esc(L.hd.coOwners.join(' · '))}</div>`:''}
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}${L.hd.matchedBy?' — matched on '+esc(L.hd.matchedBy)+(L.hd.matchedBy==='name'?' only, confirm it is the right person':''):''}${L.hd.matchScore?' ('+L.hd.matchScore+'/100)':''}</div>`:''}
       ${L.hd.rejected?`<div class="hint" style="margin-top:3px;color:var(--tierX)">No record attached — ${esc(L.hd.rejected)}</div>`:''}`:''}
+      ${(L.pv&&canVerify(L))?`<div style="margin-top:8px"><button class="mbtn" onclick="verifyLead('${L.id}',true)">Re-check this number</button>
+      <span class="hint" style="margin-left:6px">${L.hd?'Spends one lookup.':'Checked before the app read the whole record &mdash; re-checking pulls the rest of it.'}</span></div>`:''}
       ${(L.pv&&L.pv.household)?`<h4 style="margin-top:12px">Household member</h4>
       <p class="hint">${esc(L.pv.household.name)} holds ${esc(L.pv.household.phone)} at this address — likely a spouse, and often the other half of a retirement decision.</p>
       <button class="mbtn" style="margin-top:4px" onclick="addHousehold('${L.id}')">Add ${esc(L.pv.household.name)} as a lead</button>`:''}
@@ -3370,9 +3373,21 @@ async function loadMe(){
   render();
 }
 ACT_LABEL.verify='Verified';
-window.verifyLead=async id=>{
+/* Whether the phone check is available for this lead at all: a number to
+   check, a signed-in user, and the integration configured. */
+function canVerify(L){
+  return !!((L.mobilePhone||L.directPhone)&&window.ME&&ME.signed_in
+            &&ME.features&&ME.features.whitepages);
+}
+window.verifyLead=async(id,recheck)=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first \u2014 phone lookups use your WhitePages credits.');return;}
+  // Re-running spends a credit on a number that already has an answer, so it
+  // is always a deliberate act rather than a stray click.
+  if(recheck&&L.pv&&!await appConfirm(
+      L.hd?`Look ${(L.firstName||'this lead')} up again? It spends one WhitePages lookup.`
+          :`This number was checked before the app read the whole record. Re-checking spends one lookup and pulls their date of birth, other names, every phone line and every email address. Go ahead?`,
+      'Re-check'))return;
   const phone=L.mobilePhone||L.directPhone;
   toast('Checking '+phone+'\u2026');
   try{
