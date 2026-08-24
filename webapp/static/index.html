@@ -3061,6 +3061,33 @@ async function loadSignals(mark){
     renderSignals(d);
   }catch(e){meta.textContent='Could not check: '+e.message;}
 }
+/* Why the list is quiet.
+
+   "Nothing moving. Every lead was checked against the WARN feeds, the SEC
+   filing index and their own age" was printed unconditionally — on a
+   deployment with no WARN feeds and no EDGAR agent, where two of those three
+   sentences were untrue and the third had nothing to work with.
+
+   Zero events is good news only when the checks ran. Otherwise it is silence
+   being mistaken for an all-clear, which on a money-in-motion watchlist is the
+   most expensive kind of wrong this app can be. */
+function quietReason(d){
+  const c=d.coverage||{};
+  const ran=[], missing=[];
+  (c.warn?ran:missing).push('mass-separation notices');
+  (c.filings?ran:missing).push('officer-departure filings');
+  const n=c.leads||d.checked||0, known=c.with_age||0;
+  if(known>=n&&n)ran.push('every age');
+  else if(known)ran.push(`${known} of ${n} ages`);
+  else missing.push('ages \u2014 no lead on this list has one');
+
+  const parts=[];
+  if(ran.length)parts.push('Checked: '+ran.join(', ')+'.');
+  if(missing.length)parts.push(`<b>Not checked: ${missing.join(', ')}.</b> A quiet list is only good news for the checks that ran.`);
+  if(c.with_birth_date)parts.push(`${c.with_birth_date} lead${c.with_birth_date===1?' has a birth date, so its':'s have birth dates, so their'} 59\u00bd date${c.with_birth_date===1?' is':'s are'} exact.`);
+  else if(known)parts.push('No lead has a birth date on file, so every 59\u00bd estimate here is a band rather than a month \u2014 press \u260e on the ones you care about.');
+  return parts.join(' ');
+}
 function renderSignals(d){
   const items=d.signals||[];
   document.getElementById('sigMeta').innerHTML=
@@ -3083,7 +3110,7 @@ function renderSignals(d){
         <button class="abtn" onclick="setCallback('${esc(s.lead_id)}')">&#9200;</button>
       </span>
     </div>`).join('')
-    :`<p class="hint">Nothing moving. Every lead was checked against the WARN feeds, the SEC filing index and their own age.</p>`;
+    :`<p class="hint">${quietReason(d)}</p>`;
 }
 window.focusLead=id=>{
   const L=byId(id);if(!L)return;
