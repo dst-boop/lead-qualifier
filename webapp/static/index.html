@@ -2288,6 +2288,8 @@ function detailRow(L){
       <div class="sigrow ${L.hd.city?'hit':'miss'}"><span>Lives in</span><span class="pts">${L.hd.city?esc(L.hd.city+', '+L.hd.state):'unknown'}</span></div>
       <div class="sigrow ${L.hd.ownsHome?'hit':(L.hd.ownsHome===false?'miss':'')}"><span>Owns their home</span><span class="pts">${L.hd.ownsHome===true?'yes':(L.hd.ownsHome===false?'not in their name':'unknown')}</span></div>
       ${L.hd.ownerType?`<div class="sigrow hit"><span>Deed held by</span><span class="pts">${esc(L.hd.ownerType)}</span></div>`:''}
+      ${(L.hd.ownsHome===null||L.hd.ownsHome===undefined)&&(L.hd.street||L.street)?`<div style="margin-top:4px"><button class="mbtn" onclick="checkDeed('${L.id}')">Check the deed</button>
+      <span class="hint" style="margin-left:6px">A second lookup. Who holds the deed &mdash; a person, a trust, an entity &mdash; is a wealth signal in itself.</span></div>`:''}
       <div class="sigrow ${L.hd.props?'hit':'miss'}"><span>Properties owned</span><span class="pts">${L.hd.props||0}</span></div>
       <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}${L.hd.phonesTotal?' of '+L.hd.phonesTotal+' phones':''}</span></div>
       ${(L.hd.phoneRecords&&L.hd.phoneRecords.length)?`<div class="hint" style="margin-top:3px">${L.hd.phoneRecords.map(ph=>`<div class="mono">${esc(ph.number)} <span style="color:var(--ink-faint)">${esc([ph.type,ph.carrier,ph.prepaid===true?'prepaid':'',ph.dnc===true?'DNC':'',ph.spam?'spam: '+ph.spam:''].filter(Boolean).join(' \u00b7 '))}</span></div>`).join('')}</div>`
@@ -3683,16 +3685,52 @@ function applyRecord(L,r,matchedBy){
   // signal — so the lead is re-scored or the new information changes nothing.
   scoreLead(L);
 }
+/* What a press actually cost, for the activity log. A press that spent two
+   lookups should not read the same as one that spent none. */
+function lookupCost(d){
+  const n=(d&&d.steps||[]).length;
+  return n?` [${n} lookup${n>1?'s':''}]`:' [no lookup — already on file]';
+}
+ACT_LABEL.deed='Deed check';
+/* The deed is a second billed lookup and answers a different question from
+   "who is this person", so it is asked for rather than bundled into Enrich.
+   The person half is already cached by then, so this press bills for one. */
+window.checkDeed=async id=>{
+  const L=byId(id);if(!L)return;
+  if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
+  if(!await appConfirm(`Look up who holds the deed at ${L.hd&&L.hd.street||'their address'}? It spends one WhitePages lookup.`,'Check the deed'))return;
+  toast('Reading the deed\u2026');
+  try{
+    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',
+      city:L.city||'',state:L.state||'',street:L.street||'',zip:L.zip||'',
+      phone:L.mobilePhone||L.directPhone||'',email:L.email||'',want_property:true});
+    if(!d.found){toast('No record to attach a deed to.');return;}
+    applyRecord(L,d,d.matched_by||'name');
+    L.updatedAt=Date.now();
+    logAct(id,'deed',(d.owns_home===true?'owns their home':(d.owns_home===false?'home not in their name':'ownership unclear'))
+      +(d.owner_type?' ('+d.owner_type+')':'')+lookupCost(d));
+    save();render();
+  }catch(e){toast('Deed check failed: '+e.message);}
+};
 window.enrichHome=async id=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
   toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+'…');
   try{
-    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||'',phone:L.mobilePhone||L.directPhone||''});
+    // Everything that identifies her goes in one request, and the server tries
+    // them in order of how well each one identifies a person, stopping at the
+    // first answer. The email rung is why a lead with no mobile is now worth
+    // pressing at all.
+    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',
+      city:L.city||'',state:L.state||'',street:L.street||'',zip:L.zip||'',
+      phone:L.mobilePhone||L.directPhone||'',email:L.email||'',
+      // The deed is a second billed lookup answering a different question.
+      // It is its own button now.
+      want_property:false});
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||''};save();render();return;}
     applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
-    logAct(id,'enrichHome',(dobLabel(L)?'born '+dobLabel(L):(d.age?'age '+d.age:'age unknown'))+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score);
+    logAct(id,'enrichHome',(dobLabel(L)?'born '+dobLabel(L):(d.age?'age '+d.age:'age unknown'))+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score+lookupCost(d));
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
 };
