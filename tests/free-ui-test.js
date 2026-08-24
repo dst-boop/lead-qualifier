@@ -33,6 +33,7 @@ const PUB = {
                 { value: 'CORDOVA INDUSTRIES', n: 5, last: '2024-10-30' }],
     occupations: [{ value: 'VP OPERATIONS', n: 5, last: '2024-10-30' }],
     places: [{ value: 'Knoxville, TN', n: 6, last: '2026-03-11' }],
+    streets: [{ value: '12 Cherokee Trl, Knoxville', n: 6, last: '2026-03-11' }], ytd_max: 2800,
     employer_match: true, says_retired: true },
   filings: [{ form: '4', date: '2025-11-03', person: 'Harmon Gregory (CIK 0009)',
               company: 'CORDOVA INDUSTRIES INC (CIK 0002)',
@@ -99,6 +100,8 @@ const PUB = {
   // This line is the Knoxville answer: where he told a federal form he lives.
   ck('  ...and where he gave from', /Gave from Knoxville, TN/.test(text));
   ck('  ...explaining why that beats the list address', /where they told a federal form they live/.test(text));
+  ck('  ...the street shown as identity confirmation, with its limit stated',
+     /12 Cherokee Trl, Knoxville/.test(text) && /not for mailing/.test(text));
   ck('  ...the employer as he reported it, dated', /cordova industries · 2024-10/.test(text));
   ck('the retired report is called out as the event having happened',
      /told the FEC they are retired/i.test(text) && /event having already happened/.test(text));

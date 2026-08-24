@@ -1890,3 +1890,25 @@ takes both documented key spellings, absence is a value everywhere, a
 namesake filter mirrors `_best_person`'s surname rule, and `/api/free-debug`
 returns the same field census `/api/wp-debug` does — one call from
 production settles what documentation cannot.
+
+### §27 addendum: the census came back, and the parser held
+
+Dan ran `/api/free-debug?source=fec` against production the same day §27
+shipped. First time in this repository's history that a parser written blind
+met its live response and was simply right: every field it read is where it
+looked, and the plain-date spelling it guessed at is the one served.
+
+The census also showed three fields worth reading that the documentation
+hunt had not surfaced, now captured: `contributor_street_1` (shown as
+identity confirmation, labelled "not for mailing" — §27's use restriction
+does not loosen for a more precise field), `contributor_aggregate_ytd`, and
+`sub_id`, which matters because `amendment_indicator = A` rows re-report the
+same transaction — a gift counted twice would overstate a dollar figure, the
+one mistake this panel must never make. `entity_type`/`is_individual` now
+exclude committees and companies from what is presented as a person's
+giving; a record silent about its type is kept, as always.
+
+The lesson §12 has been building toward, stated once: the census endpoint is
+what turned five past schema surprises from shipped bugs into this — a
+same-day diff between what was guessed and what is true, applied while the
+guess was still warm.
