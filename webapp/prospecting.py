@@ -304,6 +304,16 @@ def parse_warn_json(records: list, default_state: str = "") -> dict:
 
 # ---------------------------------------------------------------- Form 5500
 
+# Verified against the DOL's own published layout for f_5500_2025_latest
+# (field positions in brackets). Seven of these were already right; the eighth
+# was not there to be right about.
+#
+# **f_5500 carries no assets.** It has participant counts and nothing else
+# numeric about money. Plan assets are on Schedule H (plans with 100+
+# participants) and Schedule I (smaller ones), which are separate files joined
+# on ACK_ID. Without that join, every employer comes back with a headcount and
+# no average balance, and dollars-in-motion cannot be computed at all — the
+# feature looks configured and silently produces nothing.
 PLAN_ALIASES = {
     "ein": ["spons dfe ein", "ein", "sponsor ein", "spons ein"],
     "name": ["sponsor dfe name", "spons dfe name", "sponsor name", "plan sponsor name",
@@ -313,8 +323,13 @@ PLAN_ALIASES = {
               "spons dfe loc us state"],
     "participants": ["tot partcp boy cnt", "tot active partcp cnt", "total participants",
                      "tot partcp cnt", "participants"],
+    # Present on Schedule H/I, not on f_5500. Left here because a deployment
+    # may point FORM5500_URL at a pre-joined file of its own.
     "assets": ["tot assets eoy amt", "total assets", "tot assets amt",
-               "tot assets boy amt", "net assets eoy amt"],
+               "tot assets boy amt", "net assets eoy amt",
+               "small tot assets eoy amt"],
+    # The key both schedules join back on.
+    "ack_id": ["ack id"],
     "plan_year": ["form tax prd", "plan year begin date", "form plan year begin date"],
     "plan_type": ["type pension bnft code", "type welfare bnft code", "pension code"],
 }
@@ -359,6 +374,7 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
             continue
         plans[key] = {
             "sponsor": sponsor, "ein": cell(row, "ein"), "state": st,
+            "ack_id": cell(row, "ack_id"),
             "plan_name": cell(row, "plan_name"),
             "assets": assets, "participants": participants,
             "avg_balance": round(assets / participants) if assets and participants else None,
@@ -367,6 +383,72 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
         seen += 1
     return {"plans": plans, "headers": headers, "mapped": names,
             "unmapped": [k for k, v in names.items() if v is None], "rows": n, "kept": seen}
+
+
+SCHEDULE_ASSET_ALIASES = ["tot assets eoy amt", "small tot assets eoy amt",
+                          "total assets eoy", "net assets eoy amt",
+                          "tot assets boy amt", "small tot assets boy amt"]
+
+
+def parse_schedule_assets(text: str) -> dict:
+    """{ACK_ID: assets} out of a Schedule H or Schedule I file.
+
+    Both schedules are per-filing, keyed by the same ACK_ID as the parent
+    5500. Schedule H names the column TOT_ASSETS_EOY_AMT and Schedule I
+    prefixes it SMALL_; either is accepted, and end-of-year is preferred over
+    beginning-of-year because it is the balance the plan is leaving with.
+    """
+    reader = csv.reader(io.StringIO(text))
+    try:
+        headers = [h.strip() for h in next(reader)]
+    except StopIteration:
+        return {"assets": {}, "column": None, "rows": 0, "kept": 0}
+    ack = pick_column(headers, ["ack id"])
+    col = None
+    for alias in SCHEDULE_ASSET_ALIASES:      # in preference order, not header order
+        col = pick_column(headers, [alias])
+        if col is not None:
+            break
+    if ack is None or col is None:
+        return {"assets": {}, "column": headers[col] if col is not None else None,
+                "ack_column": headers[ack] if ack is not None else None,
+                "rows": 0, "kept": 0,
+                "note": "Schedule file has no ACK_ID or no assets column."}
+    out, n = {}, 0
+    for row in reader:
+        n += 1
+        if ack >= len(row) or col >= len(row):
+            continue
+        key = row[ack].strip()
+        amt = to_money(row[col].strip())
+        if not key or amt is None:
+            continue
+        # One filing can appear more than once across amended rows; the largest
+        # is the one that matches the plan as filed.
+        if key not in out or amt > out[key]:
+            out[key] = amt
+    return {"assets": out, "column": headers[col], "ack_column": headers[ack],
+            "rows": n, "kept": len(out)}
+
+
+def attach_assets(plans: dict, assets_by_ack: dict) -> dict:
+    """Fill in assets and avg_balance on plans that had neither.
+
+    Returns a small report rather than nothing, because "how many sponsors got
+    a number" is the question a probe is actually asking.
+    """
+    filled = 0
+    for p in plans.values():
+        if p.get("assets"):
+            continue
+        amt = assets_by_ack.get(p.get("ack_id") or "")
+        if amt is None:
+            continue
+        p["assets"] = amt
+        pc = p.get("participants")
+        p["avg_balance"] = round(amt / pc) if pc else None
+        filled += 1
+    return {"filled": filled, "sponsors": len(plans)}
 
 
 def unzip_first_csv(blob: bytes, name_contains: str = "") -> str:

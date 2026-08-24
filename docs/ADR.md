@@ -1566,3 +1566,63 @@ The same test file then caught its own version of the mistake: a check named
 private-address guard first and never reached the robots path at all. Both are
 the same lesson — a passing assertion proves something passed, not that it
 proved what its name says.
+
+## 24. The Form 5500 file contains no money
+
+The advisor put the DOL files in his own Drive, which surfaced two things at
+once — and the second is the more important.
+
+### Seven aliases right, one absent
+
+The download included `f_5500_2025_latest_layout.txt`, the DOL's own field
+layout. Checked against it, seven of the eight `PLAN_ALIASES` were correct:
+`SPONSOR_DFE_NAME`, `SPONS_DFE_MAIL_US_STATE`, `PLAN_NAME`, `SPONS_DFE_EIN`,
+`TOT_PARTCP_BOY_CNT`, `FORM_TAX_PRD`, `TYPE_PENSION_BNFT_CODE`.
+
+The eighth was not wrong. It was **absent**. The file has 140 fields and none of
+them is money — participant counts and nothing else numeric about the plan.
+
+Assets are on **Schedule H** (100+ participants, `TOT_ASSETS_EOY_AMT`) and
+**Schedule I** (smaller, `SMALL_TOT_ASSETS_EOY_AMT`), separate files joined on
+`ACK_ID`. §16 built the entire dollars-in-motion ranking on assets ÷
+participants; without the join, the numerator does not exist. Every employer
+would have shown a headcount and no balance, the ranking would have had nothing
+to rank on, and the app would have looked configured while producing nothing.
+
+This is the third silent failure found in three encounters with real data
+(§17 on estimated columns, §23's robots.txt origin bug, this). The pattern is
+consistent: the code was written from documentation, the documentation was
+about the right subject, and the thing that was wrong was an assumption too
+basic to be stated anywhere — *that a file about retirement plans mentions how
+much money is in them*.
+
+`priced` is now reported by the probe alongside `rows_read`, because "how many
+sponsors ended up with a number" is the question that was being answered
+implicitly and wrongly.
+
+### Schedule H first, Schedule I filling gaps
+
+`attach_assets` never overwrites a value that is already there, so a file that
+arrives pre-joined is left alone, and a large plan keeps its large-plan figure
+rather than being overwritten by a small-plan row. Amended filings keep the
+larger figure for the same reason §16 keeps the largest plan per sponsor.
+
+A sponsor with no schedule row stays **unpriced** — null, not zero. §17's rule,
+in the one place where a zero would be quietly catastrophic: it would rank a
+real employer last rather than marking it unknown.
+
+### Sources can live in the user's Drive
+
+`FORM5500_URL`, `FORM5500_SCHEDULE_URLS` and WARN feed URLs now accept a Drive
+share link, a bare file id, or `drive:<id>`, fetched with the signed-in user's
+own credentials.
+
+This is usually the better arrangement, and not only for convenience. The DOL
+publishes behind a path that changes each year and returns a zip; a file in Drive is
+stable, unzipped once by hand, and owned by the person who will notice when it
+goes stale. The app already had read-only Drive access for the prospecting
+sheet, so the marginal cost was a URL parser and a token pass-through.
+
+A Microsoft-only session asking for a Drive source gets an explicit message
+rather than an empty result, because "no data" and "no credentials" are
+different problems and only one of them is the user's to fix.

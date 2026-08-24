@@ -40,7 +40,8 @@ secret — these are public URLs — so plain env vars, no Secret Manager.
 | Variable | Meaning |
 |---|---|
 | `WARN_FEEDS` | JSON array of feeds (below). **The feature is hidden until this is set.** |
-| `FORM5500_URL` | URL of the DOL Form 5500 dataset. A `.zip` is unpacked in memory. |
+| `FORM5500_URL` | The DOL Form 5500 dataset. A `.zip` is unpacked in memory. A **Google Drive link or file id** also works. |
+| `FORM5500_SCHEDULE_URLS` | Schedule H and Schedule I, comma-separated. **Required for any dollar figure** — see below. |
 | `FORM5500_CSV_IN_ZIP` | Substring identifying which CSV inside the zip to read. Default `f_5500`. |
 | `SOURCE_STATES` | Comma-separated states to keep, e.g. `NY,NJ,CT,PA`. Empty keeps all. |
 | `SOURCE_MIN_WORKERS` | Ignore events smaller than this. Default `25`. |
@@ -96,6 +97,48 @@ alongside, since it is the only location the file gives.
 
 **New York publishes no city or state column** — only county. That is what the
 `state` field in your feed entry is for.
+
+## The 5500 file contains no money
+
+This is the thing most likely to waste an afternoon, and it is not obvious.
+
+`f_5500_2025_latest.csv` has 140 fields. It carries the sponsor, the state, the
+plan name, the EIN and **participant counts** — and nothing numeric about
+assets. Plan assets are on:
+
+- **Schedule H** — plans with 100+ participants, column `TOT_ASSETS_EOY_AMT`
+- **Schedule I** — smaller plans, column `SMALL_TOT_ASSETS_EOY_AMT`
+
+Both are separate downloads from the same DOL page, joined back on `ACK_ID`.
+
+Without them every employer comes back with a headcount and no average balance:
+**Price the employers** finds nothing, and dollars-in-motion cannot be computed,
+so the ranking has nothing to rank on. The app would look configured and produce
+nothing.
+
+```
+FORM5500_SCHEDULE_URLS = <Schedule H>,<Schedule I>
+```
+
+Schedule H is applied first and Schedule I fills the gaps, so a large plan keeps
+the large-plan figure. Either alone works; both is better.
+
+The probe reports `priced` — how many sponsors ended up with a balance. If that
+is 0 while `rows_read` is large, the schedules are missing, or they are from a
+different plan year and the `ACK_ID`s do not line up.
+
+## Keeping the files in Google Drive
+
+`FORM5500_URL`, `FORM5500_SCHEDULE_URLS` and any WARN feed URL accept a **Google
+Drive share link, a bare file id, or `drive:<id>`** instead of a public URL.
+
+That is often the better arrangement. The DOL publishes behind a path that
+changes each year; a file dropped in Drive is stable, can be unzipped once by
+hand, and is under the control of whoever will notice when it goes stale.
+
+Drive sources are read with the **signed-in user's** Google credentials, so the
+file must be in that account's Drive and Google sign-in must be connected. A
+Microsoft-only session gets a clear message rather than a silent empty result.
 
 ## Do the probe first — the column names are not guessed at correctly
 
