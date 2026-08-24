@@ -31,7 +31,10 @@ const LEADS = [
   { id: 'c', firstName: 'Cara', lastName: 'Charlie', employer: 'Halstead',
     mobilePhone: '(207) 555-0118', status: 'New', activity: [],
     pv: { label: 'Mobile · name ✓', ok: true, field: 'mobilePhone', wrong: false },
-    hd: { owner: 'Cara Charlie', dob: { year: 1966, month: 2, day: 0 }, aliases: [],
+    // `read` is the reader's stamp. Without it this lead is one enriched under
+    // the old code — which is a different case, and the one that produced
+    // "the button didnt reappear".
+    hd: { read: 2, owner: 'Cara Charlie', dob: { year: 1966, month: 2, day: 0 }, aliases: [],
           mobiles: ['(207) 555-0118'], phoneRecords: [], emailRecords: [], jobs: [],
           properties: [], relatives: [], priorPlaces: [] } },
   // no number at all — nothing to check, under any rule
