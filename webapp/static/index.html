@@ -103,6 +103,7 @@
   .card.tB{border-top-color:var(--tierB)} .card.tB .n{color:var(--tierB)}
   .card.tC{border-top-color:var(--tierC)} .card.tC .n{color:var(--tierC)}
   .card.tX{border-top-color:var(--tierX)} .card.tX .n{color:var(--tierX)}
+  .card.tI{border-top-color:#5a3a75} .card.tI .n{color:#5a3a75}
   .card.tAll{border-top-color:var(--ink)}
   .card.active{background:var(--brass-soft);border-color:var(--brass)}
 
@@ -138,6 +139,7 @@
 
   .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:var(--tierX-bg);color:var(--tierX);white-space:nowrap}
   .badge.camp-scs{background:#e8eef7;color:#33507a}
+  .badge.intl{background:#efe7f5;color:#5a3a75;cursor:help}
   .badge.planchip{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
@@ -212,6 +214,14 @@
   .bp-grid input,.bp-grid select,.bp-extra input{padding:7px 9px;border:1px solid var(--line);border-radius:4px;font-size:.85rem;font-family:var(--font-body);color:var(--ink)}
   .bp-extra{margin-top:10px}
   .bp-actions{display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap}
+  /* .tbtn is drawn for the dark header — a pale border and near-white text.
+     On this white panel that reads as disabled, which on a panel someone has
+     already reported as "doesn't work" is the last thing it should look like. */
+  .bp-actions .tbtn{border-color:var(--line);color:var(--ink)}
+  .bp-actions .tbtn:hover:not(:disabled){border-color:var(--brass);background:var(--brass-soft);color:var(--ink)}
+  .bp-actions .tbtn:disabled{opacity:.45;cursor:not-allowed}
+  .bp-actions .tbtn.primary{background:var(--ink);border-color:var(--ink);color:#f2f4f0}
+  .bp-actions .tbtn.primary:hover:not(:disabled){background:#2b3f56;border-color:#2b3f56;color:#f2f4f0}
   .bp-status{font-size:.82rem;color:var(--ink-soft)}
   .bp-status.err{color:var(--tierX)}
   .btnBuild[disabled]{opacity:.6;cursor:wait}
@@ -354,7 +364,7 @@
 
 <details class="buildpanel" open>
   <summary>Build a list from ZoomInfo</summary>
-  <div class="bp-inner" id="envWarn" style="display:none;padding-bottom:0"><p class="hint" style="color:var(--ink-soft);font-size:.82rem;border:1px solid var(--brass);background:var(--brass-soft);border-radius:4px;padding:8px 10px;margin:0"><strong>Standalone mode.</strong> Live pull &amp; enrich run inside Claude, or by messaging Claude with the filters below &mdash; you'll get back a CSV to import or paste here. Everything else (scoring, calling, email, invites, export) works right now.</p></div>
+  <div class="bp-inner" id="envWarn" style="display:none;padding-bottom:0"><p class="hint" style="color:var(--ink-soft);font-size:.82rem;border:1px solid var(--brass);background:var(--brass-soft);border-radius:4px;padding:8px 10px;margin:0"><strong>Standalone mode.</strong> Scoring, calling, email, invites and export all work here. Running a ZoomInfo search from this page needs a token &mdash; the line under the buttons says where you stand.</p></div>
   <div class="bp-inner" style="padding-bottom:0">
     <label style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:.82rem">
       <span style="font-weight:600">Campaign</span>
@@ -388,8 +398,14 @@
       <label>Min accuracy score <input type="number" id="bAcc" value="85" min="70" max="99"></label>
     </div>
     <label class="bp-extra">Extra criteria (optional) <input id="bExtra" placeholder="e.g., company revenue over $50M"></label>
+  </div>
+  <!-- Outside both campaign panels on purpose. These buttons run whichever
+       campaign is selected, and living inside the rollover panel meant that
+       choosing SCS hid every one of them — a form with nothing to press. -->
+  <div class="bp-inner">
     <div class="bp-actions">
       <button class="tbtn primary btnBuild" id="btnBuild">1 &middot; Build list (free)</button>
+      <button class="tbtn" id="btnCopySearch" title="Put this search on the clipboard to run in Claude with the ZoomInfo connector, then paste or import the results">Copy this search</button>
       <button class="tbtn" id="btnPaste">Paste a list</button>
       <button class="tbtn btnBuild" id="btnEnrich" style="border-color:var(--brass);color:var(--brass)">2 &middot; Enrich leads (uses credits)</button>
       <span class="bp-status" id="bStatus">Search pulls names, titles, companies &amp; DNC flags free. Enriching reveals email, phones, start date &amp; LinkedIn — 1 credit per lead.</span>
@@ -413,6 +429,7 @@
   <label class="toggle"><input type="checkbox" id="fEmailFirst"> Email-first (DNC) only</label>
   <label class="toggle"><input type="checkbox" id="fSellable"> 59&frac12;+ only</label>
   <label class="toggle"><input type="checkbox" id="fDue"> Callbacks due</label>
+  <label class="toggle"><input type="checkbox" id="fIntl"> International only</label>
 </section>
 
 <section class="tablewrap">
@@ -1247,7 +1264,16 @@ function scoreLead(L){
   // Without this a 55 that is really a 65 hides in the Excluded bucket as a B.
   L.wouldBeScore=Math.min(100,L.score+((!L.mobilePhone&&L.email&&!(L.enriched===false&&truthy(L.hasEmail)&&truthy(L.hasMobile)))?+s.wContact:0));
   L.wouldBeTier=L.wouldBeScore>=+s.tierA?'A':L.wouldBeScore>=+s.tierB?'B':'C';
-  if(L.mobilePhone){L.tier=L.wouldBeTier;L.exclReason='';}
+  // A number outside the North American plan is not a number this practice can
+  // work: the advisor is licensed in US states and the US do-not-call regime
+  // does not reach it. Held out of the tiers like a missing mobile, and for the
+  // same reason — the tier is a call order, and this is not a call.
+  L.intl=isIntl(L);
+  if(L.intl){
+    L.tier='X';
+    L.exclReason='Phone number is outside the US and Canada \u2014 not workable from here';
+  }
+  else if(L.mobilePhone){L.tier=L.wouldBeTier;L.exclReason='';}
   else{
     L.tier='X';
     L.exclReason=(L.enriched===false&&truthy(L.hasMobile))
@@ -1734,6 +1760,7 @@ function applyCampaign(){
   document.getElementById('rolloverInner').style.display=scs?'none':'';
   state.settings.campaign=scs?'scs':'rollover';
   save();
+  try{buildRouteLine();}catch(e){}
 }
 ['campRollover','campScs'].forEach(id=>document.getElementById(id).addEventListener('change',applyCampaign));
 [['sTickers','scsTickers'],['sTenure','scsMinTenure'],['sMgmt','scsMgmt'],['sAcc','scsAcc']].forEach(([id,key])=>{
@@ -1762,15 +1789,14 @@ userIntent: "Building a qualified prospect call list for a financial advisory te
 positionStartDateMax is deliberate: this search wants people who started at the employer BEFORE that date, i.e. long tenure. Do not substitute positionStartDateMin. managementLevel must be passed verbatim as given above — it is an exact enum value. Do NOT call any enrich tool (enrichment spends credits; search is free). After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`};
 }
 
-document.getElementById('btnBuild').addEventListener('click',async()=>{
-  const btn=document.getElementById('btnBuild'),st=document.getElementById('bStatus');
+/* Composed separately from the button that runs it, so the same search can be
+   copied out when there is no way to run it from here. */
+function rolloverPrompt(){
   const g=id=>document.getElementById(id).value.trim();
-  const camp=currentCampaign();
-  if(camp==='scs')return runScsBuild(btn,st);
   const win=+g('bWindow')||18;const d=new Date();d.setMonth(d.getMonth()-win);
   const minDate=d.toISOString().slice(0,10);
   const exReg=g('bExStates');
-  const prompt=`Call the ZoomInfo tool named search_contacts (NOT search_contacts_v2 — v2 lacks excludedRegions) exactly ONCE with exactly these parameters:
+  return `Call the ZoomInfo tool named search_contacts (NOT search_contacts_v2 — v2 lacks excludedRegions) exactly ONCE with exactly these parameters:
 locationSearchType: "Person"
 state: "${g('bStates')}"${exReg?`
 excludedRegions: "${exReg}"`:''}
@@ -1784,6 +1810,12 @@ pageSize: ${+g('bN')||50}
 page: ${+g('bPage')||1}
 userIntent: "Building a qualified prospect call list for a financial advisory team"
 Note: managementLevel must be passed verbatim as given above — it is an exact enum value. Do NOT call any enrich tool (enrichment spends credits; search is free). After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`;
+}
+document.getElementById('btnBuild').addEventListener('click',async()=>{
+  const btn=document.getElementById('btnBuild'),st=document.getElementById('bStatus');
+  const g=id=>document.getElementById(id).value.trim();
+  if(currentCampaign()==='scs')return runScsBuild(btn,st);
+  const prompt=rolloverPrompt();
   btn.disabled=true;st.classList.remove('err');st.textContent='Searching ZoomInfo… (10\u201330 seconds)';
   try{
     const payloads=await callClaude(prompt);
@@ -1972,12 +2004,16 @@ function filtered(){
   const ef=document.getElementById('fEmailFirst').checked;
   const sf=(document.getElementById('fSellable')||{}).checked;
   const df=(document.getElementById('fDue')||{}).checked;
+  const il=(document.getElementById('fIntl')||{}).checked;
   let out=state.leads.filter(L=>
     (!filterTier||L.tier===filterTier)&&
     (!st||L.status===st)&&
     (!ef||truthy(L.mobileDnc))&&
     (!sf||sellable(L).k==='yes')&&
     (!df||(L.callbackAt&&L.callbackAt<=Date.now()))&&
+    // Off by default they are simply excluded like any other X; on, this is the
+    // only view that shows them, which is what "segregated" has to mean.
+    (il?isIntl(L):true)&&
     (!q||[L.firstName,L.lastName,L.employer,L.title,L.state].join(' ').toLowerCase().includes(q)));
   const s=document.getElementById('fSort').value;
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
@@ -2030,6 +2066,7 @@ function renderPipeline(){
 
   // 3 — Qualify
   const sellableNow=leads.filter(L=>sellable(L).k==='yes').length;
+  const intl=leads.filter(isIntl).length;
   $('cQualify').textContent=counts.A+counts.B;
   $('sQualify').textContent=leads.length
     ? `${counts.A+counts.B} worth working · ${sellableNow} already past 59½`
@@ -2038,7 +2075,9 @@ function renderPipeline(){
     ['','tAll','All',leads.length],['A','tA','Tier A · call first',counts.A],
     ['B','tB','Tier B · nurture',counts.B],['C','tC','Tier C · low signal',counts.C],
     ['X','tX','Excluded · no mobile',counts.X]
-  ].map(([t,cls,l,n])=>`<button class="card ${cls} ${filterTier===t?'active':''}" onclick="setTier('${t}')"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('');
+  ].concat(intl?[['I','tI','International',intl]]:[]).map(([t,cls,l,n])=>
+    `<button class="card ${cls} ${(t==='I'?intlOn():filterTier===t)?'active':''}" onclick="${
+      t==='I'?'toggleIntl()':`setTier('${t}')`}"><div class="n">${n}</div><div class="l">${l}</div></button>`).join('');
 
   // 4 — Track. A callback that has come due is the most time-sensitive thing
   // on the screen, so it sits above the status chips rather than inside them.
@@ -2058,6 +2097,13 @@ function renderPipeline(){
     `<button class="chipcount" onclick="setStatusFilter('${k}')" title="Show only ${k}">${esc(k)} <b>${byStatus[k]}</b></button>`).join('')
     ||`<span class="hint">Set a status on a lead and it shows up here.</span>`;
 }
+function intlOn(){const el=document.getElementById('fIntl');return !!(el&&el.checked);}
+window.toggleIntl=()=>{
+  const el=document.getElementById('fIntl');
+  el.checked=!el.checked;
+  if(el.checked)filterTier='';
+  render();
+};
 window.setStatusFilter=v=>{
   const el=document.getElementById('fStatus');
   el.value=(el.value===v)?'':v;render();
@@ -2099,7 +2145,7 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${intlBadge(L)}${
       cbDue?`<div class="cbline ${cbDue}" title="${esc(L.callbackNote||'')}">&#9200; ${esc(cbLabel(L))}${L.callbackNote?' · '+esc(L.callbackNote):''}</div>`:''}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
@@ -2311,6 +2357,53 @@ function campChip(L){
 function normPhone(v){let d=(''+(v||'')).replace(/[^\d+]/g,'');
   if(/^\+/.test(d))return d; d=d.replace(/\D/g,'');
   if(d.length===10)return '+1'+d; if(d.length===11&&d[0]==='1')return '+'+d; return d?'+'+d:'';}
+/* ---- international numbers ----
+   A +44 mobile is not a lead this practice can work: the advisor is licensed in
+   US states, the DNC regime is US, and RingCentral dialling it is an
+   international call to somebody who is not a prospect. Segregated rather than
+   deleted — the person may be a US employee posted abroad, and that is a
+   judgement for a human.
+
+   NANP is +1 with a ten-digit national number. Everything else that parses as a
+   number with a country code is foreign; anything too short to be either is
+   simply unusable and says so. */
+function phoneRegion(v){
+  const raw=(''+(v||'')).trim();
+  if(!raw)return '';
+  const d=raw.replace(/[^\d+]/g,'');
+  const digits=d.replace(/\D/g,'');
+  if(!digits)return '';
+  if(d.startsWith('+')){
+    if(digits.startsWith('1')&&digits.length===11)return 'us';
+    return digits.length>=8?'intl':'bad';
+  }
+  // No country code written down. Ten digits, or eleven starting with 1, is the
+  // North American plan; a longer bare string was dialled from somewhere else.
+  if(digits.length===10)return 'us';
+  if(digits.length===11&&digits[0]==='1')return 'us';
+  if(digits.length>11)return 'intl';
+  return 'bad';
+}
+function leadPhoneRegion(L){
+  // The mobile decides, because it is the number the tier gate is about; the
+  // business line only speaks up when there is no mobile at all.
+  for(const f of ['mobilePhone','directPhone']){
+    const r=phoneRegion(L[f]);
+    if(r==='us'||r==='intl')return r;
+  }
+  const any=phoneRegion(L.mobilePhone)||phoneRegion(L.directPhone);
+  return any||'';
+}
+function isIntl(L){return leadPhoneRegion(L)==='intl';}
+function intlBadge(L){
+  if(!isIntl(L))return '';
+  // No country code on the badge. Codes are one to three digits and cannot be
+  // told apart by length without a table — the first attempt read +49 as +491.
+  // The number itself is already on the row; a wrong code beside it is worse
+  // than none, because it looks like it was looked up.
+  const n=normPhone(L.mobilePhone||L.directPhone||'');
+  return ` <span class="badge intl" title="${esc(n)} is outside the North American numbering plan. Held out of the tiers: a US-licensed advisor cannot work it, and the US do-not-call rules do not reach it.">INTL</span>`;
+}
 function phBtn(L,f){const v=L[f];if(!v)return '';
   return `<button class="phbtn" onclick="callLead('${L.id}','${f}')" title="Click to call via ${state.settings.callVia==='tel'?'system dialer':'RingCentral'}">${esc(v)}</button>`;}
 window.callLead=async(id,f)=>{const L=byId(id);const n=normPhone(L[f]);
@@ -2755,7 +2848,7 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
-['q','fStatus','fSort','fEmailFirst','fSellable','fDue'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+['q','fStatus','fSort','fEmailFirst','fSellable','fDue','fIntl'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
 /* ---- named lists ----
    An advisor runs more than one campaign at a time and the lists should not
@@ -3088,10 +3181,43 @@ document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
 })();
 
+/* The composed search, whether or not there is a way to run it from here. The
+   panel used to hide its own buttons when neither route was available, leaving
+   filters and nothing to press — which reads as broken rather than as
+   unconfigured. */
+function currentSearchPrompt(){
+  return currentCampaign()==='scs' ? scsPrompt().prompt : rolloverPrompt();
+}
+document.getElementById('btnCopySearch').addEventListener('click',()=>{
+  const txt=currentSearchPrompt();
+  const done=()=>toast('Search copied — paste it into Claude with the ZoomInfo connector, then import the CSV it gives you.');
+  try{navigator.clipboard.writeText(txt).then(done,()=>prompt('Copy this:',txt));}
+  catch(e){prompt('Copy this:',txt);}
+});
+/* Says which of the two routes is available, and if neither, what to do about
+   it. Silence here was the actual bug report. */
+function buildRouteLine(){
+  const st=document.getElementById('bStatus');if(!st)return;
+  const feat=(window.ME&&ME.features)||{};
+  st.classList.remove('err');
+  if(ziMcpReady()){
+    st.textContent='Connected to ZoomInfo through your Claude account. Search is free; enriching reveals email, phones, start date and LinkedIn at 1 credit per lead.';
+    return;
+  }
+  if(HAS_WS){
+    st.textContent='Running inside Claude, so the ZoomInfo connector on your Claude account is used. Search is free; enriching costs 1 credit per lead.';
+    return;
+  }
+  st.classList.add('err');
+  st.innerHTML=!feat.zi_mcp
+    ? 'This deployment has no Anthropic API key, so the app cannot reach ZoomInfo itself. '
+      +'<b>Copy this search</b> and run it in Claude with the ZoomInfo connector, then import the CSV.'
+    : 'No ZoomInfo token saved, so the app cannot run the search for you. '
+      +'Add one under <b>More \u2192 ICP settings</b>, or use <b>Copy this search</b> and run it in Claude, then import the CSV.';
+}
 if(!HAS_WS){
   document.getElementById('btnBuild').style.display='none';
   document.getElementById('btnEnrich').style.display='none';
-  document.getElementById('bStatus').textContent='';
   // Live pull needs the ZoomInfo connector, so on the deployed site this panel
   // only composes a search recipe. Useful, but not worth half the screen above
   // the call list — collapse it and let it be opened when wanted.
@@ -3117,6 +3243,7 @@ document.getElementById('noteSave').addEventListener('click',()=>{
 /* Re-check once /api/me lands: a saved token turns the live buttons back on in
    an ordinary browser, so the standalone warning no longer applies. */
 function applyZiMcpAvailability(){
+  try{buildRouteLine();}catch(e){/* pre-render */}
   if(HAS_WS||!ziMcpReady())return;
   ['btnBuild','btnEnrich'].forEach(id=>{const b=document.getElementById(id);if(b)b.style.display='';});
   const w=document.getElementById('envWarn');if(w)w.style.display='none';
