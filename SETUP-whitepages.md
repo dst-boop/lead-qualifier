@@ -2,21 +2,63 @@
 
 Two per-lead buttons.
 
-**📞? Verify** checks a phone number and shows:
+**📞? Verify** looks the number up and shows:
 
 - whether the number is **valid**
 - **line type** (Mobile / Landline / VoIP …) — mobile shows green
-- **carrier**
-- whether the number's **owner matches the lead's name** (or who it belongs to)
+- **carrier**, and the **do-not-call** and **spam** flags where the record
+  carries them
+- whether the number's **owner matches the lead's name** — including a match on
+  a **former or married name**, which says which one it matched
 
-**🏠 Enrich** looks the person up by name and shows:
+**🏠 Enrich** looks the person up by name and shows the same household panel.
 
-- **confirmed age** — a real date of birth, not a graduation-year guess
-- **home city and state** — where they live, not where the company is
-- **whether they own their home**, and whether the deed is held by a person, a
-  trust, or an entity
-- **how many properties they own**
-- **how many mobile numbers** are on file, and what they are
+### One lookup, not two
+
+A reverse-phone query on this API is a *person search* (see below), so it comes
+back as a full person record. Verify now keeps that record instead of reading
+three fields off it, which means **pressing 📞? fills the household panel for
+free**. Enrich is a second lookup only when the phone check found nothing, or
+when you want the property lookup that goes with it.
+
+### What the household panel shows
+
+- **Date of birth** — month and year, when the record has one. This is the most
+  valuable field in the response; see below.
+- **The month they reach 59½**, worked out from it
+- **Other names on file** — married, maiden, misspelt
+- **Home city and state** — where they live, not where the company is
+- **Every phone line**, with its type, carrier, and DNC or spam flag
+- **Every email address**, with its type (professional / personal) and whether
+  it was recently used
+- **Employer and title on the record**, flagged when it disagrees with your list
+- **Whether they own their home**, and whether the deed is held by a person, a
+  trust, or an entity — Enrich only
+- **How many properties and how many addresses** are on file
+
+Blank fields on the lead are filled in from the record. Fields you already have
+are never overwritten — the record's version shows in the panel instead, so you
+can judge which is right.
+
+### The date of birth is the one that matters
+
+Every other age in this app is an integer as of a filing date, a round number
+from a household record, or a graduation year plus twenty-two. A month and a
+year give the **exact month a lead reaches 59½** — "Born Aug 1970" means
+February 2030 — and 59½ is the whole question the SCS campaign turns on. So it
+outranks everything else, including an age printed in an SEC proxy statement.
+
+**It carries no day**, and the app is explicit about that:
+
+- The age shown is the one they have **certainly** reached. In their birthday
+  month it can be a year low. It is never a year high.
+- The 59½ answer is a **month**, not a date.
+- In that month the badge reads **"59½ this month"** rather than a green tick,
+  and tells you to confirm the date on the call. Eligibility that month turns on
+  a day nobody has looked up.
+
+Where the record has no date of birth, nothing changes: the app falls back to
+the ages it had before and labels them as it did before.
 
 ### There is no home value in this API
 
@@ -78,6 +120,21 @@ failed lookup tells you which of these it is:
 - **403** — the key is wrong, or has extra whitespace. The message says so.
 - **404** — treated as "no record found" and shown as such. If *every* lookup
   returns it, the path is wrong for your account; set the `*_PATH` overrides.
+
+### Which fields does *my* key actually return?
+
+Accounts differ in what they are entitled to, and the two dialects name things
+differently. Rather than guess, ask:
+
+    /api/wp-debug?phone=2065550142
+
+The response now includes a **`fields`** list — every path in the response, its
+type, and a short sample — and **`read`**, which is what the app made of it. So
+"does my key return a date of birth" is one line to read rather than four
+thousand characters of JSON, and if a field is present under a name the app does
+not recognise, `fields` is where that shows up.
+
+It spends a credit, like any other lookup, and needs you signed in.
 - **Anything else** — the error text comes straight through from the API.
 
 ## Notes
