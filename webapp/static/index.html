@@ -817,7 +817,7 @@ const DEFAULTS={
   /* A tenure longer than this is a bad date, not a long career. Set at 50 after
      a 46-year run at Boeing — a real one — was being flagged at 40. */
   scsSuspectYears:50,
-  source:'ZoomInfo', addrType:'Business',
+  source:'ZoomInfo', addrType:'Home',
   orgName:'', orgEmail:'', dur:30,
   callVia:'rcapp', emailVia:'mailto',
   liNote:'Hi {firstName} — I work with senior executives on Long Island on retirement planning. Congrats on the move to {employer}. Would be glad to connect. — {yourName}',
@@ -1605,6 +1605,13 @@ function leadFromRow(row,map,batch){
            campaign:(state.settings.campaign||'rollover')};
   FIELDS.forEach(([key])=>{const i=map[key];L[key]=(i>-1&&row[i]!==undefined)?(''+row[i]).trim():'';});
   if(L.fullName&&!L.firstName&&!L.lastName){const [f,l]=splitName(L.fullName);L.firstName=f;L.lastName=l;}
+  // A source can also put the whole name in its First Name column, which is
+  // how 342 leads ended up with no surname. Only split when there is no
+  // surname to lose.
+  if(!L.lastName&&/\s/.test(L.firstName||'')){
+    const [f,l]=splitName(L.firstName);
+    if(f&&l){L.firstName=f;L.lastName=l;}
+  }
   delete L.fullName;                       // a mapping input, not a lead field
   L.enriched=!!(L.email||L.mobilePhone);
   return L;
@@ -2676,12 +2683,55 @@ const pad=n=>(''+n).padStart(2,'0');
 /* =============== CSV export =============== */
 /* Home address wins when WhitePages found one — that is where the person
    actually is. Fall back to whatever address came with the contact record. */
+/* Two-letter state codes for the export.
+   A CRM field that wants a code rejects "New York", and the source data mixes
+   both spellings — ZoomInfo writes the full name, WhitePages writes the code. */
+const ST_CODE={alabama:'AL',alaska:'AK',arizona:'AZ',arkansas:'AR',california:'CA',
+ colorado:'CO',connecticut:'CT',delaware:'DE','district of columbia':'DC',florida:'FL',
+ georgia:'GA',hawaii:'HI',idaho:'ID',illinois:'IL',indiana:'IN',iowa:'IA',kansas:'KS',
+ kentucky:'KY',louisiana:'LA',maine:'ME',maryland:'MD',massachusetts:'MA',michigan:'MI',
+ minnesota:'MN',mississippi:'MS',missouri:'MO',montana:'MT',nebraska:'NE',nevada:'NV',
+ 'new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY',
+ 'north carolina':'NC','north dakota':'ND',ohio:'OH',oklahoma:'OK',oregon:'OR',
+ pennsylvania:'PA','puerto rico':'PR','rhode island':'RI','south carolina':'SC',
+ 'south dakota':'SD',tennessee:'TN',texas:'TX',utah:'UT',vermont:'VT',virginia:'VA',
+ washington:'WA','west virginia':'WV',wisconsin:'WI',wyoming:'WY',
+ 'washington dc':'DC','washington, d.c.':'DC','d.c.':'DC','d.c':'DC','dc':'DC'};
+/* A name that cannot be resolved is passed through untouched rather than
+   blanked: a CRM row with an odd state is fixable, one with no state is not. */
+function stateCode(v){
+  const t=(''+(v||'')).trim();
+  if(!t)return '';
+  if(/^[A-Za-z]{2}$/.test(t))return t.toUpperCase();
+  return ST_CODE[t.toLowerCase().replace(/\.$/,'')]||t;
+}
+/* First and last name as separate values, even when the source put the whole
+   name in one field.
+
+   The list exported "Paul Dawe" under First Name with Last Name empty, on 342
+   rows. The export was writing firstName and lastName faithfully — the lead
+   itself held the whole name in firstName, from a source column that was never
+   split, and no amount of faithfulness fixes that.
+
+   splitName already knows how to do this, including the comma form and
+   suffixes, so this only decides *when* to call it: a last name already
+   present is left alone, and a single word is left as a first name rather than
+   promoted to a surname. */
+function exportName(L){
+  const first=(''+(L.firstName||'')).trim(), last=(''+(L.lastName||'')).trim();
+  if(last||!first||!/\s/.test(first))return {first:first,last:last};
+  const [f,l]=splitName(first);
+  return (f&&l)?{first:f,last:l}:{first:first,last:last};
+}
 function exportAddress(L){
   const h=L.hd||{};
+  // A home address from the public record is a home address, whatever the
+  // setting says.
   if(h.city&&(h.street||L.street))
-    return {street:h.street||L.street||'',city:h.city,state:h.state||'',zip:h.zip||'',type:'Home'};
-  return {street:L.street||'',city:L.city||'',state:L.state||'',zip:L.zip||'',
-          type:state.settings.addrType||'Business'};
+    return {street:h.street||L.street||'',city:h.city,state:stateCode(h.state),
+            zip:h.zip||'',type:'Home'};
+  return {street:L.street||'',city:L.city||'',state:stateCode(L.state),zip:L.zip||'',
+          type:state.settings.addrType||'Home'};
 }
 /* Business email is primary. The secondary is whichever personal address we
    have — from the CSV, or from the WhitePages record. */
@@ -2696,7 +2746,9 @@ function exportEmails(L){
 document.getElementById('btnExport').addEventListener('click',()=>{
   const list=filtered();
   if(!list.length){toast('Nothing to export with current filters.');return;}
-  const H=['First Name','Last Name','Email Address','Secondary Email','Business Phone','Mobile phone','Street Address','City','State/Province','Zip','Address Type','Comments','Employer','Lead Other 2','Lead Source Detail','Lead External ID'];
+  // LinkedIn goes on the end so every existing column keeps its position and a
+  // CRM mapping built against the old file still lines up.
+  const H=['First Name','Last Name','Email Address','Secondary Email','Business Phone','Mobile phone','Street Address','City','State/Province','Zip','Address Type','Comments','Employer','Lead Other 2','Lead Source Detail','Lead External ID','LinkedIn URL'];
   const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const lines=[H.join(',')].concat(list.map(L=>{
     const sigs=(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; ');
@@ -2707,8 +2759,8 @@ document.getElementById('btnExport').addEventListener('click',()=>{
       `59.5: ${sell.k==='yes'?'sellable now':sell.k==='soon'?sell.label.replace('59½','turns 59.5'):'age unverified'}`,
       ab.kind==='none'?'':`Age basis: ${ab.label}`,
       L.retryBlocked?'Enrichment blocked — credit limit':'',nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
-    const a=exportAddress(L), em=exportEmails(L);
-    return [L.firstName,L.lastName,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId].map(q).join(',');
+    const a=exportAddress(L), em=exportEmails(L), nm=exportName(L);
+    return [nm.first,nm.last,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId,L.linkedinUrl||''].map(q).join(',');
   }));
   dl(new Blob([lines.join('\r\n')],{type:'text/csv'}),'call-list-'+new Date().toISOString().slice(0,10)+'.csv');
   toast(`Exported ${list.length} leads (current filter).`);});
