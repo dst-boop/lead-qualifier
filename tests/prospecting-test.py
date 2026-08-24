@@ -111,7 +111,10 @@ REQUIRED_PLAN = {"name", "state", "participants", "assets"}
 ck("every load-bearing 5500 column is mapped",
    REQUIRED_PLAN.isdisjoint(pl["unmapped"]), pl["unmapped"])
 ck("  ...with only the optional ones absent",
-   set(pl["unmapped"]) <= {"plan_type", "plan_year", "ein", "plan_name"}, pl["unmapped"])
+   # ack_id is optional here for the same reason assets is not: a file that
+   # already carries assets needs no join back to a schedule.
+   set(pl["unmapped"]) <= {"plan_type", "plan_year", "ein", "plan_name", "ack_id"},
+   pl["unmapped"])
 
 # zipped, the way the DOL ships it
 buf = io.BytesIO()

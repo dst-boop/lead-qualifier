@@ -65,6 +65,10 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 WARN_FEEDS = os.environ.get("WARN_FEEDS", "")
 FORM5500_URL = os.environ.get("FORM5500_URL", "")
 FORM5500_CSV_IN_ZIP = os.environ.get("FORM5500_CSV_IN_ZIP", "f_5500")
+# Schedule H and Schedule I, comma-separated. The 5500 file has no assets on
+# it; these are where the money is, joined back on ACK_ID.
+FORM5500_SCHEDULE_URLS = [u.strip() for u in
+                          os.environ.get("FORM5500_SCHEDULE_URLS", "").split(",") if u.strip()]
 SOURCE_STATES = os.environ.get("SOURCE_STATES", "")     # e.g. "NY,NJ,CT,PA"
 SOURCE_MIN_WORKERS = int(os.environ.get("SOURCE_MIN_WORKERS", "25"))
 FS_OPPS = os.environ.get("FIRESTORE_OPPS_COLLECTION", "opportunities")
@@ -1377,7 +1381,45 @@ def _warn_feeds() -> list:
     return [f for f in feeds if isinstance(f, dict) and f.get("url")]
 
 
-async def _get(url: str, *, as_bytes: bool = False, timeout: int = 120):
+# A source can live in the advisor's own Drive rather than on a government
+# host. That is often the better arrangement: the DOL publishes a zip behind a
+# path that moves each year, whereas a file dropped in Drive is stable, already
+# unpacked, and under the control of whoever is going to notice when it is
+# stale. Accepts a Drive share link, a bare file id, or drive:<id>.
+_DRIVE_ID = re.compile(r"(?:^drive:|/d/|[?&]id=)([A-Za-z0-9_-]{20,})")
+
+
+def drive_file_id(ref: str) -> str:
+    t = (ref or "").strip()
+    m = _DRIVE_ID.search(t)
+    if m:
+        return m.group(1)
+    return t if re.fullmatch(r"[A-Za-z0-9_-]{25,}", t) else ""
+
+
+async def _drive_get(file_id: str, token: str, *, as_bytes: bool = False):
+    async with httpx.AsyncClient(timeout=300, follow_redirects=True) as cx:
+        r = await cx.get(f"{DRIVE_FILES_URL}/{file_id}",
+                         headers={"Authorization": f"Bearer {token}"},
+                         params={"alt": "media", "supportsAllDrives": "true"})
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Drive returned {r.status_code} for that file. Check it is in the "
+                   f"signed-in account's Drive and is not a Google-native document.")
+    return r.content if as_bytes else r.text
+
+
+async def _get(url: str, *, as_bytes: bool = False, timeout: int = 120,
+               drive_token: str = ""):
+    fid = drive_file_id(url)
+    if fid and drive_token:
+        return await _drive_get(fid, drive_token, as_bytes=as_bytes)
+    if fid and not url.lower().startswith("http"):
+        raise HTTPException(
+            status_code=400,
+            detail="That source is a Google Drive file, but Drive is not connected. "
+                   "Sign in with Google, or point it at a public URL instead.")
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as cx:
         r = await cx.get(url, headers={"User-Agent": EDGAR_USER_AGENT or
                                        "FPA Lead Qualifier"})
@@ -1387,20 +1429,21 @@ async def _get(url: str, *, as_bytes: bool = False, timeout: int = 120):
     return r.content if as_bytes else r.text
 
 
-async def _load_warn() -> dict:
+async def _load_warn(drive_token: str = "") -> dict:
     """Every configured WARN feed, normalised. Reports per-feed what happened."""
     events, report = [], []
     for feed in _warn_feeds():
         fid = feed.get("id") or feed.get("state") or feed["url"][:40]
         try:
             if (feed.get("format") or "csv").lower() == "json":
-                raw = json.loads(await _get(feed["url"]))
+                raw = json.loads(await _get(feed["url"], drive_token=drive_token))
                 if isinstance(raw, dict):
                     # Socrata sometimes wraps rows; take the first list it holds.
                     raw = next((v for v in raw.values() if isinstance(v, list)), [])
                 parsed = prospecting.parse_warn_json(raw, feed.get("state", ""))
             else:
-                parsed = prospecting.parse_warn_csv(await _get(feed["url"]), feed.get("state", ""))
+                parsed = prospecting.parse_warn_csv(
+                    await _get(feed["url"], drive_token=drive_token), feed.get("state", ""))
         except HTTPException as e:
             report.append({"id": fid, "error": e.detail})
             continue
@@ -1413,18 +1456,73 @@ async def _load_warn() -> dict:
     return {"events": events, "feeds": report}
 
 
-async def _load_plans() -> dict:
-    """Form 5500 sponsors, filtered to the states this practice covers."""
+async def _drive_token_for(request: Request) -> str:
+    """The signed-in user's Google token, or "" — Drive-hosted sources need it,
+    web-hosted ones do not, so a Microsoft-only session is not an error here."""
+    try:
+        return await _google_token(request.state.session) or ""
+    except Exception:
+        return ""
+
+
+async def _fetch_source(ref: str, token: str, want: str) -> str:
+    """One source file as text, from Drive or the open web, unzipped if needed."""
+    blob = await _get(ref, as_bytes=True, drive_token=token)
+    if ref.lower().endswith(".zip") or blob[:2] == b"PK":
+        return prospecting.unzip_first_csv(blob, want)
+    return blob.decode("utf-8", errors="replace")
+
+
+async def _load_plans(drive_token: str = "") -> dict:
+    """Form 5500 sponsors, with assets joined in from Schedule H or I.
+
+    The 5500 file itself carries no money — only participant counts — so
+    without the schedule there is no average balance and nothing to rank on.
+    That is reported rather than left to be discovered.
+    """
     if not FORM5500_URL:
         return {"plans": {}, "note": "FORM5500_URL is not set."}
-    blob = await _get(FORM5500_URL, as_bytes=True)
-    text = (prospecting.unzip_first_csv(blob, FORM5500_CSV_IN_ZIP)
-            if FORM5500_URL.lower().endswith(".zip") or blob[:2] == b"PK"
-            else blob.decode("utf-8", errors="replace"))
+    text = await _fetch_source(FORM5500_URL, drive_token, FORM5500_CSV_IN_ZIP)
     parsed = prospecting.parse_5500_csv(text, states=_source_states() or None)
-    return {"plans": parsed["plans"], "rows": parsed.get("rows"),
-            "kept": parsed.get("kept"), "mapped": parsed["mapped"],
-            "unmapped": parsed["unmapped"]}
+    out = {"plans": parsed["plans"], "rows": parsed.get("rows"),
+           "kept": parsed.get("kept"), "mapped": parsed["mapped"],
+           "unmapped": parsed["unmapped"]}
+
+    priced = sum(1 for p in parsed["plans"].values() if p.get("avg_balance"))
+    if priced:
+        out["priced"] = priced
+        return out
+
+    if not FORM5500_SCHEDULE_URLS:
+        out["note"] = ("The 5500 file has participant counts but no assets — assets are "
+                       "on Schedule H and Schedule I, which are separate downloads. Set "
+                       "FORM5500_SCHEDULE_URLS or nothing can be priced.")
+        return out
+
+    assets, notes = {}, []
+    for ref in FORM5500_SCHEDULE_URLS:
+        try:
+            sched = prospecting.parse_schedule_assets(
+                await _fetch_source(ref, drive_token, "sch"))
+            if sched.get("note"):
+                notes.append(sched["note"])
+            # Later schedules fill gaps rather than overwrite: Schedule H is the
+            # large-plan file and is the better number where both exist.
+            for k, v in sched["assets"].items():
+                assets.setdefault(k, v)
+        except HTTPException as e:
+            notes.append(f"schedule unavailable: {e.detail}"[:200])
+        except Exception as e:
+            notes.append(f"schedule unreadable: {type(e).__name__}")
+    rep = prospecting.attach_assets(parsed["plans"], assets)
+    out["priced"] = rep["filled"]
+    out["schedule_rows"] = len(assets)
+    if notes:
+        out["note"] = " ".join(notes)
+    elif not rep["filled"]:
+        out["note"] = ("Schedule files loaded but nothing joined — the ACK_ID values do "
+                       "not line up with the 5500 file. Check both are the same year.")
+    return out
 
 
 @app.get("/api/sources/probe")
@@ -1442,7 +1540,7 @@ async def sources_probe(request: Request, which: str = "all"):
         feeds = _warn_feeds()
         out["warn"] = {"configured": len(feeds)}
         if feeds:
-            got = await _load_warn()
+            got = await _load_warn(await _drive_token_for(request))
             out["warn"]["feeds"] = got["feeds"]
             out["warn"]["sample"] = got["events"][:3]
     if which in ("all", "5500"):
@@ -1450,10 +1548,16 @@ async def sources_probe(request: Request, which: str = "all"):
             out["form5500"] = {"error": "FORM5500_URL is not set."}
         else:
             try:
-                got = await _load_plans()
+                got = await _load_plans(await _drive_token_for(request))
                 sample = list(got["plans"].items())[:3]
                 out["form5500"] = {"rows_read": got.get("rows"), "kept": got.get("kept"),
                                    "mapped": got.get("mapped"), "unmapped": got.get("unmapped"),
+                                   # The number that decides whether anything can be
+                                   # ranked. Sponsors without it are counted, not hidden.
+                                   "priced": got.get("priced"),
+                                   "schedule_rows": got.get("schedule_rows"),
+                                   "schedules_configured": len(FORM5500_SCHEDULE_URLS),
+                                   "note": got.get("note"),
                                    "sample": [v for _, v in sample]}
             except HTTPException as e:
                 out["form5500"] = {"error": e.detail}
@@ -1470,12 +1574,12 @@ async def sources_refresh(request: Request):
     what turns a set of buttons into something that watches.
     """
     await _active_token(request)
-    warn = await _load_warn()
+    warn = await _load_warn(await _drive_token_for(request))
     if not warn["events"]:
         return {"stored": 0, "feeds": warn["feeds"],
                 "note": "No WARN events. Set WARN_FEEDS, then check /api/sources/probe."}
     try:
-        plans = await _load_plans()
+        plans = await _load_plans(await _drive_token_for(request))
     except Exception as e:
         plans = {"plans": {}, "note": f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}"}
     opps = prospecting.build_opportunities(
@@ -1499,13 +1603,13 @@ async def opportunities(request: Request, refresh: bool = False):
         doc = await _fs_get(FS_OPPS, "latest")
         if doc:
             return doc
-    warn = await _load_warn()
+    warn = await _load_warn(await _drive_token_for(request))
     if not warn["events"]:
         return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
                 "feeds": warn["feeds"],
                 "note": "No WARN feeds configured — see SETUP-prospecting.md."}
     try:
-        plans = (await _load_plans()).get("plans") or {}
+        plans = (await _load_plans(await _drive_token_for(request))).get("plans") or {}
     except Exception:
         plans = {}
     opps = prospecting.build_opportunities(
@@ -2582,7 +2686,7 @@ async def employer_plans(body: PlanRequest, request: Request):
     if not FORM5500_URL:
         return {"plans": {}, "note": "FORM5500_URL is not set — see SETUP-prospecting.md."}
     try:
-        plans = (await _load_plans()).get("plans") or {}
+        plans = (await _load_plans(await _drive_token_for(request))).get("plans") or {}
     except Exception as e:
         raise HTTPException(status_code=502,
                             detail=f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}")
@@ -2674,10 +2778,10 @@ async def get_signals(body: SignalsRequest, request: Request):
     warn_index, warn_note = {}, ""
     if WARN_FEEDS.strip():
         try:
-            got = await _load_warn()
+            got = await _load_warn(await _drive_token_for(request))
             plans = {}
             try:
-                plans = (await _load_plans()).get("plans") or {}
+                plans = (await _load_plans(await _drive_token_for(request))).get("plans") or {}
             except Exception:
                 pass
             opps = prospecting.build_opportunities(
