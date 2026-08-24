@@ -4,15 +4,24 @@
 unnecessary scenarios. Since not all leads have mobile numbers, Use People
 search and the other features available."
 
-The published billing rule is why most of this file exists:
+What is billed, from the endpoint's own response-code table:
 
-    "successful (2xx) and client-error (4xx) responses are billed;
-     throttling (429) and server errors (5xx) are not."
+    200 OK   billable      404 by id  billable
+    400/403  NOT billable  429/5xx    NOT billable
 
-A malformed request costs exactly what a good one costs. Sending "New York"
-where a two-letter code is required buys a 400 and a charge. So the tests below
-are mostly about calls that must NOT happen: the stub counts every request it
-receives, and a passing test usually means that counter did not move.
+An earlier version of this file said a 400 was billed, on the strength of the
+integration guide's looser wording. The per-endpoint table is more specific and
+says otherwise, so the money argument has moved: **a 200 with zero results is
+billed**. "No such person" costs exactly what finding them costs.
+
+That makes the expensive mistake the well-formed query that was never going to
+identify anybody, and the well-formed query asked twice. The validator still
+earns its place — a request that cannot succeed should fail instantly with a
+reason a person can act on — but it buys clarity, not credits, and the tests
+below say so where it matters.
+
+The stub counts every request it receives, and a passing test here usually
+means that counter did not move.
 
 The second half is the ladder. A lead with no mobile used to fall straight to a
 name search, which is the query that returns a stranger with the same surname.
@@ -104,8 +113,9 @@ def reset():
     main.WP_SPEND.update(calls=0, served_from_cache=0, refused=0)
 
 
-# --- refused before it can be billed ----------------------------------------
-# Each of these would come back 400, and a 400 is billed.
+# --- refused before it is sent ----------------------------------------------
+# A 400 is not billed, so this is about failing fast with a usable reason
+# rather than after a round trip. The saving is latency and clarity.
 reset()
 BAD = [
     ({"phone": "555"}, "a phone fragment"),
@@ -257,8 +267,46 @@ ck("  ...as a percentage a person can read", sp["saved_pct"] == 50, sp)
 
 # A refusal must reach the user as a refusal, not as a mysterious failure.
 r = c.post("/api/verify-phone", json={"phone": "555", "last_name": "Melter"})
-ck("a refused lookup says it was not billed",
-   "not billed" in r.json().get("detail", ""), r.json())
+ck("a refused lookup explains itself rather than failing mysteriously",
+   "not a phone number" in r.json().get("detail", ""), r.json())
+
+# --- the two things that share a 429 -----------------------------------------
+# Throttling clears in seconds. A usage cap does not clear until the billing
+# period resets, so "try again shortly" is useless advice for it.
+@stub.get("/capped/v2/person")
+async def capped(request: Request):
+    from fastapi.responses import JSONResponse
+    return JSONResponse({
+        "message": "Query cap reached for this billing cycle.",
+        "error": "usage_cap_exceeded", "limit": 1000, "used": 1000,
+        "reset_at": "2026-09-01T00:00:00+00:00",
+    }, status_code=429)
+
+
+@stub.get("/throttled/v2/person")
+async def throttled(request: Request):
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"message": "Too Many Requests"}, status_code=429)
+
+
+time.sleep(0.4)
+reset()
+main.WHITEPAGES_BASE_URL = STUB + "/capped"
+r = c.post("/api/verify-phone", json={"phone": "2065550142", "last_name": "Melter"})
+msg = r.json().get("detail", "")
+ck("a used-up allowance is not reported as a rate limit",
+   "allowance is used up" in msg, msg)
+ck("  ...saying how much of it went", "1000 of 1000" in msg, msg)
+ck("  ...and when it comes back", "2026-09-01" in msg, msg)
+ck("  ...rather than telling them to try again shortly", "shortly" not in msg, msg)
+
+main.WHITEPAGES_BASE_URL = STUB + "/throttled"
+r = c.post("/api/verify-phone", json={"phone": "2065550143", "last_name": "Melter"})
+msg = r.json().get("detail", "")
+ck("ordinary throttling still says to try again shortly", "shortly" in msg, msg)
+# Neither is billed, and neither should be remembered as an answer.
+ck("  ...and neither is cached as an answer", len(main._WP_CACHE) == 0, main._WP_CACHE)
+main.WHITEPAGES_BASE_URL = STUB
 
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")

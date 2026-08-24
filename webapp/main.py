@@ -984,21 +984,31 @@ class VerifyPhoneRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Spending credits on purpose
 #
-# The published billing rule is the reason this section exists:
+# What is billed, from the response-code table on the endpoint reference:
 #
-#   "successful (2xx) and client-error (4xx) responses are billed;
-#    throttling (429) and server errors (5xx) are not."
+#   200 OK   billable      404 by id  billable
+#   400/403  NOT billable  429/5xx    NOT billable
 #
-# A malformed request costs exactly what a good one costs. Sending a full state
-# name where a two-letter code is required, or a phone number the pattern
-# rejects, buys a 400 and a charge. So every parameter is checked against the
-# documented constraint *before* the call goes out, and a request that cannot
-# succeed is refused here for free rather than refused there for money.
+# Note what that means: **a 200 with zero results is billed**. "No such person"
+# costs exactly what finding them costs. The expensive mistake here is not the
+# malformed query — that one is free — it is the well-formed query that was
+# never going to identify anybody, and the well-formed query asked twice.
 #
-# The second rule is that identical questions are asked once. A person's record
-# does not change between two clicks, so the answer is cached on the exact
-# query that produced it. This is not a performance cache — the app was fast
-# enough — it is a bill.
+# (An earlier draft of this module was written against the integration guide's
+# looser wording, "successful (2xx) and client-error (4xx) responses are
+# billed", and justified the validator below as a way to avoid paying for 400s.
+# The per-endpoint table is more specific and says otherwise. The validator
+# stays — a request that cannot succeed should fail instantly with a reason a
+# person can act on, rather than after a round trip — but it is worth being
+# clear that it buys clarity and latency, not credits.)
+#
+# The two things that genuinely save money:
+#
+#   1. Never ask a question that cannot identify anyone. A surname with no
+#      location returns a stranger, at full price.
+#   2. Never ask the same question twice. A person's record does not change
+#      between two clicks, so the answer is cached on the exact query that
+#      produced it — including "nobody", which was paid for like anything else.
 # ---------------------------------------------------------------------------
 
 # Documented on the endpoint. Kept as the API states them rather than loosened,
@@ -1019,7 +1029,12 @@ WP_SEARCH_KEYS = ("phone", "email", "name", "first_name", "middle_name",
 
 
 class WPRefused(Exception):
-    """A request that would be billed for failing. Never sent."""
+    """A request that cannot succeed. Never sent.
+
+    A 400 is not billed, so this is not primarily about money — it is about
+    failing in a hundredth of a second with a reason the user can act on,
+    instead of after a round trip with one they cannot.
+    """
 
 
 def wp_validate(params: dict) -> dict:
@@ -1145,7 +1160,8 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False):
         WP_SPEND["refused"] += 1
         raise HTTPException(
             status_code=400,
-            detail=f"Not sent, so not billed — {e}.",
+            detail=f"Not sent — {e}. (A rejected query is not billed either way; "
+                   f"this just tells you sooner.)",
         )
 
     key = _wp_key(kind, params)
@@ -1164,6 +1180,25 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False):
         _WP_CACHE[key] = (time.time(), None)
         return None          # documented as "no matching record"
     if r.status_code == 429:
+        # Two very different things share this code. Ordinary throttling clears
+        # in seconds; a usage cap does not clear until the billing period
+        # resets, and telling someone to "try again shortly" when their
+        # allowance is gone until the first of the month is useless advice.
+        body = {}
+        try:
+            body = r.json()
+        except ValueError:
+            pass
+        if body.get("error") == "usage_cap_exceeded":
+            used, limit = body.get("used"), body.get("limit")
+            when = body.get("reset_at") or ""
+            raise HTTPException(
+                status_code=502,
+                detail=("WhitePages allowance is used up"
+                        + (f" — {used} of {limit} queries this period" if limit else "")
+                        + (f", resets {when[:10]}" if when else "")
+                        + ". Nothing further will be looked up until then."),
+            )
         raise HTTPException(status_code=502, detail="WhitePages rate limit hit — try again shortly.")
     if r.status_code == 400:
         try:

@@ -1729,18 +1729,35 @@ to stay silent otherwise, so the census is confirmation rather than the thing
 that makes the code work — but it is what turns the next surprise into a
 five-minute fix rather than a sixth entry in this section.
 
-## 26. A 400 costs the same as a 200
+## 26. A zero-result 200 costs the same as a hit
 
-The billing rule, published on the endpoint:
+This section was first written against the integration guide's wording —
+"successful (2xx) and client-error (4xx) responses are billed" — and concluded
+that a malformed request was a charge for being told no. **That was wrong**, and
+the per-endpoint response-code table says so plainly:
 
-> successful (2xx) and client-error (4xx) responses are billed; throttling
-> (429) and server errors (5xx) are not.
+| Status | Billable |
+|---|---|
+| 200 OK | **yes** |
+| 404 by id | **yes** |
+| 400, 403 | no |
+| 429, 5xx | no |
 
-A malformed request is not free. It is a charge for being told no. That single
-line reorganises how this integration should be written: **validation is not
-politeness, it is the bill.**
+The correction matters because it moves the expensive mistake. A malformed
+query is free. What costs money is the **well-formed query that was never going
+to identify anybody** — and a 200 carrying an empty `results` array is billed
+exactly like one carrying the person. "No such person" is a purchase.
 
-So `wp_validate()` checks every parameter against the documented constraint and
+So the validator stays, but its justification changes: it buys a failure in a
+hundredth of a second with a reason the user can act on, instead of a round
+trip and a reason they cannot. That is worth having. It is not a saving.
+
+The two things that actually save money are §26's real content: never ask a
+question that cannot identify anyone, and never ask the same question twice.
+
+### The validator, for clarity rather than credits
+
+`wp_validate()` checks every parameter against the documented constraint and
 raises before anything is sent — phone pattern, five-digit ZIP, the state-code
 enum, ages inside 18–65, pages inside 1–10, and the two pairs the API
 explicitly rejects when combined (`name` with `first_name`/`last_name`,
@@ -1749,6 +1766,14 @@ than sent, because an empty `state_code` is a 400, not a wildcard.
 
 The refusal names the offending value, because a user who cannot see what was
 wrong cannot fix it, and a silent refusal is indistinguishable from a bug.
+
+### Two things share the 429
+
+Ordinary throttling clears in seconds. A usage cap does not clear until the
+billing period resets, and it arrives with `error: "usage_cap_exceeded"` plus
+`used`, `limit` and `reset_at`. Telling someone to "try again shortly" when
+their allowance is gone until the first of the month is useless advice, so the
+two are now reported differently and the cap message carries the date.
 
 ### The cache is a bill, not a speedup
 

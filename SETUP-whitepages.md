@@ -92,22 +92,30 @@ gain one.
 
 ## Credits
 
-Lookups cost money, and the published billing rule is the one to know:
+Lookups cost money. What is billed:
 
-> successful (2xx) and client-error (4xx) responses are billed; throttling
-> (429) and server errors (5xx) are not.
+| Status | Billable |
+|---|---|
+| 200 OK | **yes** |
+| 404 (lookup by id) | **yes** |
+| 400 Bad Request, 403 Forbidden | no |
+| 429 rate limit, 5xx server error | no |
 
-**A malformed request costs the same as a good one.** Sending a full state name
-where a two-letter code is required buys a 400 and a charge. So the app checks
-every parameter against the documented constraint *before* the call goes out,
-and refuses what cannot succeed for free. A refused lookup says so: *"Not sent,
-so not billed — 'New York' is not a two-letter state code."*
+**The important line is the first one.** A 200 carrying an empty `results` array
+is billed exactly like one carrying the person — *"no such person" is a
+purchase*. A malformed query, by contrast, is free.
+
+So the expensive mistake is not a typo. It is a well-formed query that was never
+going to identify anybody, and a well-formed query asked twice.
 
 Three things keep the bill down:
 
-1. **Nothing invalid is ever sent.** Phone patterns, five-digit ZIPs, real state
-   codes, ages inside the documented 18–65, pages inside 1–10, and the two pairs
-   of parameters the API rejects when combined.
+1. **Nothing that cannot identify anyone is sent.** A surname with no city,
+   state or ZIP is refused — that query returns a stranger, at full price.
+   Parameters are also checked against their documented constraints (phone
+   patterns, five-digit ZIPs, real state codes, ages inside 18–65) so a bad
+   value fails instantly with a reason rather than after a round trip. That part
+   is for clarity, not credits.
 2. **The same question is asked once.** Answers are cached on the exact query
    for `WHITEPAGES_CACHE_SECONDS` (default 30 days) — including *"no such
    person"*, which was paid for and does not change. Pressing 📞? then 🏠 on the
@@ -117,9 +125,19 @@ Three things keep the bill down:
    says what it costs.
 
 `/api/wp-spend` reports what was billed, what came from memory, and what was
-refused before it could be charged. It counts rather than estimates, and it
-deliberately does *not* call the account-usage endpoint — that endpoint is
-billed too, and asking what you have spent should not spend anything.
+refused before sending. It counts rather than estimates, and it deliberately
+does *not* call the account-usage endpoint — that endpoint is billed too, and
+asking what you have spent should not spend anything. (Its `request_count` is
+also documented as *including* 2xx, 4xx and 5xx, so it is not a billable count
+either way.)
+
+### When the allowance runs out
+
+Two different things arrive as HTTP 429. Ordinary throttling clears in seconds.
+A usage cap arrives with `error: "usage_cap_exceeded"` and does not clear until
+the billing period resets, so the app reports that one with the numbers and the
+date — *"WhitePages allowance is used up — 1000 of 1000 queries this period,
+resets 2026-09-01"* — rather than telling you to try again shortly.
 
 Every activity-log entry now ends with what the press cost, e.g.
 `[1 lookup]` or `[no lookup — already on file]`.
