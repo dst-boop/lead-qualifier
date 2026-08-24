@@ -3460,6 +3460,14 @@ async def get_signals(body: SignalsRequest, request: Request):
         raise HTTPException(status_code=401, detail="Not signed in")
 
     warn_index, warn_note = {}, ""
+    warn_ran = False
+    if not WARN_FEEDS.strip():
+        # This used to say nothing at all, so the panel reported that every lead
+        # had been "checked against the WARN feeds" on a deployment with no WARN
+        # feeds configured. Zero events then reads as "nothing is happening"
+        # when it means "nothing was looked at".
+        warn_note = ("WARN_FEEDS is not set, so mass-separation notices are not "
+                     "checked. See SETUP-signals.md.")
     if WARN_FEEDS.strip():
         try:
             got = await _load_warn(await _drive_token_for(request))
@@ -3471,13 +3479,15 @@ async def get_signals(body: SignalsRequest, request: Request):
             opps = prospecting.build_opportunities(
                 got["events"], plans, min_workers=1, states=_source_states() or None)
             warn_index = signals.index_warn(opps)
+            warn_ran = True
         except Exception as e:
             warn_note = f"WARN feeds unavailable: {type(e).__name__}"
 
     # One EDGAR round-trip per distinct employer, not per lead: a list of forty
     # people at four companies costs four lookups.
-    filings, filing_note = {}, ""
+    filings, filing_note, filings_ran = {}, "", False
     if EDGAR_USER_AGENT:
+        filings_ran = True
         employers = {}
         for L in body.leads:
             name = (L.get("employer") or "").strip()
@@ -3501,8 +3511,26 @@ async def get_signals(body: SignalsRequest, request: Request):
                                 min_tenure=body.min_tenure, seen=seen)
     if body.mark_seen and out:
         await _mark_seen(email, [s["id"] for s in out])
+    # Three detectors run here and each can be silent for two very different
+    # reasons: nothing happened, or nothing was looked at. Zero events is only
+    # good news when the checks actually ran, so the coverage says which.
+    #
+    # The age count is the one that matters most. It is the only detector that
+    # needs nothing configured — but it needs an age, and a list with no ages
+    # produces the same confident zero as a list where nobody is near 59 1/2.
+    with_age = sum(1 for L in body.leads if signals._age_now(L)[0] is not None)
+    dated = sum(1 for L in body.leads if signals.half_month(L) is not None)
     return {"signals": out, "new": sum(1 for s in out if s["new"]),
             "checked": len(body.leads),
+            "coverage": {
+                "leads": len(body.leads),
+                "with_age": with_age,
+                "with_birth_date": dated,
+                "warn": warn_ran,
+                "warn_events": len(warn_index),
+                "filings": filings_ran,
+                "employers_checked": len(filings),
+            },
             "notes": [n for n in (warn_note, filing_note) if n]}
 
 

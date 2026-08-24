@@ -122,10 +122,40 @@ const SIGNALS=[
   // --- degrading -----------------------------------------------------------------
   payload={signals:[],new:0,checked:3,notes:['WARN feeds unavailable: TimeoutError']};
   await p.evaluate(()=>loadSignals(false));await p.waitForTimeout(700);
-  ck('an empty result says nothing is moving',
-     /Nothing moving/.test(await txt('#sigRows')), await txt('#sigRows'));
+  // This used to assert "Nothing moving. Every lead was checked against the
+  // WARN feeds, the SEC filing index and their own age" — printed
+  // unconditionally, including on a deployment where none of the three had
+  // run. Zero events is good news only for the checks that actually happened.
+  ck('an empty result does not claim checks that did not run',
+     !/Every lead was checked/.test(await txt('#sigRows')), await txt('#sigRows'));
+  ck('  ...it names what was skipped instead',
+     /Not checked:/.test(await txt('#sigRows')), await txt('#sigRows'));
+  ck('  ...and says why that matters',
+     /only good news for the checks that ran/.test(await txt('#sigRows')));
   ck('  ...and a missing source is named, not hidden',
      /WARN feeds unavailable/.test(await txt('#sigMeta')), await txt('#sigMeta'));
+
+  // With everything configured and every age known, it may say so plainly.
+  payload={signals:[],new:0,checked:3,notes:[],
+           coverage:{leads:3,with_age:3,with_birth_date:2,warn:true,warn_events:12,
+                     filings:true,employers_checked:2}};
+  await p.evaluate(()=>loadSignals(false));await p.waitForTimeout(700);
+  const quiet=await txt('#sigRows');
+  ck('a genuinely complete check reports a real all-clear',
+     /Checked:/.test(quiet)&&!/Not checked/.test(quiet), quiet);
+  ck('  ...naming the sources that ran',
+     /mass-separation notices/.test(quiet)&&/officer-departure filings/.test(quiet), quiet);
+  ck('  ...and that every age was available', /every age/.test(quiet), quiet);
+  // A birth date is a month; an age is a twelve-month band. Say which.
+  ck('  ...and how many 59½ dates are exact rather than estimated',
+     /2 leads have birth dates/.test(quiet), quiet);
+
+  payload={signals:[],new:0,checked:3,notes:[],
+           coverage:{leads:3,with_age:3,with_birth_date:0,warn:true,warn_events:1,
+                     filings:true,employers_checked:1}};
+  await p.evaluate(()=>loadSignals(false));await p.waitForTimeout(700);
+  ck('with no birth dates at all it says the 59½ dates are bands',
+     /band rather than a month/.test(await txt('#sigRows')), await txt('#sigRows'));
 
   ck('no page errors', errs.length===0, errs.slice(0,2).join(' | '));
   console.log(fail?`\nFAILURES: ${fail} of ${n}`:`\nall ${n} checks passed`);
