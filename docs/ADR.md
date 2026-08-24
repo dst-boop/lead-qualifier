@@ -1728,3 +1728,72 @@ The readers are written to find the field under any of its plausible names and
 to stay silent otherwise, so the census is confirmation rather than the thing
 that makes the code work — but it is what turns the next surprise into a
 five-minute fix rather than a sixth entry in this section.
+
+## 26. A 400 costs the same as a 200
+
+The billing rule, published on the endpoint:
+
+> successful (2xx) and client-error (4xx) responses are billed; throttling
+> (429) and server errors (5xx) are not.
+
+A malformed request is not free. It is a charge for being told no. That single
+line reorganises how this integration should be written: **validation is not
+politeness, it is the bill.**
+
+So `wp_validate()` checks every parameter against the documented constraint and
+raises before anything is sent — phone pattern, five-digit ZIP, the state-code
+enum, ages inside 18–65, pages inside 1–10, and the two pairs the API
+explicitly rejects when combined (`name` with `first_name`/`last_name`,
+`strict_match` with `include_fuzzy_matching`). Empty values are dropped rather
+than sent, because an empty `state_code` is a 400, not a wildcard.
+
+The refusal names the offending value, because a user who cannot see what was
+wrong cannot fix it, and a silent refusal is indistinguishable from a bug.
+
+### The cache is a bill, not a speedup
+
+`_WP_CACHE` keys on the exact validated query. The app was already fast enough;
+this exists because a person's record does not change between two clicks and
+the second click was buying it again.
+
+Two details matter more than the cache itself:
+
+- **A miss is cached.** "No such person" was paid for and will not change.
+  Leaving it uncached meant every unmatched lead was re-bought on every press —
+  and unmatched leads are exactly the ones a user presses repeatedly.
+- **One spelling per question.** `verify_phone` and `enrich` each built their
+  own reverse-phone query by hand, so the cache saw two spellings of one
+  question and stored both. `_wp_phone()` is now the only door.
+
+### The ladder, and why email is on it
+
+Person search is one endpoint; phone, email, address and name are the same call
+with different parameters. They are not equally good at identifying a person,
+so Enrich climbs in order and stops at the first answer:
+
+**phone → email → first+last with a location**
+
+Email is the rung that matters. Not every lead has a mobile, and until now such
+a lead fell straight to a name search — the query that returned the Portland
+realtor in §14. Nobody shares an email address, so it identifies nearly as well
+as a number does.
+
+A name with no city, state or ZIP is refused without spending anything. It is
+the query most likely to return a stranger, and the app has attributed one to a
+lead before.
+
+### Nothing is bought speculatively
+
+The property lookup ran automatically inside Enrich, so every press that found
+an address bought a second call whether or not anyone wanted the deed. It is
+now its own button that names its price. Enrich answers "who is this person" in
+one call; the deed is a different question and is asked separately.
+
+### Counting rather than estimating
+
+`/api/wp-spend` reports billed calls, cache hits and pre-flight refusals, each
+incremented at the point the call is made or avoided.
+
+It deliberately does not call the account-usage endpoint. That endpoint is
+billed like any other data call, and an app that spends a credit to tell you
+how many credits you have spent is not solving the problem it was asked to.

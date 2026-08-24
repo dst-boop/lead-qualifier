@@ -90,6 +90,57 @@ Both write into the CSV export comments. Enrich also backfills empty street,
 city, zip and mobile fields on the lead, so a lead with no mobile number can
 gain one.
 
+## Credits
+
+Lookups cost money, and the published billing rule is the one to know:
+
+> successful (2xx) and client-error (4xx) responses are billed; throttling
+> (429) and server errors (5xx) are not.
+
+**A malformed request costs the same as a good one.** Sending a full state name
+where a two-letter code is required buys a 400 and a charge. So the app checks
+every parameter against the documented constraint *before* the call goes out,
+and refuses what cannot succeed for free. A refused lookup says so: *"Not sent,
+so not billed — 'New York' is not a two-letter state code."*
+
+Three things keep the bill down:
+
+1. **Nothing invalid is ever sent.** Phone patterns, five-digit ZIPs, real state
+   codes, ages inside the documented 18–65, pages inside 1–10, and the two pairs
+   of parameters the API rejects when combined.
+2. **The same question is asked once.** Answers are cached on the exact query
+   for `WHITEPAGES_CACHE_SECONDS` (default 30 days) — including *"no such
+   person"*, which was paid for and does not change. Pressing 📞? then 🏠 on the
+   same lead now costs one lookup, not two.
+3. **Nothing is bought speculatively.** The deed lookup used to run
+   automatically inside Enrich; it is now its own **Check the deed** button that
+   says what it costs.
+
+`/api/wp-spend` reports what was billed, what came from memory, and what was
+refused before it could be charged. It counts rather than estimates, and it
+deliberately does *not* call the account-usage endpoint — that endpoint is
+billed too, and asking what you have spent should not spend anything.
+
+Every activity-log entry now ends with what the press cost, e.g.
+`[1 lookup]` or `[no lookup — already on file]`.
+
+## Finding someone with no mobile number
+
+Person search is one endpoint. Phone, email, address and name are all
+`GET /v2/person/` with different parameters, and they differ enormously in how
+well they identify a person. Enrich climbs this ladder and stops at the first
+answer, so a rung is only paid for when the one below found nothing:
+
+| Rung | Why it is where it is |
+|---|---|
+| **Phone** | A number identifies a person. Best available. |
+| **Email** | Nearly as good — nobody shares one. This is the rung that makes a lead with no mobile worth pressing. |
+| **First + last name, with a location** | Documented as matching each part specifically, unlike the loose `name` field. |
+
+A name with **no** city, state or ZIP is refused without spending anything.
+That query is the one that returns a stranger with the same surname, and the
+app has attributed one of those to a lead before.
+
 ## Which API you have
 
 Two incompatible flavours of this API exist, and the key you hold works with

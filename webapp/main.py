@@ -981,6 +981,115 @@ class VerifyPhoneRequest(BaseModel):
     zip: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Spending credits on purpose
+#
+# The published billing rule is the reason this section exists:
+#
+#   "successful (2xx) and client-error (4xx) responses are billed;
+#    throttling (429) and server errors (5xx) are not."
+#
+# A malformed request costs exactly what a good one costs. Sending a full state
+# name where a two-letter code is required, or a phone number the pattern
+# rejects, buys a 400 and a charge. So every parameter is checked against the
+# documented constraint *before* the call goes out, and a request that cannot
+# succeed is refused here for free rather than refused there for money.
+#
+# The second rule is that identical questions are asked once. A person's record
+# does not change between two clicks, so the answer is cached on the exact
+# query that produced it. This is not a performance cache — the app was fast
+# enough — it is a bill.
+# ---------------------------------------------------------------------------
+
+# Documented on the endpoint. Kept as the API states them rather than loosened,
+# because a value this rejects is a value the API charges for rejecting.
+WP_PHONE_RE = re.compile(r"^(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$")
+WP_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+WP_ZIP_RE = re.compile(r"^\d{5}$")
+WP_STATES = {
+    "AL", "AK", "AZ", "AR", "AS", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+    "GU", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+    "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC",
+    "ND", "MP", "OH", "OK", "OR", "PA", "PR", "RI", "SC", "SD", "TN", "TX",
+    "TT", "UT", "VT", "VA", "VI", "WA", "WV", "WI", "WY",
+}
+# Any one of these is enough to make the query a search rather than a listing.
+WP_SEARCH_KEYS = ("phone", "email", "name", "first_name", "middle_name",
+                  "last_name", "street", "city", "state_code", "zipcode")
+
+
+class WPRefused(Exception):
+    """A request that would be billed for failing. Never sent."""
+
+
+def wp_validate(params: dict) -> dict:
+    """Params as they will be sent, or WPRefused with the reason.
+
+    Empty values are dropped rather than sent: an empty state_code is not a
+    wildcard, it is a 400.
+    """
+    p = {k: v for k, v in params.items()
+         if v is not None and str(v).strip() != ""}
+
+    if "phone" in p and not WP_PHONE_RE.match(str(p["phone"]).strip()):
+        raise WPRefused(f"{p['phone']!r} is not a phone number the API accepts")
+    if "email" in p and not WP_EMAIL_RE.match(str(p["email"]).strip()):
+        raise WPRefused(f"{p['email']!r} is not an email address the API accepts")
+    if "zipcode" in p and not WP_ZIP_RE.match(str(p["zipcode"]).strip()):
+        raise WPRefused(f"{p['zipcode']!r} is not a five-digit ZIP")
+    if "state_code" in p and str(p["state_code"]).strip().upper() not in WP_STATES:
+        raise WPRefused(f"{p['state_code']!r} is not a two-letter state code")
+
+    # "first_name / middle_name / last_name cannot be used with 'name'."
+    if "name" in p and any(k in p for k in ("first_name", "middle_name", "last_name")):
+        raise WPRefused("name cannot be combined with first_name/last_name")
+    # "Setting both on the same request returns HTTP 400."
+    if _truthy_param(p.get("strict_match")) and _truthy_param(p.get("include_fuzzy_matching")):
+        raise WPRefused("strict_match and include_fuzzy_matching contradict each other")
+
+    for key, lo, hi in (("min_age", 18, 65), ("max_age", 18, 65),
+                        ("page", 1, 10), ("page_size", 1, 15)):
+        if key in p:
+            try:
+                v = int(p[key])
+            except (TypeError, ValueError):
+                raise WPRefused(f"{key} must be a whole number")
+            if not lo <= v <= hi:
+                raise WPRefused(f"{key} must be between {lo} and {hi}, got {v}")
+            p[key] = v
+    if "min_age" in p and "max_age" in p and p["min_age"] > p["max_age"]:
+        raise WPRefused("min_age is above max_age")
+    if "radius" in p:
+        try:
+            r = float(p["radius"])
+        except (TypeError, ValueError):
+            raise WPRefused("radius must be a number")
+        if not 0.1 <= r <= 100:
+            raise WPRefused(f"radius must be between 0.1 and 100, got {r}")
+
+    if not any(k in p for k in WP_SEARCH_KEYS):
+        raise WPRefused("nothing to search on")
+    return p
+
+
+def _truthy_param(v) -> bool:
+    return str(v).strip().lower() in ("true", "1", "yes")
+
+
+# How long an answer stands. A person's record does not change between two
+# clicks, or between this morning and this afternoon. Long by default because
+# the scarce resource is credits, not freshness, and any lookup can be forced.
+WP_TTL = int(os.environ.get("WHITEPAGES_CACHE_SECONDS", str(30 * 86400)))
+_WP_CACHE: dict = {}
+# What has actually been spent, so the number shown to the user is counted
+# rather than estimated.
+WP_SPEND = {"calls": 0, "served_from_cache": 0, "refused": 0}
+
+
+def _wp_key(kind: str, params: dict) -> str:
+    return kind + "|" + "&".join(f"{k}={params[k]}" for k in sorted(params))
+
+
 def _wp_path(kind: str) -> str:
     """Endpoint path for a lookup, per API flavour.
 
@@ -1001,20 +1110,58 @@ def _wp_path(kind: str) -> str:
     return "/v2/person"            # both person search and reverse phone
 
 
-async def _wp_get(kind: str, params: dict):
-    """One WhitePages call. Returns parsed JSON, or None when nothing matched."""
+async def _wp_phone(digits: str, fresh: bool = False) -> tuple:
+    """(person, line) for a number. The single door to a reverse-phone query.
+
+    Both endpoints came here by different routes and built the same query by
+    hand, which meant the cache saw two spellings of one question. Now there is
+    one spelling.
+    """
+    return _phone_owner(await _wp_get("phone", {"phone": digits}, fresh=fresh), digits)
+
+
+async def _wp_get(kind: str, params: dict, fresh: bool = False):
+    """One WhitePages call, or none at all.
+
+    Three things stand between a caller and a charge:
+
+    1. The parameters are checked against the documented constraints. A request
+       that cannot succeed is refused here for nothing, rather than there for
+       the price of a 400.
+    2. An identical question already asked is answered from memory.
+    3. Only then does anything go out.
+
+    Returns parsed JSON, or None when nothing matched.
+    """
     if not WHITEPAGES_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="WhitePages not configured — set WHITEPAGES_API_KEY "
                    "(see SETUP-whitepages.md).",
         )
+    try:
+        params = wp_validate(params)
+    except WPRefused as e:
+        WP_SPEND["refused"] += 1
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not sent, so not billed — {e}.",
+        )
+
+    key = _wp_key(kind, params)
+    hit = _WP_CACHE.get(key)
+    if hit and not fresh and time.time() - hit[0] < WP_TTL:
+        WP_SPEND["served_from_cache"] += 1
+        return hit[1]
+
     url = WHITEPAGES_BASE_URL + _wp_path(kind)
+    WP_SPEND["calls"] += 1
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
     if r.status_code in (401, 403):
         raise HTTPException(status_code=502, detail="WhitePages rejected the API key — check WHITEPAGES_API_KEY.")
     if r.status_code == 404:
+        _WP_CACHE[key] = (time.time(), None)
         return None          # documented as "no matching record"
     if r.status_code == 429:
         raise HTTPException(status_code=502, detail="WhitePages rate limit hit — try again shortly.")
@@ -1030,9 +1177,13 @@ async def _wp_get(kind: str, params: dict):
             detail=f"WhitePages error {r.status_code} from {url}: {r.text[:300]}",
         )
     try:
-        return r.json()
+        out = r.json()
     except ValueError:
         raise HTTPException(status_code=502, detail=f"WhitePages returned non-JSON from {url}.")
+    # A zero-result answer is cached like any other. It was paid for, and the
+    # same query will keep returning it.
+    _WP_CACHE[key] = (time.time(), out)
+    return out
 
 
 def _best_person(payload, require_last: str = "") -> dict:
@@ -1532,8 +1683,7 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
     """
     await _active_token(request)
     want = _digits(req.phone)
-    payload = await _wp_get("phone", {"phone": want})
-    person, hit = _phone_owner(payload, want)
+    person, hit = await _wp_phone(want)
     if not person or not hit:
         return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
                 "owner": "", "name_match": None, "note": "no record found"}
@@ -2419,6 +2569,31 @@ async def edgar_debug(request: Request, url: str = ""):
             "body": r.text[:4000]}
 
 
+@app.get("/api/wp-spend")
+async def wp_spend(request: Request):
+    """What this service has actually spent, and what it has saved.
+
+    Counted, not estimated: every number here is incremented at the point the
+    call is made or avoided. Deliberately not a call to the account usage
+    endpoint, which is itself billed — asking how much you have spent should
+    not spend any.
+    """
+    await _active_token(request)
+    total = WP_SPEND["calls"] + WP_SPEND["served_from_cache"]
+    return {
+        "billed_calls": WP_SPEND["calls"],
+        "answered_from_cache": WP_SPEND["served_from_cache"],
+        "refused_before_sending": WP_SPEND["refused"],
+        "saved_pct": round(100 * WP_SPEND["served_from_cache"] / total) if total else 0,
+        "cache_entries": len(_WP_CACHE),
+        "cache_seconds": WP_TTL,
+        # Since this process started. Cloud Run recycles instances, so it is a
+        # recent picture rather than a lifetime bill — the account dashboard is
+        # the authority on that.
+        "since": "this server instance started",
+    }
+
+
 @app.get("/api/wp-debug")
 async def wp_debug(request: Request, phone: str = "", name: str = "", path: str = ""):
     """Raw WhitePages round-trip, for diagnosing an integration that returns
@@ -2489,10 +2664,18 @@ def _key_census(node, prefix: str = "", out=None, depth: int = 0) -> list:
 class EnrichRequest(BaseModel):
     first_name: str = ""
     last_name: str = ""
+    middle_name: str = ""
     city: str = ""
     state: str = ""
     street: str = ""
+    zip: str = ""
     phone: str = ""
+    email: str = ""
+    # The property lookup is a second billed call and answers a different
+    # question, so it is asked for rather than assumed. Off by default: most
+    # presses want to know who someone is, not who holds the deed.
+    want_property: bool = False
+    fresh: bool = False
 
 
 @app.post("/api/enrich")
@@ -2509,32 +2692,79 @@ async def enrich(req: EnrichRequest, request: Request):
 
     want_state = _state_code(req.state)
     person, matched_by = {}, ""
+    steps: list = []          # what was actually spent, in order
 
+    # The ladder is ordered by how well each thing identifies a person, and it
+    # stops at the first answer. Every rung is a billed call, so a rung is only
+    # climbed when the one below it found nothing and the next one has
+    # something real to search on.
+    #
     # A phone number identifies a person; a name does not. "Daniel Treacy"
     # returns a 30-year-old in Kansas City and a realtor in Portland, and the
-    # highest match_score is the realtor. Search the known number first.
-    if req.phone:
-        p, hit = _phone_owner(await _wp_get("phone", {"phone": _digits(req.phone)}),
-                              _digits(req.phone))
-        last = req.last_name.strip().lower()
-        if p and (not last or last in (_first_str(p, "name") or "").lower()):
+    # highest match_score is the realtor.
+    last = req.last_name.strip().lower()
+
+    def _mine(p) -> bool:
+        """Whether a record plausibly belongs to this lead."""
+        if not p:
+            return False
+        if not last:
+            return True
+        if last in (_first_str(p, "name", "full_name") or "").lower():
+            return True
+        return any(last in a.lower() for a in _aliases(p))
+
+    if req.phone and WP_PHONE_RE.match(_digits(req.phone)):
+        steps.append("phone")
+        p, _hit = await _wp_phone(_digits(req.phone), req.fresh)
+        if _mine(p):
             person, matched_by = p, "phone"
 
-    if not person:
-        # strict_match suppresses the server-side fuzzy fallback; the surname
-        # check in _best_person catches anything that slips through.
-        params = {"name": name, "strict_match": "true"}
+    # Not every lead has a mobile, and an email address identifies a person
+    # nearly as well as a number does — better than a name, because nobody
+    # shares one. This rung is why a lead with no phone is now worth a press.
+    if not person and req.email and WP_EMAIL_RE.match(req.email.strip()):
+        steps.append("email")
+        p = _best_person(await _wp_get("person", {"email": req.email.strip()},
+                                       fresh=req.fresh),
+                         require_last=req.last_name)
+        if _mine(p):
+            person, matched_by = p, "email"
+
+    if not person and (req.last_name.strip() or name):
+        # Individual name fields are documented as matching each part
+        # specifically, where `name` matches loosely against the whole field.
+        # They cannot be combined, so it is one or the other.
+        params = {"strict_match": "true"}
+        if req.last_name.strip():
+            params["last_name"] = req.last_name.strip()
+            if req.first_name.strip():
+                params["first_name"] = req.first_name.strip()
+            if req.middle_name.strip():
+                params["middle_name"] = req.middle_name.strip()
+        else:
+            params["name"] = name
         if req.city:
             params["city"] = req.city
         if want_state:
             params["state_code"] = want_state
         if req.street:
             params["street"] = req.street
-        person = _best_person(await _wp_get("person", params), require_last=req.last_name)
+        if WP_ZIP_RE.match((req.zip or "").strip()):
+            params["zipcode"] = req.zip.strip()
+        # A name with no location at all is the query that returns the realtor
+        # in Portland. Refuse it rather than pay for it.
+        if not any(k in params for k in ("city", "state_code", "street", "zipcode")):
+            return {"found": False, "steps": steps,
+                    "rejected": "a name with no city, state or ZIP matches too many "
+                                "people to be worth a lookup — add a location"}
+        steps.append("name")
+        person = _best_person(await _wp_get("person", params, fresh=req.fresh),
+                              require_last=req.last_name)
         matched_by = "name"
 
     if not person:
-        return {"found": False}
+        return {"found": False, "steps": steps}
 
     # Namesakes are the failure mode here, so a record from a different state
     # than the lead is refused rather than silently attributed to them.
@@ -2552,7 +2782,7 @@ async def enrich(req: EnrichRequest, request: Request):
     owns_home = None
     owner_type = ""
     co_owners: list = []
-    if addr["street"] and (addr["city"] or addr["zip"]):
+    if req.want_property and addr["street"] and (addr["city"] or addr["zip"]):
         prop_params = {"street": addr["street"]}
         if addr["city"]:
             prop_params["city"] = addr["city"]
@@ -2560,7 +2790,8 @@ async def enrich(req: EnrichRequest, request: Request):
             prop_params["state_code"] = _state_code(addr["state"])
         if addr["zip"]:
             prop_params["zipcode"] = addr["zip"]
-        prop = await _wp_get("property", prop_params)
+        steps.append("property")
+        prop = await _wp_get("property", prop_params, fresh=req.fresh)
         result = (prop or {}).get("result") if isinstance(prop, dict) else None
         if isinstance(result, dict):
             info = result.get("ownership_info") or {}
@@ -2588,6 +2819,10 @@ async def enrich(req: EnrichRequest, request: Request):
         "owns_home": owns_home,
         "owner_type": owner_type,
         "co_owners": co_owners,
+        # Which rungs were climbed. The UI shows this so a press that cost two
+        # lookups says so instead of looking the same as one that cost none.
+        "steps": steps,
+        "property_checked": bool(req.want_property),
     })
     return out
 
