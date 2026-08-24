@@ -127,6 +127,54 @@ The probe reports `priced` — how many sponsors ended up with a balance. If tha
 is 0 while `rows_read` is large, the schedules are missing, or they are from a
 different plan year and the `ACK_ID`s do not line up.
 
+## Where to host the files: Drive or the DOL directly
+
+Both work. `FORM5500_URL`, `FORM5500_SCHEDULE_URLS` and WARN feed URLs all take
+either a public URL or a Drive reference.
+
+**Drive is the better default**, for three reasons that have nothing to do with
+convenience:
+
+- **The DOL path moves every year.** `.../2025/Latest/...` becomes `.../2026/...`,
+  and the old one keeps working for a while before it does not. A Drive file
+  does not move.
+- **The DOL ships a zip.** The app unpacks it in memory, which works, but it is
+  megabytes of decompression on a request path for no benefit over a file that
+  was unzipped once by hand.
+- **Cloud egress is not guaranteed.** A government host may rate-limit or block
+  a cloud IP range, and that failure looks like an empty result.
+
+**The DOL link is better on exactly one axis:** it stays current on its own. DOL
+updates the datasets around the first of each month; a Drive copy is as stale as
+the day you downloaded it. If you go the Drive route, put a note in your
+calendar to refresh it quarterly — the plan data changes slowly, but not never.
+
+Drive sources are read with the **signed-in user's** Google credentials, so the
+file must be in that account's Drive and Google sign-in must be connected. A
+Microsoft-only session gets a clear message rather than a silent empty result.
+
+## The file is fetched once, not once per click
+
+Both the 5500 file and the WARN feeds are cached in memory after the first
+fetch. Before this, every "Price the employers", every "Check for events" and
+every opportunities view re-downloaded and re-parsed the whole file — per user,
+per click, and against a government host if the source was the DOL's own URL.
+
+| | Default | Variable |
+|---|---|---|
+| Form 5500 | 24 hours | `PLANS_CACHE_SECONDS` |
+| WARN feeds | 6 hours | `WARN_CACHE_SECONDS` |
+
+The cache is per instance, so Cloud Run scaling to zero means the next request
+pays for one fetch. That is correct, not a miss.
+
+**Three things always bypass it**, because otherwise they would be lying:
+`/api/sources/probe`, **Refresh from source**, and `/api/opportunities?refresh=true`.
+A cached probe diagnoses the cache rather than the source.
+
+Changing any source URL or `SOURCE_STATES` invalidates the entry automatically —
+the cache key is the configuration.
+
 ## Keeping the files in Google Drive
 
 `FORM5500_URL`, `FORM5500_SCHEDULE_URLS` and any WARN feed URL accept a **Google
