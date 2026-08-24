@@ -43,6 +43,7 @@ and `opportunities-test.py` drive FastAPI (or the parsers) directly.
 | `zi-mcp-ui-test.js` | saving and removing the MCP token, and that the credential never reaches localStorage or the lead-state document |
 | `prospecting-test.py` | the WARN and Form 5500 parsers — company-name normalisation, column aliasing, the join, and that an unmatched event survives without acquiring a made-up dollar figure |
 | `opportunities-test.py` | the source endpoints against a stub WARN feed and a stub zipped DOL file: the probe reports what came back, one dead feed does not sink the refresh, and a signed-out visitor gets nothing |
+| `cache-test.py` | the source cache — that repeated clicks stop re-downloading the whole DOL file, and that "Refresh from source" and the probe still bypass it, since a cached probe diagnoses the cache |
 | `plan-assets-test.py` | the Schedule H/I join — built from the DOL's published layout, which shows `f_5500` carries participant counts and no money at all, so without the join nothing can be priced |
 | `harvest-test.py` | the page fetcher — mostly refusals, because fetching is four lines and deciding whether you may is the part worth writing down: the terms denylist, private addresses, robots.txt, rate limiting |
 | `intl-build-test.js` | the build panel never dead-ending (its actions used to live inside the rollover panel, so choosing SCS hid every button), and international numbers held out of the tiers |
