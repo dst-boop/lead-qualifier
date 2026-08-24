@@ -90,6 +90,75 @@ Both write into the CSV export comments. Enrich also backfills empty street,
 city, zip and mobile fields on the lead, so a lead with no mobile number can
 gain one.
 
+## Credits
+
+Lookups cost money. What is billed:
+
+| Status | Billable |
+|---|---|
+| 200 OK | **yes** |
+| 404 (lookup by id) | **yes** |
+| 400 Bad Request, 403 Forbidden | no |
+| 429 rate limit, 5xx server error | no |
+
+**The important line is the first one.** A 200 carrying an empty `results` array
+is billed exactly like one carrying the person — *"no such person" is a
+purchase*. A malformed query, by contrast, is free.
+
+So the expensive mistake is not a typo. It is a well-formed query that was never
+going to identify anybody, and a well-formed query asked twice.
+
+Three things keep the bill down:
+
+1. **Nothing that cannot identify anyone is sent.** A surname with no city,
+   state or ZIP is refused — that query returns a stranger, at full price.
+   Parameters are also checked against their documented constraints (phone
+   patterns, five-digit ZIPs, real state codes, ages inside 18–65) so a bad
+   value fails instantly with a reason rather than after a round trip. That part
+   is for clarity, not credits.
+2. **The same question is asked once.** Answers are cached on the exact query
+   for `WHITEPAGES_CACHE_SECONDS` (default 30 days) — including *"no such
+   person"*, which was paid for and does not change. Pressing 📞? then 🏠 on the
+   same lead now costs one lookup, not two.
+3. **Nothing is bought speculatively.** The deed lookup used to run
+   automatically inside Enrich; it is now its own **Check the deed** button that
+   says what it costs.
+
+`/api/wp-spend` reports what was billed, what came from memory, and what was
+refused before sending. It counts rather than estimates, and it deliberately
+does *not* call the account-usage endpoint — that endpoint is billed too, and
+asking what you have spent should not spend anything. (Its `request_count` is
+also documented as *including* 2xx, 4xx and 5xx, so it is not a billable count
+either way.)
+
+### When the allowance runs out
+
+Two different things arrive as HTTP 429. Ordinary throttling clears in seconds.
+A usage cap arrives with `error: "usage_cap_exceeded"` and does not clear until
+the billing period resets, so the app reports that one with the numbers and the
+date — *"WhitePages allowance is used up — 1000 of 1000 queries this period,
+resets 2026-09-01"* — rather than telling you to try again shortly.
+
+Every activity-log entry now ends with what the press cost, e.g.
+`[1 lookup]` or `[no lookup — already on file]`.
+
+## Finding someone with no mobile number
+
+Person search is one endpoint. Phone, email, address and name are all
+`GET /v2/person/` with different parameters, and they differ enormously in how
+well they identify a person. Enrich climbs this ladder and stops at the first
+answer, so a rung is only paid for when the one below found nothing:
+
+| Rung | Why it is where it is |
+|---|---|
+| **Phone** | A number identifies a person. Best available. |
+| **Email** | Nearly as good — nobody shares one. This is the rung that makes a lead with no mobile worth pressing. |
+| **First + last name, with a location** | Documented as matching each part specifically, unlike the loose `name` field. |
+
+A name with **no** city, state or ZIP is refused without spending anything.
+That query is the one that returns a stranger with the same surname, and the
+app has attributed one of those to a lead before.
+
 ## Which API you have
 
 Two incompatible flavours of this API exist, and the key you hold works with

@@ -41,7 +41,7 @@ for s in $SUITES; do
 done
 
 # Backend suites run from the repo root, each against its own stub server.
-for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py team-test.py signals-test.py signals-api-test.py harvest-test.py plan-assets-test.py cache-test.py wp-record-test.py signals-coverage-test.py google-consent-test.py; do
+for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py team-test.py signals-test.py signals-api-test.py harvest-test.py plan-assets-test.py cache-test.py wp-record-test.py signals-coverage-test.py google-consent-test.py wp-credits-test.py; do
   printf '%-20s ' "$s"
   if out=$(cd "$ROOT" && python3 "tests/$s" 2>&1); then
     echo "$(echo "$out" | tail -1)"
