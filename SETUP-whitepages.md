@@ -13,6 +13,20 @@ Two per-lead buttons.
 
 **🏠 Enrich** looks the person up by name and shows the same household panel.
 
+### Re-checking a number
+
+The 📞? button appears on a lead that has never been checked. Once it has an
+answer the button changes rather than disappearing:
+
+- **📞+** on a lead checked *before* the app read the whole record — pressing it
+  pulls the date of birth, other names, every line and every email. This is the
+  one to press on anything you checked before this feature shipped.
+- **Re-check this number** inside the lead's panel, for anything else.
+
+Both spend a lookup, so both ask first and say so. Once a lead's record has been
+read in full the row button retires — there is nothing left to learn without
+new data at the other end.
+
 ### One lookup, not two
 
 A reverse-phone query on this API is a *person search* (see below), so it comes
