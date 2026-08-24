@@ -42,7 +42,7 @@ import msal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from webapp import harvest, prospecting, signals
+from webapp import freesources, harvest, prospecting, signals
 from pydantic import BaseModel, EmailStr
 
 # --- Microsoft ---
@@ -93,6 +93,12 @@ EDGAR_DATA = os.environ.get("EDGAR_DATA", "https://data.sec.gov").rstrip("/")
 EDGAR_WWW = os.environ.get("EDGAR_WWW", "https://www.sec.gov").rstrip("/")
 EDGAR_FTS = os.environ.get("EDGAR_FTS", "https://efts.sec.gov").rstrip("/")
 EDGAR_MAX_RPS = float(os.environ.get("EDGAR_MAX_RPS", "8"))   # SEC ceiling is 10
+# FEC's demo key works out of the box at 40 requests/hour shared per IP. A
+# personal key (free, instant, api.open.fec.gov/developers) raises that to
+# 1,000/hour, so the default is "works today, upgrade when it matters".
+FEC_API_KEY = os.environ.get("FEC_API_KEY", "DEMO_KEY")
+FEC_API_BASE = os.environ.get("FEC_API_BASE", "https://api.open.fec.gov/v1")
+EFTS_URL = os.environ.get("EFTS_URL", "https://efts.sec.gov/LATEST/search-index")
 
 # --- ZoomInfo (per-user OAuth) ---
 # Each advisor connects their own ZoomInfo seat, so searches and enrichment are
@@ -880,6 +886,9 @@ async def me(request: Request):
         "server_state": storage_backend() == "firestore",
         "zoominfo": _zi_configured(),
         "edgar": bool(EDGAR_USER_AGENT and ANTHROPIC_API_KEY),
+        # Free public-record lookups. FEC ships with the demo key, so the only
+        # half that can be dark is the SEC one, and it says so per-source.
+        "free_sources": True,
         "zi_mcp": bool(ANTHROPIC_API_KEY),
         "opportunities": bool(WARN_FEEDS.strip()),
         "drive": False,          # set per-session below when Google is signed in
@@ -2725,6 +2734,120 @@ def _key_census(node, prefix: str = "", out=None, depth: int = 0) -> list:
         s = str(node)
         out.append(f"{prefix} = {s[:60]}" + ("…" if len(s) > 60 else ""))
     return out
+
+
+class FreeEnrichRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    employer: str = ""
+
+
+async def _fec_get(params: dict):
+    """One FEC call. The API is free; the failure modes are the key and the
+    shared demo rate limit, and each gets its own sentence."""
+    q = dict(params)
+    q["api_key"] = FEC_API_KEY
+    async with httpx.AsyncClient(timeout=30) as cx:
+        r = await cx.get(f"{FEC_API_BASE}/schedules/schedule_a/", params=q)
+    if r.status_code == 403:
+        raise HTTPException(status_code=502,
+                            detail="FEC rejected the API key — set FEC_API_KEY "
+                                   "(free at api.open.fec.gov/developers).")
+    if r.status_code == 429:
+        raise HTTPException(status_code=502,
+                            detail="FEC rate limit hit. The shared DEMO_KEY allows 40 "
+                                   "lookups an hour across everyone using it — a free "
+                                   "personal FEC_API_KEY raises that to 1,000.")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"FEC error {r.status_code}: {r.text[:200]}")
+    try:
+        return r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="FEC returned non-JSON.")
+
+
+@app.post("/api/free-enrich")
+async def free_enrich(req: FreeEnrichRequest, request: Request):
+    """Everything the free public records say about one person.
+
+    Two sources, each optional, and the response says which ran — the same
+    coverage honesty the signals panel got in §26's predecessor: an empty
+    answer from a check that never ran must not read as an all-clear.
+
+    Costs nothing. The FEC search itself is free, and the SEC search rides the
+    same rate-limited client as every other EDGAR call in the app.
+    """
+    await _active_token(request)
+    last = req.last_name.strip()
+    if not last:
+        raise HTTPException(status_code=400, detail="A last name is required.")
+    name = f"{req.first_name.strip()} {last}".strip()
+
+    sources = {}
+    donations, filings = {}, []
+
+    try:
+        payload = await _fec_get({"contributor_name": name, "per_page": 100,
+                                  "sort": "-contribution_receipt_date"})
+        rows = freesources.match_rows(freesources.fec_rows(payload),
+                                      last, req.first_name)
+        donations = freesources.summarize_fec(rows, req.employer)
+        sources["fec"] = {"ran": True,
+                          "note": "" if rows else "no itemised contributions under this name"}
+    except HTTPException as e:
+        sources["fec"] = {"ran": False, "reason": e.detail}
+
+    if EDGAR_USER_AGENT:
+        try:
+            payload = await _edgar_get(
+                EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"}))
+            hits = freesources.efts_hits(payload)
+            filings = freesources.match_filings(hits, last, req.first_name)[:8]
+            sources["edgar"] = {"ran": True,
+                                "note": "" if filings else "no insider filings under this name"}
+        except HTTPException as e:
+            sources["edgar"] = {"ran": False, "reason": e.detail}
+    else:
+        sources["edgar"] = {"ran": False,
+                            "reason": "EDGAR_USER_AGENT not set — see SETUP-edgar.md"}
+
+    return {
+        "sources": sources,
+        "donations": donations,
+        "filings": filings,
+        # Deep links to the same searches on the source's own site, so every
+        # number above can be checked by a person in one click.
+        "links": {
+            "fec": "https://www.fec.gov/data/receipts/individual-contributions/"
+                   f"?{urlencode({'contributor_name': name})}",
+            "edgar": "https://www.sec.gov/edgar/search/#/"
+                     f"q=%22{name.replace(' ', '%20')}%22&forms=3,4,5",
+        },
+    }
+
+
+@app.get("/api/free-debug")
+async def free_debug(request: Request, source: str = "fec", name: str = ""):
+    """Raw round-trip against one free source, with the field census.
+
+    Both parsers were written without a live response — the build environment
+    cannot reach either host — which is the condition this app has been wrong
+    under five times. One call to this endpoint from the deployed app is the
+    line of truth that settles it.
+    """
+    await _active_token(request)
+    if not name:
+        return {"error": "Pass ?name=First Last"}
+    if source == "fec":
+        payload = await _fec_get({"contributor_name": name, "per_page": 3})
+        parsed = freesources.fec_rows(payload)
+    elif source == "efts":
+        payload = await _edgar_get(
+            EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"}))
+        parsed = freesources.efts_hits(payload)
+    else:
+        return {"error": "source must be fec or efts"}
+    return {"source": source, "fields": _key_census(payload), "read": parsed[:3]}
 
 
 class EnrichRequest(BaseModel):

@@ -1822,3 +1822,71 @@ incremented at the point the call is made or avoided.
 It deliberately does not call the account-usage endpoint. That endpoint is
 billed like any other data call, and an app that spends a credit to tell you
 how many credits you have spent is not solving the problem it was asked to.
+
+## 27. Free sources answer the question the list gets wrong
+
+"Why can't we find this information? He's from Knoxville, TN."
+
+Two failures hid inside that report, and only one of them was about data.
+
+**The lookup searched the wrong place with the right guard.** The lead row
+carries the employer's address — nearly every sourced list does — so the
+WhitePages search ran against the company's city, found the real person at
+home in Tennessee, and §14's namesake guard did exactly what it was built to
+do: refused to attach a record from a state the lead's row doesn't match.
+Right guard, wrong input. And the user, who knew the correct city, had
+nowhere in the app to say so.
+
+So the second half of the fix is the small one: a failed home lookup now
+offers **"Know where they live? Search there"**, and a record found that way
+carries the basis `you supplied it` forever — a location typed by a person is
+a weaker provenance than one observed in data, and §17 says the difference
+must stay visible.
+
+### The two free sources worth having
+
+Every free source that knows a lot about a person forbids scraping in its
+terms, and harvest.py already refuses them. What remains is what the law
+requires to be published, with real APIs:
+
+- **FEC individual contributions.** Itemised above $200: name, **home** city
+  and ZIP, employer and occupation — self-reported, per gift, dated. As a
+  timeline it is the exact field the list gets wrong (where they live), an
+  employer confirmation with a date on it, and occasionally the single word
+  "retired", which for this app is the event itself.
+- **SEC insider filings (Forms 3/4/5).** A person who appears there holds
+  equity compensation. Free, keyless, rides the same rate-limited EDGAR
+  client the app already has.
+
+County records (assessor, deeds) were considered and deliberately left as
+links rather than integrations: three thousand counties, no common API, and
+§23 already establishes that "legally accessible" is a property of the
+publisher's terms, checked per fetch — a per-county scraping farm fails that
+test before it fails any technical one.
+
+### The FEC restriction, stated rather than discovered
+
+Federal law (52 U.S.C. §30111(a)(4)) forbids the **sale or use** of FEC
+contributor information for commercial purposes or to solicit contributions.
+A prospecting app is commercial. That sits in tension with using donations to
+decide whom to call, and the tension is not resolvable by this repository —
+so it is stated in the panel itself, in the setup doc, and here, rather than
+left for someone to find. The defensible use is corroboration: confirming
+that a person already sourced elsewhere lives where the user thinks, held the
+job the list claims, on the dates it claims. The insider-filing half carries
+no such restriction.
+
+The pattern this repeats: §23 refused to fetch pages whose publishers forbid
+it, even though fetching would work. Here the fetch is explicitly public and
+the *use* is what the law constrains. Same rule, one layer up.
+
+### Blind parsers, sixth time armed
+
+Neither parser had a live response to be written against — the build
+environment's proxy blocks both hosts, though production reaches EDGAR every
+day. Five entries in this document (§12, §18, §24, §25) exist because that
+condition breeds silent failure. The defences are now standard: every reader
+takes both documented key spellings, absence is a value everywhere, a
+namesake filter mirrors `_best_person`'s surname rule, and `/api/free-debug`
+returns the same field census `/api/wp-debug` does — one call from
+production settles what documentation cannot.
