@@ -1031,7 +1031,53 @@ const NOW_YEAR=new Date().getFullYear();
    public filing, which beats a household record, which beats a graduation-year
    guess. Graduation year stays where it is — it is handled separately in
    scoreLead as an explicitly inferred fallback. */
+/* Date of birth from the household record, when it carried one. The current
+   server stores {year,month,day}; leads enriched before that hold whatever
+   string the API returned, so both shapes are read. */
+function dobOf(L){
+  const d=L&&L.hd&&L.hd.dob;
+  if(!d)return null;
+  if(typeof d==='object')
+    return d.year>0?{year:+d.year,month:+d.month||0,day:+d.day||0}:null;
+  const s=''+d;
+  let m=s.match(/^(\d{4})[-\/](\d{1,2})(?:[-\/](\d{1,2}))?/);
+  if(m)return {year:+m[1],month:+m[2],day:+m[3]||0};
+  m=s.match(/^(\d{1,2})\/(?:(\d{1,2})\/)?(\d{4})$/);
+  if(m)return {year:+m[3],month:+m[1],day:+m[2]||0};
+  m=s.match(/\b(1[89]\d\d|20\d\d)\b/);
+  return m?{year:+m[1],month:0,day:0}:null;
+}
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dobLabel(L){
+  const d=dobOf(L); if(!d)return '';
+  return d.month?(d.day?`${MON[d.month-1]} ${d.day}, ${d.year}`:`${MON[d.month-1]} ${d.year}`)
+                :(''+d.year);
+}
+/* Age from a date of birth. With a month and a year the answer is exact except
+   in the birthday month itself, where it turns on a day the record does not
+   carry — so the age returned is the one they have certainly reached. It can
+   be a month behind and it is never ahead. A year with no month is a
+   twelve-month band, not an age, and returns nothing. */
+function dobAge(L){
+  const d=dobOf(L); if(!d||!d.month)return null;
+  const n=new Date();
+  const months=(n.getFullYear()*12+n.getMonth())-(d.year*12+(d.month-1));
+  if(d.day)return Math.floor((months-(n.getDate()<d.day?1:0))/12);
+  return Math.max(0,Math.floor((months-1)/12));
+}
+/* The month this lead reaches 59½: birth month, plus fifty-nine years, plus
+   six. Returned as a month index because that is the precision the record
+   supports — printing a day here would be inventing one. */
+function halfMonth(L){
+  const d=dobOf(L); if(!d||!d.month)return null;
+  return d.year*12+(d.month-1)+59*12+6;
+}
+function monLabel(i){return MON[((i%12)+12)%12]+' '+Math.floor(i/12);}
+function nowMonth(){const n=new Date();return n.getFullYear()*12+n.getMonth();}
 function leadAge(L){
+  // A date of birth outranks a proxy statement: the proxy prints an integer as
+  // of a filing date, the record prints the month it happened.
+  const da=dobAge(L); if(da>0)return da;
   if(L.edgar&&L.edgar.age>0)return L.edgar.age;
   return (L.hd&&L.hd.age)||null;
 }
@@ -1061,6 +1107,7 @@ function inferredAge(L){
   return {age:Math.round(yrs+ASSUMED_START_AGE), basis};
 }
 function ageSource(L){
+  if(dobAge(L)>0)return 'date of birth on public record ('+dobLabel(L)+')';
   if(L.edgar&&L.edgar.age>0)return 'SEC proxy statement '+(L.edgar.asOf||'');
   if(L.hd&&L.hd.age)return 'public record';
   const inf=inferredAge(L);
@@ -1070,6 +1117,7 @@ function ageSource(L){
    every lead, because an inferred 61 and a filed 61 are not the same fact and
    the person making the call is entitled to know which they have. */
 function ageBasis(L){
+  if(dobAge(L)>0)return {kind:'dob',label:'born '+dobLabel(L)};
   if(L.edgar&&L.edgar.age>0)return {kind:'filed',label:'SEC filing'};
   if(L.hd&&L.hd.age)return {kind:'record',label:'public record'};
   if(L.ageVerified)return {kind:'checked',label:'checked by hand'};
@@ -1108,6 +1156,18 @@ function suspectTenure(L){
 const SELL_AGE=59.5;
 function sellable(L){
   const b=ageBasis(L);
+  // With a real birth month the answer is a month, not a band, so say the
+  // month. This is the whole reason a date of birth is worth having.
+  const h=halfMonth(L);
+  if(h!==null){
+    const mo=h-nowMonth(), when=monLabel(h), born=dobLabel(L);
+    if(mo<0)return {k:'yes',label:'59\u00bd \u2713',
+      title:`Born ${born} (public record) — reached 59½ in ${when}. An in-service distribution is available.`};
+    if(mo===0)return {k:'yes',label:'59\u00bd this month',
+      title:`Born ${born} (public record) — turns 59½ this month. The record carries no day of birth, so confirm the date on the call.`};
+    return {k:'soon',label:mo<12?`59\u00bd in ${mo}mo`:('59\u00bd '+when),
+      title:`Born ${born} (public record) — reaches 59½ in ${when}, ${mo} month${mo>1?'s':''} away. Nurture.`};
+  }
   if(b.kind==='none')return {k:'unknown',label:'verify date',title:'No age and nothing to infer one from — enrich, or check by hand.'};
   const age=leadAgeAny(L);
   if(!age)return {k:'unknown',label:'verify date',title:'No age on file.'};
@@ -2181,13 +2241,22 @@ function detailRow(L){
       ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
       ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
       ${L.hd?`<h4 style="margin-top:12px">Household &mdash; WhitePages</h4>
-      <div class="sigrow ${L.hd.age?'hit':'miss'}"><span>Age (confirmed)</span><span class="pts">${L.hd.age||'unknown'}</span></div>
+      <div class="sigrow ${dobLabel(L)?'hit':(L.hd.age?'hit':'miss')}"><span>${dobLabel(L)?'Born':'Age (confirmed)'}</span><span class="pts">${dobLabel(L)?esc(dobLabel(L))+(dobAge(L)?' \u00b7 '+dobAge(L):''):(L.hd.age||'unknown')}</span></div>
+      ${halfMonth(L)!==null?`<div class="sigrow hit"><span>Reaches 59\u00bd</span><span class="pts">${esc(monLabel(halfMonth(L)))}</span></div>
+      <p class="hint" style="margin-top:2px">No day of birth on file, so this is the month, not the date \u2014 confirm it on the call before anything is signed.</p>`:''}
+      ${(L.hd.aliases&&L.hd.aliases.length)?`<div class="sigrow hit"><span>Also known as</span><span class="pts">${esc(L.hd.aliases.join(' \u00b7 '))}</span></div>`:''}
       <div class="sigrow ${L.hd.city?'hit':'miss'}"><span>Lives in</span><span class="pts">${L.hd.city?esc(L.hd.city+', '+L.hd.state):'unknown'}</span></div>
       <div class="sigrow ${L.hd.ownsHome?'hit':(L.hd.ownsHome===false?'miss':'')}"><span>Owns their home</span><span class="pts">${L.hd.ownsHome===true?'yes':(L.hd.ownsHome===false?'not in their name':'unknown')}</span></div>
       ${L.hd.ownerType?`<div class="sigrow hit"><span>Deed held by</span><span class="pts">${esc(L.hd.ownerType)}</span></div>`:''}
       <div class="sigrow ${L.hd.props?'hit':'miss'}"><span>Properties owned</span><span class="pts">${L.hd.props||0}</span></div>
       <div class="sigrow ${L.hd.mobiles&&L.hd.mobiles.length?'hit':'miss'}"><span>Mobile numbers on file</span><span class="pts">${(L.hd.mobiles&&L.hd.mobiles.length)||0}${L.hd.phonesTotal?' of '+L.hd.phonesTotal+' phones':''}</span></div>
-      ${(L.hd.mobiles&&L.hd.mobiles.length)?`<div class="hint mono" style="margin-top:3px">${L.hd.mobiles.map(esc).join(' &middot; ')}</div>`:''}
+      ${(L.hd.phoneRecords&&L.hd.phoneRecords.length)?`<div class="hint" style="margin-top:3px">${L.hd.phoneRecords.map(ph=>`<div class="mono">${esc(ph.number)} <span style="color:var(--ink-faint)">${esc([ph.type,ph.carrier,ph.prepaid===true?'prepaid':'',ph.dnc===true?'DNC':'',ph.spam?'spam: '+ph.spam:''].filter(Boolean).join(' \u00b7 '))}</span></div>`).join('')}</div>`
+        :((L.hd.mobiles&&L.hd.mobiles.length)?`<div class="hint mono" style="margin-top:3px">${L.hd.mobiles.map(esc).join(' &middot; ')}</div>`:'')}
+      ${(L.hd.emailRecords&&L.hd.emailRecords.length)?`<div class="sigrow hit"><span>Email addresses</span><span class="pts">${L.hd.emailRecords.length}</span></div>
+      <div class="hint" style="margin-top:3px">${L.hd.emailRecords.map(e=>`<div class="mono">${esc(e.email)} <span style="color:var(--ink-faint)">${esc([e.type,e.recent===true?'recently used':''].filter(Boolean).join(' \u00b7 '))}</span></div>`).join('')}</div>`:''}
+      ${(L.hd.jobs&&L.hd.jobs.length)?`<div class="sigrow ${L.hd.jobs.some(j=>j.employer&&normCo(j.employer)===normCo(L.employer||''))?'hit':''}"><span>Work on the record</span><span class="pts">${esc(L.hd.jobs.map(j=>[j.title,j.employer].filter(Boolean).join(' at ')).join('; '))}</span></div>
+      ${L.employer&&L.hd.jobs.some(j=>j.employer)&&!L.hd.jobs.some(j=>j.employer&&normCo(j.employer)===normCo(L.employer))?`<p class="hint" style="margin-top:2px;color:var(--tierB)">The list says ${esc(L.employer)}; this record says otherwise. One of them is out of date, and which one changes whether there is a plan to roll over.</p>`:''}`:''}
+      ${L.hd.addressesTotal?`<div class="sigrow hit"><span>Addresses on file</span><span class="pts">${L.hd.addressesTotal}</span></div>`:''}
       ${(L.hd.coOwners&&L.hd.coOwners.length)?`<div class="hint" style="margin-top:3px">Deed names: ${esc(L.hd.coOwners.join(' · '))}</div>`:''}
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}${L.hd.matchedBy?' — matched on '+esc(L.hd.matchedBy)+(L.hd.matchedBy==='name'?' only, confirm it is the right person':''):''}${L.hd.matchScore?' ('+L.hd.matchScore+'/100)':''}</div>`:''}
       ${L.hd.rejected?`<div class="hint" style="margin-top:3px;color:var(--tierX)">No record attached — ${esc(L.hd.rejected)}</div>`:''}`:''}
@@ -2354,6 +2423,10 @@ function campChip(L){
   return leadCampaign(L)==='scs'?` <span class="badge camp-scs" title="Scored on the SCS rules: tenure at one employer, not a recent move">SCS</span>`:'';
 }
 /* =============== click-to-call (RingCentral) =============== */
+/* Loose company comparison, for asking whether two sources name the same
+   employer. "The Boeing Company, Inc." and "Boeing" are the same answer. */
+const CO_SUFFIX=/\b(incorporated|corporation|company|holdings|group|enterprises|industries|international|worldwide|inc|corp|co|llc|lp|llp|plc|ltd|limited|usa|us|the)\b/g;
+function normCo(s){return (''+(s||'')).toLowerCase().replace(/[^a-z0-9&]+/g,' ').replace(CO_SUFFIX,' ').replace(/\s+/g,' ').trim();}
 function normPhone(v){let d=(''+(v||'')).replace(/[^\d+]/g,'');
   if(/^\+/.test(d))return d; d=d.replace(/\D/g,'');
   if(d.length===10)return '+1'+d; if(d.length===11&&d[0]==='1')return '+'+d; return d?'+'+d:'';}
@@ -3312,7 +3385,12 @@ window.verifyLead=async id=>{
     else if(!d.line_type&&!d.owner)bits.push('no record for this number');
     else bits.push(d.line_type||'unknown type');
     if(d.carrier)bits.push(d.carrier);
-    if(d.name_match===true)bits.push('name \u2713');
+    if(d.dnc===true)bits.push('DNC');
+    // A spam score of zero is a clean line, not a warning. Only say something
+    // when the record says something.
+    if(d.spam&&!/^0(\.0+)?$/.test(''+d.spam))bits.push('spam: '+d.spam);
+    if(d.prepaid===true)bits.push('prepaid');
+    if(d.name_match===true)bits.push(d.matched_alias?('name \u2713 as '+d.matched_alias):'name \u2713');
     else if(d.name_match===false&&d.owner)bits.push('owner: '+d.owner);
     // A different owner elsewhere is a wrong number; the same address is a
     // household member. Only the first should stop anyone dialling.
@@ -3323,6 +3401,12 @@ window.verifyLead=async id=>{
           household:(d.name_match===false&&d.same_household===true)?
             {name:d.owner,street:d.owner_street||'',city:d.owner_city||'',state:d.owner_state||'',zip:d.owner_zip||'',phone:phone}:null};
     if(wrong)bits.push('wrong number');
+    // The lookup returned the whole person record, not just the line — it
+    // always did, the app just never read it. Keeping it here means the phone
+    // check fills the household panel for free and Enrich is a second lookup
+    // only when this one found nothing. Not applied to a wrong number: that
+    // record belongs to someone else.
+    if(d.record&&!wrong)applyRecord(L,d.record,'phone');
     L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
   }catch(e){toast('Verify failed: '+e.message);}
 };
@@ -3471,6 +3555,66 @@ window.addHousehold=id=>{
   logAct(id,'household',h.name+' added as a lead');
   save();render();toast(h.name+' added — unscored until you fill in their details.');
 };
+/* Which address to reach someone on, out of everything on file.
+   A "recently used" flag beats a type label, and a personal address beats a
+   work one for a 59-year-old thinking about leaving: the work address is read
+   at a desk they are trying to get away from, and it is read by their
+   employer's mail system. */
+function bestEmail(recs,plain){
+  const r=recs||[];
+  const hit=r.find(e=>e.recent===true)
+         || r.find(e=>/personal|home/.test(e.type||''))
+         || r.find(e=>!/professional|work|business/.test(e.type||''))
+         || r[0];
+  return (hit&&hit.email)||(plain&&plain[0])||'';
+}
+/* Fold a WhitePages person record into a lead.
+
+   Both buttons receive the same record — Verify gets it as a by-product of the
+   reverse-phone lookup, Enrich as the point of the call — so both land here
+   and the two cannot end up disagreeing about the same person.
+
+   Backfill only ever fills blanks. Nothing the user typed or the source list
+   supplied is overwritten by a third-party record; the record's version of a
+   field the lead already has is visible in the panel instead, where a person
+   can judge which is right. */
+function applyRecord(L,r,matchedBy){
+  const prev=L.hd||{};
+  const keep=(v,p)=>v===undefined?(p===undefined?null:p):v;
+  L.hd={matchedBy:matchedBy||prev.matchedBy||'',
+        matchScore:(r.match_score!==undefined?r.match_score:prev.matchScore)||null,
+        owner:r.owner||'',aliases:r.aliases||[],
+        age:r.age||null,dob:r.dob||null,
+        street:r.home_street||'',city:r.home_city||'',
+        state:r.home_state||'',zip:r.home_zip||'',
+        emails:r.emails||[],emailRecords:r.email_records||[],
+        mobiles:r.mobiles||[],phoneRecords:r.phone_records||[],
+        phonesTotal:r.phones_total||0,addressesTotal:r.addresses_total||0,
+        jobs:r.jobs||[],properties:r.properties||[],props:r.properties_owned||0,
+        priorPlaces:r.prior_places||[],relatives:r.relatives||[],
+        // The property lookup only happens on Enrich, so a phone check must
+        // not blank out what an earlier Enrich established about the deed.
+        ownsHome:keep(r.owns_home,prev.ownsHome),
+        ownerType:r.owner_type||prev.ownerType||'',
+        coOwners:r.co_owners||prev.coOwners||[],
+        rejected:''};
+  if(!L.street&&r.home_street)L.street=r.home_street;
+  if(!L.city&&r.home_city)L.city=r.home_city;
+  if(!L.state&&r.home_state)L.state=r.home_state;
+  if(!L.zip&&r.home_zip)L.zip=r.home_zip;
+  if(!L.email)L.email=bestEmail(r.email_records,r.emails);
+  if(!L.linkedinUrl&&r.linkedin_url)L.linkedinUrl=r.linkedin_url;
+  if(!L.mobilePhone&&r.mobiles&&r.mobiles.length)L.mobilePhone=r.mobiles[0];
+  // A do-not-call flag on the line the app is about to dial is the one piece
+  // of this record that changes what the user is allowed to do, so it is
+  // carried onto the lead itself where the call guard already reads it.
+  const dnc=(r.phone_records||[]).find(p=>p.dnc===true&&normPhone(p.number)===normPhone(L.mobilePhone||''));
+  if(dnc)L.mobileDnc='true';
+  // The record supplies the two facts the model weighs most — an age it can
+  // treat as observed, and a mobile or email that completes the contact
+  // signal — so the lead is re-scored or the new information changes nothing.
+  scoreLead(L);
+}
 window.enrichHome=async id=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
@@ -3478,25 +3622,9 @@ window.enrichHome=async id=>{
   try{
     const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:L.city||'',state:L.state||'',street:L.street||'',phone:L.mobilePhone||L.directPhone||''});
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||''};save();render();return;}
-    L.hd={matchedBy:d.matched_by||'',matchScore:d.match_score||null,
-          properties:d.properties||[],priorPlaces:d.prior_places||[],relatives:d.relatives||[],
-          age:d.age||null,dob:d.dob||'',street:d.home_street||'',city:d.home_city||'',
-          state:d.home_state||'',zip:d.home_zip||'',emails:d.emails||[],
-          mobiles:d.mobiles||[],phonesTotal:d.phones_total||0,props:d.properties_owned||0,
-          ownsHome:(d.owns_home===undefined?null:d.owns_home),ownerType:d.owner_type||'',
-          coOwners:d.co_owners||[],owner:d.owner||''};
-    if(!L.street&&d.home_street)L.street=d.home_street;
-    if(!L.city&&d.home_city)L.city=d.home_city;
-    if(!L.zip&&d.home_zip)L.zip=d.home_zip;
-    if(!L.email&&d.emails&&d.emails.length)L.email=d.emails[0];
-    if(!L.linkedinUrl&&d.linkedin_url)L.linkedinUrl=d.linkedin_url;
-    if(!L.mobilePhone&&d.mobiles&&d.mobiles.length)L.mobilePhone=d.mobiles[0];
+    applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
-    // Enrichment supplies the two facts the model weighs most — a confirmed
-    // age, and a mobile or email that completes the contact signal — so the
-    // lead has to be re-scored or the new information changes nothing.
-    scoreLead(L);
-    logAct(id,'enrichHome',(d.age?'age '+d.age:'age unknown')+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score);
+    logAct(id,'enrichHome',(dobLabel(L)?'born '+dobLabel(L):(d.age?'age '+d.age:'age unknown'))+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score);
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
 };

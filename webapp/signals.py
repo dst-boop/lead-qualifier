@@ -75,8 +75,69 @@ def _num(v) -> Optional[float]:
         return None
 
 
+MONTH_NAME = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def dob_parts(lead: dict) -> tuple:
+    """(year, month) of birth from the household record, or (0, 0).
+
+    Stored as {"year": …, "month": …} by the current server; leads enriched
+    before that hold whatever string the API returned, so both are read.
+    """
+    d = (lead.get("hd") or {}).get("dob")
+    if isinstance(d, dict):
+        y, m = _num(d.get("year")), _num(d.get("month"))
+        y, m = int(y or 0), int(m or 0)
+        if y < 1900:
+            return 0, 0
+        return y, (m if 1 <= m <= 12 else 0)
+    if isinstance(d, str) and d.strip():
+        s = d.strip()
+        m = re.match(r"^(\d{4})-(\d{1,2})", s)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        m = re.match(r"^(\d{1,2})/(?:\d{1,2}/)?(\d{4})$", s)
+        if m:
+            return int(m.group(2)), int(m.group(1))
+        m = re.search(r"\b(1[89]\d\d|20\d\d)\b", s)
+        if m:
+            return int(m.group(1)), 0
+    return 0, 0
+
+
+def half_month(lead: dict):
+    """The month this lead reaches 59 1/2, as a 0-based month index.
+
+    Birth month plus fifty-nine years plus six. The record carries no day, so
+    the answer is a month and not a date — which matters in that month itself,
+    where eligibility turns on a day nobody here knows.
+    """
+    y, m = dob_parts(lead)
+    if not (y and m):
+        return None
+    return y * 12 + (m - 1) + 59 * 12 + 6
+
+
+def _now_month(now: float = None) -> int:
+    t = time.gmtime(now) if now else time.gmtime()
+    return t.tm_year * 12 + (t.tm_mon - 1)
+
+
+def _month_label(idx: int) -> str:
+    return f"{MONTH_NAME[(idx % 12) + 1]} {idx // 12}"
+
+
 def _age_now(lead: dict) -> tuple:
     """(age, basis, confirmed) using the same precedence the UI shows."""
+    # A date of birth outranks everything. Every other age here is an integer
+    # as of some filing date or a guess from a graduation year; this one is a
+    # record of the event. With no day on file the age returned is the one the
+    # lead has certainly reached, so it can be a month behind and never ahead.
+    y, m = dob_parts(lead)
+    if y and m:
+        months = _now_month() - (y * 12 + (m - 1))
+        return float(max(0, (months - 1) // 12)), f"born {MONTH_NAME[m]} {y}", True
     edgar = (lead.get("edgar") or {})
     if _num(edgar.get("age")):
         return _num(edgar["age"]), f"SEC filing {edgar.get('asOf') or ''}".strip(), True
@@ -98,9 +159,59 @@ def _age_now(lead: dict) -> tuple:
     return None, "", False
 
 
+def _age_signal_from_dob(lead: dict, now: float):
+    """The 59 1/2 signal when an actual date of birth is on file.
+
+    Kept separate from the age arithmetic rather than folded into it because
+    the two answer different questions. An age of 59 says "somewhere in a
+    twelve-month band"; a birth month says "February 2030", and rounding that
+    back into a whole-number age to reuse the old path would throw away the
+    only thing that makes it worth having.
+
+    Returns None when there is no date of birth, so the caller falls through
+    to the old path, and {} when there is one but the date is not near.
+    """
+    idx = half_month(lead)
+    if idx is None:
+        return None
+    months = idx - _now_month(now)
+    # Same window as the age path, stated in the units this one measures in:
+    # a quarter ahead, a year behind.
+    if months > 3 or months < -12:
+        return {}
+    when = _month_label(idx)
+    y, m = dob_parts(lead)
+    if months > 0:
+        headline = f"Turns 59\u00bd in {when}"
+    elif months == 0:
+        headline = f"Turns 59\u00bd this month ({when})"
+    else:
+        headline = f"Past 59\u00bd since {when} \u2014 an in-service distribution is available now"
+    detail = f"Born {MONTH_NAME[m]} {y} (public record)"
+    if months == 0:
+        # The day is the one part of the date the record does not carry, and
+        # in this month it is the part that decides. Say so rather than
+        # letting a green tick imply a date nobody looked up.
+        detail += " \u2014 no day of birth on file, so confirm the date on the call"
+    return {
+        "id": _sig_id(lead.get("id") or "", "age", f"dob{idx}"),
+        "lead_id": lead.get("id"),
+        "kind": "age",
+        "urgency": 0 if months <= 0 else 1,
+        "days": int(round(months * 30.44)),
+        "confirmed": True,
+        "headline": headline,
+        "detail": detail,
+        "source": "date of birth",
+    }
+
+
 def age_signal(lead: dict, now: float = None) -> Optional[dict]:
     """Approaching, or newly past, the in-service distribution age."""
     now = now or time.time()
+    exact = _age_signal_from_dob(lead, now)
+    if exact is not None:
+        return exact or None
     age, basis, confirmed = _age_now(lead)
     if age is None:
         return None

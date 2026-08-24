@@ -1626,3 +1626,105 @@ sheet, so the marginal cost was a URL parser and a token pass-through.
 A Microsoft-only session asking for a Drive source gets an explicit message
 rather than an empty result, because "no data" and "no credentials" are
 different problems and only one of them is the user's to fix.
+
+## 25. The lookup was always buying more than it read
+
+Dan looked Janet Melter up by reverse phone on the WhitePages consumer site and
+came back with her mobile number confirmed, her **month and year of birth**, her
+work, her other names, alternate phones, several email addresses and eleven
+addresses. The app's own reverse-phone lookup — the same query against the same
+company — was reporting three things: a line type, an owner's name, and an
+address.
+
+The gap was not a missing integration. It was a comment. `verify_phone` said:
+
+> The Pro API answers a reverse-phone query with person records, so there is no
+> carrier or prepaid flag to report
+
+The first half of that sentence is a genuine finding from live data, recorded in
+§12: there is no `/v2/phone`, reverse phone is a mode of person search. The
+second half is a conclusion drawn from it that nobody checked. A person record
+is *more* than a phone record, not less. The lookup was returning the whole
+person the entire time and the handler was reading three fields off it and
+dropping the rest — then the Enrich button spent a second credit fetching the
+same record again.
+
+This is the fifth entry in the pattern §12 opened, and the first where the false
+belief was written down *in this repository*, in a comment, by us. The four
+before it came from reading documentation about real data. This one came from
+reasoning about a real finding one step too far, and then writing the conclusion
+somewhere it would be read as established.
+
+### One reader, both buttons
+
+`_person_facts()` reads a person record. Enrich calls it. Verify calls it. Verify
+now returns the record under `record`, and the front end folds it in through
+`applyRecord()`, so pressing the phone check fills the household panel at no
+extra cost and Enrich is a second lookup only when the first found nothing.
+
+### Every new field is optional, and absence is a value
+
+The Pro and Trestle dialects name things differently and accounts differ in what
+they are entitled to, so each reader takes a list of plausible keys and returns
+nothing when none is present. `_flag()` returns `None`, not `False`, when a
+record says nothing about a flag — the difference matters most on `do_not_call`,
+where "not stated" read as "not on the list" is a fine rather than a bad call.
+A spam score of zero is shown as zero; a record silent about spam shows nothing.
+
+A record with none of the new fields must produce exactly the behaviour the app
+had before, and the tests assert that directly rather than by implication.
+
+### The date of birth is the whole point
+
+Everything else here is useful. The date of birth is different in kind.
+
+Every other age in this app is an integer as of a filing date (§18), a
+household record's round number, or a graduation year plus twenty-two (§21).
+A month and a year give the **exact month a lead reaches 59½**, and 59½ is the
+entire question the SCS campaign turns on. "Age 59" means somewhere in a
+twelve-month band. "Born Aug 1970" means February 2030.
+
+So it outranks everything, including the SEC proxy statement: a proxy prints an
+integer as of a filing date, a birth record prints the month it happened.
+
+### It carries no day, and the app says so
+
+The record gives a month, not a date. Three consequences, all of them the same
+rule as §17:
+
+- **The age reported is the one certainly reached.** In the birthday month the
+  day decides and nobody here knows it, so the app reports the lower of the two
+  possible ages. It can be a month behind. It is never ahead.
+- **The 59½ answer is a month.** `halfMonth()` returns a month index and the UI
+  prints "Feb 2030". Printing a day would be inventing one.
+- **In that month itself the badge says "59½ this month", not "59½ ✓"**, and
+  both the badge tooltip and the signal detail say the day is not on file and to
+  confirm it on the call. A green tick in the one month where eligibility turns
+  on an unknown day would be the app asserting something it does not know.
+
+### Two smaller things the record settled
+
+A **married name** is the same person. The surname test looked only at the
+primary name, so a record filed under a maiden name read as a wrong number and
+the lead was flagged undialable. Aliases now count, and the check reports which
+alias matched.
+
+A **different employer** on the record is surfaced rather than quietly shown
+beside the list's version. Which of the two is current decides whether there is
+a plan to roll over at all, so it is a question for a person, not a field to
+overwrite.
+
+### Closing the loop instead of guessing again
+
+None of the above was written against a live response — there is no key in this
+environment and the egress proxy does not reach the API. Given §12's history
+that is the exact condition under which this repository has been wrong five
+times, so `/api/wp-debug` now returns a **field census**: every path in the
+response, its type, and a truncated sample, plus what `_person_facts()` made of
+it. "Does my key return a date of birth" is now one line to read instead of four
+thousand characters of JSON.
+
+The readers are written to find the field under any of its plausible names and
+to stay silent otherwise, so the census is confirmation rather than the thing
+that makes the code work — but it is what turns the next surprise into a
+five-minute fix rather than a sixth entry in this section.

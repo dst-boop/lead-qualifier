@@ -1152,6 +1152,15 @@ def _phone_owner(payload, want: str) -> tuple:
 
 
 def _phone_list(person: dict) -> list:
+    """Every line on the record, with what the record says about each.
+
+    The carrier, the prepaid flag, the do-not-call flag and the spam label all
+    came back in the same response as the line type; the app read the type and
+    dropped the rest, and a comment in verify_phone asserted the carrier was
+    "not offered by this API". Whether it is offered depends on the account,
+    so it is read where present and left empty where absent, which is a fact
+    the user can see rather than an assertion in a comment they cannot.
+    """
     out = []
     for p in person.get("phones") or []:
         if not isinstance(p, dict):
@@ -1160,12 +1169,298 @@ def _phone_list(person: dict) -> list:
         if num:
             out.append({"number": num,
                         "type": _first_str(p, "type", "line_type", "phone_type"),
-                        "score": p.get("score")})
+                        "score": p.get("score"),
+                        "carrier": _first_str(p, "carrier", "carrier_name",
+                                              "company", "provider"),
+                        "prepaid": _flag(p, "is_prepaid", "prepaid"),
+                        "dnc": _flag(p, "do_not_call", "is_do_not_call", "dnc"),
+                        "valid": _flag(p, "is_valid", "valid"),
+                        "spam": _spam(p)})
     return out
 
 
 def _mobiles(person: dict) -> list:
     return [p["number"] for p in _phone_list(person) if "mobile" in p["type"].lower()]
+
+
+# ---------------------------------------------------------------------------
+# Reading the record we already paid for
+#
+# A reverse-phone lookup on this API is a person search — GET /v2/person?phone=
+# — so it comes back as a full person record, the same one a name search
+# returns. Until now the app read three fields off it (the owner's name, the
+# matching line's type, the address) and threw the rest away, then charged a
+# second lookup when the user pressed Enrich to fetch the same record again.
+#
+# The consumer site shows what is in that record: month and year of birth,
+# other names, the carrier and spam status of each line, several typed email
+# addresses, employer and title, and an address history. All of it arrives in
+# the response the app was already receiving.
+#
+# Every reader below is optional and additive. WhitePages returns what it
+# holds and the Pro and Trestle dialects name things differently, so each one
+# takes a list of plausible keys and returns nothing when none is present.
+# Nothing here fills a gap with a guess: an absent date of birth stays absent
+# rather than becoming an estimate, because the entire value of a date of
+# birth is that it is not one.
+# ---------------------------------------------------------------------------
+
+MONTH_NUM = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"])}
+MONTH_NAME = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+DOB_KEYS = ("date_of_birth", "dob", "birth_date", "birthdate", "born")
+
+
+def _int_or_none(v):
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _month_num(v) -> int:
+    """A month as 1-12, from a number or a name. 0 when it is neither."""
+    n = _int_or_none(v)
+    if n and 1 <= n <= 12:
+        return n
+    s = str(v or "").strip().lower()[:3]
+    return MONTH_NUM.get(s, 0)
+
+
+def _parse_dob_string(s: str) -> tuple:
+    """(year, month, day) out of a written date. Zeros for the parts absent.
+
+    The site prints "Aug 1970" — a month and a year, no day — and the API
+    field follows suit, but not in one single format, so the shapes that
+    actually occur are each matched explicitly rather than handed to a
+    permissive date parser that would read "55-59" as a date.
+    """
+    s = (s or "").strip()
+    if not s:
+        return 0, 0, 0
+    m = re.match(r"^(\d{4})[-/](\d{1,2})(?:[-/](\d{1,2}))?$", s)      # ISO-ish
+    if m:
+        return int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)                 # m/d/Y
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        # Day and month are only distinguishable when one of them is over 12.
+        if a > 12 and b <= 12:
+            a, b = b, a
+        return int(m.group(3)), a, b
+    m = re.match(r"^(\d{1,2})/(\d{4})$", s)                           # m/Y
+    if m:
+        return int(m.group(2)), int(m.group(1)), 0
+    year = re.search(r"\b(1[89]\d\d|20\d\d)\b", s)
+    if not year:
+        return 0, 0, 0
+    name = re.search(r"[A-Za-z]{3,}", s)
+    mon = _month_num(name.group(0)) if name else 0
+    day = 0
+    if mon:
+        rest = s.replace(year.group(1), " ")
+        d = re.search(r"\b(\d{1,2})\b", rest)
+        if d:
+            day = int(d.group(1))
+    return int(year.group(1)), mon, day
+
+
+def _dob(person: dict) -> dict:
+    """Month and year of birth, when the record carries one.
+
+    This is the single most valuable field in the response. Every other age in
+    this app is either an integer as of some filing date or a guess from a
+    graduation year; a month and a year give the exact month a lead reaches
+    59 1/2, which is the whole question the campaign turns on.
+
+    An age_range like "55-59" is deliberately NOT read here. It is a bucket,
+    not a date, and the app already has a place for uncertain ages that says
+    so out loud.
+    """
+    raw = None
+    for k in DOB_KEYS:
+        v = person.get(k)
+        if v not in (None, "", [], {}):
+            raw = v
+            break
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        year = _int_or_none(raw.get("year")) or 0
+        month = _month_num(raw.get("month"))
+        day = _int_or_none(raw.get("day")) or 0
+    elif isinstance(raw, (str, int)):
+        year, month, day = _parse_dob_string(str(raw))
+    else:
+        return {}
+    this_year = time.gmtime().tm_year
+    if not (1900 <= year <= this_year):
+        return {}
+    if not 1 <= month <= 12:
+        month = 0
+    if not 1 <= day <= 31:
+        day = 0
+    out = {"year": year, "month": month, "day": day}
+    if month and day:
+        out["text"] = f"{MONTH_NAME[month]} {day}, {year}"
+    elif month:
+        out["text"] = f"{MONTH_NAME[month]} {year}"
+    else:
+        out["text"] = str(year)
+    return out
+
+
+def _flag(d: dict, *keys):
+    """True/False from whichever key is present, None when none of them is.
+
+    None and False are different answers here — "this API did not tell us
+    whether the line is on the do-not-call list" must not read as "it is not".
+    """
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str) and v.strip().lower() in ("true", "yes", "y", "1"):
+            return True
+        if isinstance(v, str) and v.strip().lower() in ("false", "no", "n", "0"):
+            return False
+    return None
+
+
+def _spam(d: dict) -> str:
+    """Spam or risk label on a line, as the record words it.
+
+    Reported verbatim rather than thresholded into a yes/no, because the
+    scales differ between fields and a number invented here would look
+    looked-up.
+    """
+    for k in ("spam_risk", "spam_status", "risk_level", "reputation"):
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if isinstance(v, dict):
+            s = _first_str(v, "level", "risk", "status", "label")
+            if s:
+                return s
+    for k in ("spam_score", "risk_score"):
+        v = d.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return str(v)
+    v = _flag(d, "is_spam", "spam")
+    return "spam" if v is True else ""
+
+
+def _aliases(person: dict) -> list:
+    """Other names on the record — married, maiden, misspelt.
+
+    Worth having for its own sake: an email to a name the lead no longer uses
+    is a worse opening than no email, and a maiden name explains a household
+    record that otherwise looks like a stranger's.
+    """
+    out = []
+    for key in ("aliases", "akas", "also_known_as", "other_names", "names"):
+        v = person.get(key)
+        if not isinstance(v, list):
+            continue
+        for a in v:
+            s = a.strip() if isinstance(a, str) else (
+                _first_str(a, "name", "full_name") if isinstance(a, dict) else "")
+            if s and s not in out:
+                out.append(s)
+    return out[:8]
+
+
+def _email_list(person: dict) -> list:
+    """Every email on the record, with what the record says about each.
+
+    The type is the point. A professional address at the employer confirms the
+    employer; a personal one is the address a 59-year-old actually reads, and
+    a "recently used" flag says which of four old ones is live. Flattening
+    them to a list of strings, which is what the app did, throws away the only
+    thing that distinguishes them.
+    """
+    out = []
+    for e in person.get("emails") or []:
+        if isinstance(e, str) and e.strip():
+            out.append({"email": e.strip(), "type": "", "recent": None, "valid": None})
+            continue
+        if not isinstance(e, dict):
+            continue
+        addr = _first_str(e, "email", "email_address", "address")
+        if not addr:
+            continue
+        out.append({
+            "email": addr,
+            "type": _first_str(e, "type", "email_type", "category").lower(),
+            "recent": _flag(e, "is_recently_used", "recently_used", "is_recent"),
+            "valid": _flag(e, "is_valid", "valid", "is_deliverable"),
+        })
+    return out[:10]
+
+
+def _jobs(person: dict) -> list:
+    """Employer and title, when the record carries them.
+
+    Cross-checking rather than sourcing: the lead already has an employer from
+    the list it was built from, and a second source agreeing is worth showing.
+    A second source disagreeing is worth showing more.
+    """
+    out = []
+    title = _first_str(person, "job_title", "occupation", "title")
+    emp = _first_str(person, "company", "employer", "company_name", "organization")
+    if title or emp:
+        out.append({"title": title, "employer": emp})
+    for key in ("jobs", "employments", "job_history", "occupations", "work"):
+        v = person.get(key)
+        if not isinstance(v, list):
+            continue
+        for j in v:
+            if not isinstance(j, dict):
+                continue
+            t = _first_str(j, "title", "job_title", "position", "occupation")
+            c = _first_str(j, "company", "employer", "company_name", "organization")
+            if (t or c) and not any(x["title"] == t and x["employer"] == c for x in out):
+                out.append({"title": t, "employer": c})
+    return out[:4]
+
+
+def _person_facts(person: dict) -> dict:
+    """Everything useful in one person record.
+
+    Shared by Enrich and by Verify, because they receive the same record and
+    there is no reason the one that arrived first should be read less
+    thoroughly than the one that arrived second.
+    """
+    addr = _home_address(person)
+    phones = _phone_list(person)
+    emails = _email_list(person)
+    return {
+        "owner": _first_str(person, "name", "full_name"),
+        "aliases": _aliases(person),
+        "age": person.get("age"),
+        "dob": _dob(person),
+        "home_street": addr["street"],
+        "home_city": addr["city"],
+        "home_state": addr["state"],
+        "home_zip": addr["zip"],
+        "mobiles": [p["number"] for p in phones if "mobile" in p["type"].lower()],
+        "phone_records": phones,
+        "phones_total": _list_total(person, "phones"),
+        "emails": [e["email"] for e in emails],
+        "email_records": emails,
+        "jobs": _jobs(person),
+        "linkedin_url": _first_str(person, "linkedin_url"),
+        "properties": _property_addresses(person),
+        "properties_owned": _list_total(person, "owned_properties"),
+        "prior_places": _prior_places(person),
+        "addresses_total": _list_total(person, "historical_addresses")
+                           or _list_total(person, "addresses"),
+        "relatives": [_first_str(r, "name") for r in (person.get("relatives") or [])
+                      if isinstance(r, dict) and _first_str(r, "name")][:8],
+    }
 
 
 EMPTY_ADDR = {"street": "", "city": "", "state": "", "zip": ""}
@@ -1224,11 +1519,16 @@ def _list_total(person: dict, name: str) -> int:
 
 @app.post("/api/verify-phone")
 async def verify_phone(req: VerifyPhoneRequest, request: Request):
-    """Who a number belongs to, and whether it is a mobile.
+    """Who a number belongs to, and everything else that came back with it.
 
-    The Pro API answers a reverse-phone query with person records, so there is
-    no carrier or prepaid flag to report — the useful signals are the line type
-    on the matching phone entry and whether the owner is the lead.
+    The Pro API answers a reverse-phone query with a full person record, so
+    this call has always been buying far more than the three fields it read.
+    It now returns the record too, under "record", so pressing the phone check
+    fills the household panel at no extra cost and the Enrich button is a
+    second lookup only when the first one found nothing.
+
+    The name-match verdict is unchanged: it is what stops someone dialling a
+    stranger, and nothing added here should be able to weaken it.
     """
     await _active_token(request)
     want = _digits(req.phone)
@@ -1239,23 +1539,43 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
                 "owner": "", "name_match": None, "note": "no record found"}
 
     owner = _first_str(person, "name", "full_name")
+    facts = _person_facts(person)
+
+    # A married name is still the same person. The surname test used to look
+    # only at the primary name, so a record filed under a maiden name read as
+    # a wrong number and the lead was flagged undialable.
     name_match = None
-    if owner and req.last_name.strip():
-        name_match = req.last_name.strip().lower() in owner.lower()
+    last = req.last_name.strip().lower()
+    if last and (owner or facts["aliases"]):
+        name_match = (last in owner.lower()
+                      or any(last in a.lower() for a in facts["aliases"]))
 
     owner_addr = _home_address(person)
+    hit = hit or {}
+    # The record listing the number is itself the evidence it is real, unless
+    # the record explicitly says otherwise.
+    stated_valid = hit.get("valid")
     return {
-        "valid": True if hit else None,
-        "line_type": (hit or {}).get("type", ""),
-        "carrier": "",          # not offered by this API
-        "prepaid": None,
+        "valid": stated_valid if stated_valid is not None else True,
+        "line_type": hit.get("type", ""),
+        "carrier": hit.get("carrier", ""),
+        "prepaid": hit.get("prepaid"),
+        "dnc": hit.get("dnc"),
+        "spam": hit.get("spam", ""),
         "owner": owner,
         "name_match": name_match,
+        "matched_alias": next((a for a in facts["aliases"]
+                               if last and last in a.lower()
+                               and last not in owner.lower()), ""),
         "owner_city": owner_addr["city"],
         "owner_state": owner_addr["state"],
         "owner_street": owner_addr["street"],
         "owner_zip": owner_addr["zip"],
         "same_household": _same_household(owner_addr, req),
+        # Everything else the lookup already returned. Named "record" rather
+        # than "household" because the front end uses "household" for a
+        # different person living at the same address.
+        "record": facts,
     }
 
 
@@ -2081,12 +2401,50 @@ async def wp_debug(request: Request, phone: str = "", name: str = "", path: str 
     url = WHITEPAGES_BASE_URL + ("/" + path.lstrip("/") if path else _wp_path("phone"))
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
+    body = r.text
+    try:
+        parsed = r.json()
+    except ValueError:
+        parsed = None
     return {
         "url": str(r.url),
         "status": r.status_code,
         "key_len": len(WHITEPAGES_API_KEY),      # confirms a key is present, not its value
-        "body": r.text[:4000],
+        # Which fields THIS account's responses actually carry. Four parsers in
+        # this app were written from documentation and all four were wrong
+        # about the real data, so the question "does my key return a date of
+        # birth" deserves an answer that is one line long instead of four
+        # thousand characters of JSON to read by eye.
+        "fields": _key_census(parsed) if parsed is not None else [],
+        "read": _person_facts(_best_person(parsed)) if parsed is not None else {},
+        "body": body[:4000],
     }
+
+
+def _key_census(node, prefix: str = "", out=None, depth: int = 0) -> list:
+    """Every field path in a response, with its type and a short sample.
+
+    Lists are described by their first element rather than every element, so
+    a hundred-address record still summarises in a screenful. Samples are
+    truncated: this is for identifying the shape, and the untouched body is
+    right below it for anyone who wants the values.
+    """
+    out = [] if out is None else out
+    if depth > 5 or len(out) > 300:
+        return out
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _key_census(v, f"{prefix}.{k}" if prefix else str(k), out, depth + 1)
+    elif isinstance(node, list):
+        out.append(f"{prefix}[] — {len(node)} item(s)")
+        if node:
+            _key_census(node[0], f"{prefix}[0]", out, depth + 1)
+    elif node is None:
+        out.append(f"{prefix} = null")
+    else:
+        s = str(node)
+        out.append(f"{prefix} = {s[:60]}" + ("…" if len(s) > 60 else ""))
+    return out
 
 
 class EnrichRequest(BaseModel):
@@ -2178,35 +2536,21 @@ async def enrich(req: EnrichRequest, request: Request):
                 owner_type = owner_type or "entity"
             co_owners = [n for n in names + biz if n]
 
-    return {
+    # Everything the record carries, read once and shared with the phone check
+    # so the two buttons cannot disagree about the same person. The deeds are
+    # the part worth reading twice: each address is a property to value, and a
+    # second one says more about net worth than any title ever will.
+    out = _person_facts(person)
+    out.update({
         "found": True,
         "matched_by": matched_by,
         "match_score": person.get("match_score"),
-        "owner": _first_str(person, "name", "full_name"),
-        "age": person.get("age"),
-        "dob": _first_str(person, "date_of_birth"),
-        "home_street": addr["street"],
-        "home_city": addr["city"],
-        "home_state": addr["state"],
-        "home_zip": addr["zip"],
-        "mobiles": mobiles,
         "mobile_count": len(mobiles),
-        "phones_total": _list_total(person, "phones"),
-        "properties_owned": _list_total(person, "owned_properties"),
         "owns_home": owns_home,
         "owner_type": owner_type,
         "co_owners": co_owners,
-        "linkedin_url": _first_str(person, "linkedin_url"),
-        "emails": [_first_str(e, "email") for e in (person.get("emails") or [])
-                   if isinstance(e, dict) and _first_str(e, "email")],
-        # Already in the response and already paid for. The deeds are the
-        # useful part: each address is a property to value, and a second one
-        # says more about net worth than any title ever will.
-        "properties": _property_addresses(person),
-        "prior_places": _prior_places(person),
-        "relatives": [_first_str(r, "name") for r in (person.get("relatives") or [])
-                      if isinstance(r, dict) and _first_str(r, "name")][:8],
-    }
+    })
+    return out
 
 
 def _property_addresses(person: dict) -> list:
