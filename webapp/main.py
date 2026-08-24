@@ -516,14 +516,31 @@ async def google_login(request: Request):
                    "GOOGLE_CLIENT_SECRET (see SETUP-google.md).",
         )
     state = secrets.token_urlsafe(24)
-    request.state.session["g_state"] = state
+    session = request.state.session
+    session["g_state"] = state
+    # Google issues a refresh token only on a grant that shows the consent
+    # screen. Asking for consent every time guarantees one — and makes the user
+    # approve Drive, Calendar and Gmail on every single sign-in, which is what
+    # this used to do. They read the same screen so often it stops being a
+    # decision, which is the opposite of what a consent screen is for.
+    #
+    # So consent is asked for once. If the grant comes back without a refresh
+    # token and we do not already hold one, the callback sends them round once
+    # more with force=1, and only that trip shows the screen.
+    force = request.query_params.get("force") == "1"
+    if force:
+        session["g_forced"] = True      # so the callback cannot bounce twice
+    have_refresh = bool((session.get("google") or {}).get("refresh_token"))
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": BASE_URL + "/auth/google/callback",
         "response_type": "code",
         "scope": GOOGLE_SCOPES,
         "access_type": "offline",   # refresh token, so sign-in survives the hour
-        "prompt": "consent",
+        # select_account still lets someone switch identity — the thing a
+        # sign-in button is actually for — without re-approving every scope.
+        "prompt": "consent" if (force or not have_refresh) else "select_account",
+        "include_granted_scopes": "true",
         "state": state,
     }
     return RedirectResponse(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
@@ -534,6 +551,9 @@ async def google_callback(request: Request):
     session = request.state.session
     if request.query_params.get("state") != session.pop("g_state", None):
         return RedirectResponse("/")
+    # Guard against a loop: if the forced trip also comes back without a
+    # refresh token, accept the hour-long session rather than bouncing forever.
+    already_forced = session.pop("g_forced", False)
     code = request.query_params.get("code")
     if not code:
         return RedirectResponse("/")
@@ -548,12 +568,23 @@ async def google_callback(request: Request):
     if r.status_code != 200:
         raise HTTPException(status_code=400, detail=f"Google sign-in failed: {r.text[:200]}")
     tok = r.json()
+    # A re-authorisation returns no refresh token, because the existing one is
+    # still valid. Writing tok.get("refresh_token") straight in would replace a
+    # working token with None and silently end the session an hour later — a
+    # bug that could not bite while consent was forced on every sign-in, and
+    # would have started biting the moment it stopped.
+    keep = (session.get("google") or {}).get("refresh_token")
+    refresh = tok.get("refresh_token") or keep
     session["google"] = {
         "access_token": tok["access_token"],
-        "refresh_token": tok.get("refresh_token"),
+        "refresh_token": refresh,
         "expires_at": time.time() + tok.get("expires_in", 3600) - 60,
     }
     session["provider"] = "google"
+    # No refresh token and none on file: this grant cannot outlive the hour.
+    # Ask for consent exactly once, and only here, where we know it is needed.
+    if not refresh and not already_forced:
+        return RedirectResponse("/auth/google/login?force=1")
     return RedirectResponse("/")
 
 

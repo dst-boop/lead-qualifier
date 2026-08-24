@@ -112,6 +112,9 @@
   .toolbar input[type=search]{flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--line);border-radius:4px;font-size:.88rem;background:var(--panel)}
   .toolbar select{padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--panel);font-size:.85rem;color:var(--ink)}
   .toggle{display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--ink-soft);cursor:pointer;user-select:none}
+  .agebox{display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--ink-soft);user-select:none}
+  .agebox input{width:62px;padding:5px 7px}
+  .agebox span{color:var(--ink-faint)}
 
   /* ---------- Table ---------- */
   .tablewrap{padding:0 22px 30px;overflow-x:auto}
@@ -425,7 +428,14 @@
     <option value="name">Sort: Name A&ndash;Z</option>
     <option value="state">Sort: State</option>
     <option value="updated">Sort: Recently worked</option>
+    <option value="age">Sort: Age (oldest first)</option>
+    <option value="ageAsc">Sort: Age (youngest first)</option>
   </select>
+  <label class="agebox" title="Age on file. A lead with no age is not in a range &mdash; the count below the table says how many were set aside.">Age
+    <input type="number" id="fAgeMin" min="18" max="100" step="1" placeholder="min">
+    <span>&ndash;</span>
+    <input type="number" id="fAgeMax" min="18" max="100" step="1" placeholder="max">
+  </label>
   <label class="toggle"><input type="checkbox" id="fEmailFirst"> Email-first (DNC) only</label>
   <label class="toggle"><input type="checkbox" id="fSellable"> 59&frac12;+ only</label>
   <label class="toggle"><input type="checkbox" id="fDue"> Callbacks due</label>
@@ -2058,6 +2068,17 @@ document.addEventListener('DOMContentLoaded',()=>{const b=document.getElementByI
 /* =============== rendering =============== */
 let filterTier='',expanded=null;
 const esc=s=>(''+(s??'')).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const AGE_SET_ASIDE={n:0};
+/* A bound from one of the age boxes, or null when it is empty or nonsense.
+   Deliberately null rather than 0: "no minimum" and "minimum zero" are the
+   same result here but not the same statement. */
+function ageBound(id){
+  const el=document.getElementById(id);
+  if(!el||!el.value.trim())return null;
+  const v=parseInt(el.value,10);
+  return (v>=0&&v<=120)?v:null;
+}
+function ageFilterOn(){return ageBound('fAgeMin')!==null||ageBound('fAgeMax')!==null;}
 function filtered(){
   const q=document.getElementById('q').value.trim().toLowerCase();
   const st=document.getElementById('fStatus').value;
@@ -2065,7 +2086,19 @@ function filtered(){
   const sf=(document.getElementById('fSellable')||{}).checked;
   const df=(document.getElementById('fDue')||{}).checked;
   const il=(document.getElementById('fIntl')||{}).checked;
+  const aMin=ageBound('fAgeMin'), aMax=ageBound('fAgeMax');
+  // A lead with no age does not fall in a range. Dropping them silently would
+  // hide the leads most worth enriching, so they are counted and reported
+  // under the table rather than just disappearing.
+  AGE_SET_ASIDE.n=0;
+  const inAgeRange=L=>{
+    if(aMin===null&&aMax===null)return true;
+    const a=leadAgeAny(L);
+    if(!(a>0)){AGE_SET_ASIDE.n++;return false;}
+    return (aMin===null||a>=aMin)&&(aMax===null||a<=aMax);
+  };
   let out=state.leads.filter(L=>
+    inAgeRange(L)&&
     (!filterTier||L.tier===filterTier)&&
     (!st||L.status===st)&&
     (!ef||truthy(L.mobileDnc))&&
@@ -2079,6 +2112,10 @@ function filtered(){
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
     :s==='state'?(a.state||'').localeCompare(b.state||'')
     :s==='updated'?b.updatedAt-a.updatedAt
+    // Unknown ages sort last either way: they are not old and they are not
+    // young, and putting them at one end would read as an answer.
+    :s==='age'?((leadAgeAny(b)||-1)-(leadAgeAny(a)||-1))
+    :s==='ageAsc'?((leadAgeAny(a)||999)-(leadAgeAny(b)||999))
     // The default sort answers "who do I call now", in three steps.
     // A promise beats a score: someone you told you would ring back today
     // outranks a stranger who happens to score higher.
@@ -2217,7 +2254,7 @@ function render(){
       <td><div class="act">
         ${L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady())?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
         ${(canVerify(L)&&!L.pv)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
-        ${(canVerify(L)&&L.pv&&!L.hd)?`<button class="abtn" onclick="verifyLead('${L.id}',true)" title="Checked before the app read the whole record. Re-checking pulls their date of birth, other names, every line and every email &mdash; the same lookup, read properly. (1 lookup)">&#128222;&#43;</button>`:''}
+        ${(canVerify(L)&&L.pv&&!fullyRead(L))?`<button class="abtn" onclick="verifyLead('${L.id}',true)" title="Checked before the app read the whole record. Re-checking pulls their date of birth, other names, every line and every email &mdash; the same lookup, read properly. (1 lookup)">&#128222;&#43;</button>`:''}
         ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: confirmed age, home address, mobile numbers, properties owned (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
@@ -2228,8 +2265,10 @@ function render(){
   }).join('');
   const more=all.length-list.length;
   const note=document.getElementById('rowCap');
-  if(note)note.innerHTML=more>0
-    ?`Showing the top <strong>${list.length}</strong> of ${all.length} matching leads &mdash; search or filter to reach the rest. Export includes all ${all.length}.`:'';
+  const aside=(ageFilterOn()&&AGE_SET_ASIDE.n)
+    ?` <strong>${AGE_SET_ASIDE.n}</strong> lead${AGE_SET_ASIDE.n>1?'s have':' has'} no age on file and ${AGE_SET_ASIDE.n>1?'are':'is'} not in this range &mdash; enrich ${AGE_SET_ASIDE.n>1?'them':'it'} to place ${AGE_SET_ASIDE.n>1?'them':'it'}.`:'';
+  if(note)note.innerHTML=(more>0
+    ?`Showing the top <strong>${list.length}</strong> of ${all.length} matching leads &mdash; search or filter to reach the rest. Export includes all ${all.length}.`:'')+aside;
   renderBlocked();
   renderStats();
 }
@@ -2264,7 +2303,7 @@ function detailRow(L){
       ${L.hd.owner?`<div class="hint" style="margin-top:3px">Record: ${esc(L.hd.owner)}${L.hd.matchedBy?' — matched on '+esc(L.hd.matchedBy)+(L.hd.matchedBy==='name'?' only, confirm it is the right person':''):''}${L.hd.matchScore?' ('+L.hd.matchScore+'/100)':''}</div>`:''}
       ${L.hd.rejected?`<div class="hint" style="margin-top:3px;color:var(--tierX)">No record attached — ${esc(L.hd.rejected)}</div>`:''}`:''}
       ${(L.pv&&canVerify(L))?`<div style="margin-top:8px"><button class="mbtn" onclick="verifyLead('${L.id}',true)">Re-check this number</button>
-      <span class="hint" style="margin-left:6px">${L.hd?'Spends one lookup.':'Checked before the app read the whole record &mdash; re-checking pulls the rest of it.'}</span></div>`:''}
+      <span class="hint" style="margin-left:6px">${fullyRead(L)?'Spends one lookup.':'Checked before the app read the whole record &mdash; re-checking pulls the rest of it.'}</span></div>`:''}
       ${(L.pv&&L.pv.household)?`<h4 style="margin-top:12px">Household member</h4>
       <p class="hint">${esc(L.pv.household.name)} holds ${esc(L.pv.household.phone)} at this address — likely a spouse, and often the other half of a retirement decision.</p>
       <button class="mbtn" style="margin-top:4px" onclick="addHousehold('${L.id}')">Add ${esc(L.pv.household.name)} as a lead</button>`:''}
@@ -2926,7 +2965,7 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
-['q','fStatus','fSort','fEmailFirst','fSellable','fDue','fIntl'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+['q','fStatus','fSort','fEmailFirst','fSellable','fDue','fIntl','fAgeMin','fAgeMax'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
 /* ---- named lists ----
    An advisor runs more than one campaign at a time and the lists should not
@@ -3090,7 +3129,11 @@ function renderSignals(d){
 window.focusLead=id=>{
   const L=byId(id);if(!L)return;
   document.getElementById('q').value=((L.firstName||'')+' '+(L.lastName||'')).trim();
-  ['fSellable','fDue','fEmailFirst'].forEach(k=>{const el=document.getElementById(k);if(el)el.checked=false;});
+  ['fSellable','fDue','fEmailFirst','fIntl'].forEach(k=>{const el=document.getElementById(k);if(el)el.checked=false;});
+  // The age range has to go too. Jumping to a lead from a signal and landing
+  // on an empty table because they fall outside a range set an hour ago reads
+  // as a broken link.
+  ['fAgeMin','fAgeMax'].forEach(k=>{const el=document.getElementById(k);if(el)el.value='';});
   document.getElementById('fStatus').value='';
   filterTier='';expanded=id;render();
   document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
@@ -3595,10 +3638,20 @@ function bestEmail(recs,plain){
    supplied is overwritten by a third-party record; the record's version of a
    field the lead already has is visible in the panel instead, where a person
    can judge which is right. */
+const RECORD_READER=2;   // bump when the reader learns to keep more
+/* Whether this lead's household record was read by the current reader.
+
+   The first version of this asked "does L.hd exist", which a lead enriched
+   under the old code also answers yes to — while holding none of the fields
+   that made the change worth having. That is exactly the lead most in need of
+   a re-check, and it was the only one the button hid from. Reported as: the
+   button didn't reappear. */
+function fullyRead(L){return !!(L.hd&&(L.hd.read||0)>=RECORD_READER);}
 function applyRecord(L,r,matchedBy){
   const prev=L.hd||{};
   const keep=(v,p)=>v===undefined?(p===undefined?null:p):v;
-  L.hd={matchedBy:matchedBy||prev.matchedBy||'',
+  L.hd={read:RECORD_READER,
+        matchedBy:matchedBy||prev.matchedBy||'',
         matchScore:(r.match_score!==undefined?r.match_score:prev.matchScore)||null,
         owner:r.owner||'',aliases:r.aliases||[],
         age:r.age||null,dob:r.dob||null,
