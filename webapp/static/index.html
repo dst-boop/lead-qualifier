@@ -143,6 +143,8 @@
   .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;background:var(--tierX-bg);color:var(--tierX);white-space:nowrap}
   .badge.camp-scs{background:#e8eef7;color:#33507a}
   .badge.intl{background:#efe7f5;color:#5a3a75;cursor:help}
+  .badge.sec{background:#e8f0e9;color:#2c5d3f;cursor:help}
+  .badge.fecret{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .badge.planchip{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
@@ -302,6 +304,7 @@
       <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
       <div class="menu" id="moreMenu" hidden>
         <button id="btnCoverage">Data coverage</button>
+        <button id="btnSweep" onclick="sweepFree()">Sweep public records (free)</button>
         <button id="btnSettings">ICP settings</button>
         <button id="btnTemplate">CSV template &amp; research prompt</button>
         <button id="btnShareList">Share this list&hellip;</button>
@@ -2249,7 +2252,7 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${intlBadge(L)}${
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${intlBadge(L)}${secBadge(L)}${fecRetBadge(L)}${
       cbDue?`<div class="cbline ${cbDue}" title="${esc(L.callbackNote||'')}">&#9200; ${esc(cbLabel(L))}${L.callbackNote?' · '+esc(L.callbackNote):''}</div>`:''}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
@@ -3836,22 +3839,100 @@ function pubSection(L){
   bits.push(`<p class="hint" style="margin-top:4px">Check these yourself: ${lk.fec?`<a target="_blank" rel="noopener" href="${esc(lk.fec)}">FEC donor search</a>`:''}${lk.fec&&lk.edgar?' &middot; ':''}${lk.edgar?`<a target="_blank" rel="noopener" href="${esc(lk.edgar)}">EDGAR insider search</a>`:''}</p>`);
   return bits.join('');
 }
+/* One store for both the per-lead button and the sweep, so the two cannot
+   disagree about what a result means. Logs activity only when something was
+   found: a sweep writing "nothing on record" into 300 activity logs would
+   bury the entries that matter. */
+function storePub(L,d,quiet){
+  L.pub={sources:d.sources||{},donations:d.donations||{},filings:d.filings||[],links:d.links||{},at:Date.now()};
+  L.updatedAt=Date.now();
+  const dn=L.pub.donations,parts=[];
+  if(dn.count)parts.push(dn.count+' donation'+(dn.count>1?'s':'')+' $'+(dn.total||0).toLocaleString()+((dn.places&&dn.places[0])?' from '+dn.places[0].value:''));
+  if(dn.says_retired)parts.push('told the FEC they are retired');
+  if(L.pub.filings.length)parts.push(L.pub.filings.length+' insider filing'+(L.pub.filings.length>1?'s':''));
+  if(parts.length||!quiet)logAct(L.id,'pub',(parts.join(' \u00b7 ')||'nothing on record')+' [free \u2014 no lookups spent]');
+  return parts;
+}
+function secBadge(L){
+  const f=(L.pub&&L.pub.filings)||[];
+  if(!f.length)return '';
+  const co=f[0].company||'';
+  return ` <span class="badge sec" title="SEC insider filings on record \u2014 an officer, director or 10% owner. Latest: Form ${esc(f[0].form)} ${esc(f[0].date)}${co?' \u00b7 '+esc(co):''}. Equity compensation is its own planning conversation.">SEC</span>`;
+}
+function fecRetBadge(L){
+  const d=L.pub&&L.pub.donations;
+  if(!d||!d.says_retired)return '';
+  return ` <span class="badge fecret" title="Told the FEC they are retired \u2014 self-reported on a federal form, dated. The rollover event may have already happened.">RETIRED\u00b7FEC</span>`;
+}
 window.freeLookup=async id=>{
   const L=byId(id);if(!L||!L.lastName)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
   toast('Searching public records for '+(L.firstName||'')+' '+L.lastName+'\u2026 (free)');
   try{
     const d=await api('/api/free-enrich',{first_name:L.firstName||'',last_name:L.lastName||'',employer:L.employer||''});
-    L.pub={sources:d.sources||{},donations:d.donations||{},filings:d.filings||[],links:d.links||{},at:Date.now()};
-    L.updatedAt=Date.now();
-    const dn=L.pub.donations,parts=[];
-    if(dn.count)parts.push(dn.count+' donation'+(dn.count>1?'s':'')+' $'+(dn.total||0).toLocaleString()+((dn.places&&dn.places[0])?' from '+dn.places[0].value:''));
-    if(dn.says_retired)parts.push('told the FEC they are retired');
-    if(L.pub.filings.length)parts.push(L.pub.filings.length+' insider filing'+(L.pub.filings.length>1?'s':''));
-    logAct(id,'pub',(parts.join(' \u00b7 ')||'nothing on record')+' [free \u2014 no lookups spent]');
+    const parts=storePub(L,d,false);
     save();render();
     toast(parts.length?('Found: '+parts.join(' \u00b7 ')):'Nothing on the public record under that name.');
   }catch(e){toast('Public-records search failed: '+e.message);}
+};
+/* The whole list, gated on being free.
+
+   The FEC and SEC searches cost nothing, so scale changes nothing about the
+   money — what it changes is honesty about pace and coverage. The shared
+   demo FEC key allows 40 lookups an hour across everyone using it, so on a
+   big list the donations half will start reporting rate limits mid-sweep;
+   each lead records which sources actually ran, and the summary counts the
+   gaps instead of letting a rate limit read as "no donations".
+
+   Deliberately NOT swept: WhitePages (spends credits) and the proxy-age
+   reader (spends Anthropic tokens). The sweep's summary says which leads the
+   proxy-age button is now worth pressing on, which is the free way to aim a
+   paid lookup. */
+let SWEEP=null;
+window.sweepFree=async()=>{
+  if(SWEEP){SWEEP.stop=true;return;}
+  if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
+  const todo=state.leads.filter(L=>L.lastName&&!L.pub);
+  const done=state.leads.filter(L=>L.lastName&&L.pub).length;
+  if(!todo.length){toast(done?'Every lead has already been swept \u2014 press \u2696 on one to re-check it.':'No leads with names to sweep.');return;}
+  const demo=!(ME.features&&ME.features.fec_personal_key);
+  if(!await appConfirm(
+    `Search the public record for ${todo.length} lead${todo.length>1?'s':''}? Free \u2014 no credits, no lookups spent.`+
+    (done?` ${done} already swept are skipped; press \u2696 on one to re-check it.`:'')+
+    (demo&&todo.length>40?` Note: the shared demo FEC key allows about 40 donation lookups an hour, so most of the donations half will come back rate-limited \u2014 the SEC half is unaffected. A free personal FEC_API_KEY (api.open.fec.gov/developers) lifts that to 1,000.`:''),
+    'Sweep the list'))return;
+  SWEEP={stop:false,done:0,total:todo.length};
+  const btn=document.getElementById('btnSweep');
+  const found={sec:0,donors:0,retired:0,fecMissed:0,errors:0};
+  const CONC=3;let idx=0;
+  const label=()=>{if(btn)btn.textContent=`Sweeping ${SWEEP.done}/${SWEEP.total} \u2014 click to stop`;};
+  label();
+  const worker=async()=>{
+    while(!SWEEP.stop&&idx<todo.length){
+      const L=todo[idx++];
+      try{
+        const d=await api('/api/free-enrich',{first_name:L.firstName||'',last_name:L.lastName||'',employer:L.employer||''});
+        storePub(L,d,true);
+        if(L.pub.filings.length)found.sec++;
+        if(L.pub.donations.count)found.donors++;
+        if(L.pub.donations.says_retired)found.retired++;
+        if(L.pub.sources.fec&&L.pub.sources.fec.ran===false)found.fecMissed++;
+      }catch(e){found.errors++;}
+      SWEEP.done++;label();
+      if(SWEEP.done%25===0){save();render();}
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(CONC,todo.length)},worker));
+  const stopped=SWEEP.stop;SWEEP=null;
+  if(btn)btn.textContent='Sweep public records (free)';
+  save();render();
+  const bits=[];
+  if(found.sec)bits.push(found.sec+' SEC insider'+(found.sec>1?'s':'')+' \u2014 the \ud83c\udfdb age lookup will work on these');
+  if(found.retired)bits.push(found.retired+' told the FEC they are retired');
+  if(found.donors)bits.push(found.donors+' donor'+(found.donors>1?'s':'')+' with home city on record');
+  if(found.fecMissed)bits.push(found.fecMissed+' donation lookups did not run (rate limit) \u2014 sweep again later to fill them');
+  if(found.errors)bits.push(found.errors+' failed');
+  toast((stopped?'Sweep stopped. ':'Sweep done. ')+(bits.join(' \u00b7 ')||'Nothing on the public record for this list.'));
 };
 /* The Knoxville problem: the user KNOWS where a lead lives — the lead row
    just holds the employer's city, so the lookup searched the wrong place and
