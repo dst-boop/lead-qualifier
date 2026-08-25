@@ -889,6 +889,9 @@ async def me(request: Request):
         # Free public-record lookups. FEC ships with the demo key, so the only
         # half that can be dark is the SEC one, and it says so per-source.
         "free_sources": True,
+        # So the sweep can be honest about pace before it starts: the shared
+        # demo key allows 40 FEC lookups an hour across everyone using it.
+        "fec_personal_key": FEC_API_KEY != "DEMO_KEY",
         "zi_mcp": bool(ANTHROPIC_API_KEY),
         "opportunities": bool(WARN_FEEDS.strip()),
         "drive": False,          # set per-session below when Google is signed in

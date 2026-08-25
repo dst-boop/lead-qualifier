@@ -19,6 +19,26 @@ employer stock, which is its own planning conversation.
 Every block in the panel ends with a link to the same search on the
 government's own site, so each number can be checked by hand.
 
+## The whole list at once
+
+**More → Sweep public records (free)** runs the ⚖ search across every lead
+that has a surname and hasn't been swept yet. It asks first, states the count,
+and skips anything already swept (press ⚖ on a lead to re-check just it).
+Leads with findings get row badges — **SEC** for insider filings,
+**RETIRED·FEC** for a self-reported retirement — and the closing summary
+counts what was found, including which leads the 🏛 proxy-age lookup is now
+worth pressing on.
+
+What the sweep will never do is spend money: WhitePages lookups and the
+proxy-age reader are excluded by design. It aims the paid buttons; it does
+not press them.
+
+On the demo FEC key a large list will out-run the shared 40-lookups-an-hour
+limit partway through. Each lead records which sources actually ran, the
+summary counts the gaps ("N donation lookups did not run"), and sweeping
+again later fills only those gaps — a rate limit is never allowed to read as
+"no donations".
+
 ## The restriction that matters
 
 > Federal law — 52 U.S.C. §30111(a)(4) — forbids the sale or **use** of FEC
