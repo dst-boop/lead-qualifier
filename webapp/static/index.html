@@ -3896,15 +3896,27 @@ window.freeLookup=async id=>{
    proxy-age button is now worth pressing on, which is the free way to aim a
    paid lookup. */
 let SWEEP=null;
+/* A lead swept while a source was down holds a verdict with a hole in it —
+   "fec: ran false" — and the hole is recorded, not silent. Incomplete leads
+   stay eligible, or the summary's promise that a later sweep fills the gaps
+   would be false: the first version skipped anything with a result attached,
+   which made every rate-limited gap permanent. */
+function pubIncomplete(L){
+  const s=(L.pub&&L.pub.sources)||{};
+  return !!L.pub&&((s.fec&&s.fec.ran===false)||(s.edgar&&s.edgar.ran===false));
+}
 window.sweepFree=async()=>{
   if(SWEEP){SWEEP.stop=true;return;}
   if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
-  const todo=state.leads.filter(L=>L.lastName&&!L.pub);
-  const done=state.leads.filter(L=>L.lastName&&L.pub).length;
+  const todo=state.leads.filter(L=>L.lastName&&(!L.pub||pubIncomplete(L)));
+  const gaps=todo.filter(pubIncomplete).length;
+  const done=state.leads.filter(L=>L.lastName&&L.pub&&!pubIncomplete(L)).length;
   if(!todo.length){toast(done?'Every lead has already been swept \u2014 press \u2696 on one to re-check it.':'No leads with names to sweep.');return;}
   const demo=!(ME.features&&ME.features.fec_personal_key);
   if(!await appConfirm(
-    `Search the public record for ${todo.length} lead${todo.length>1?'s':''}? Free \u2014 no credits, no lookups spent.`+
+    `Search the public record for ${todo.length} lead${todo.length>1?'s':''}?`+
+    (gaps?` (${gaps} of them to fill gaps a rate limit or outage left last time.)`:'')+
+    ` Free \u2014 no credits, no lookups spent.`+
     (done?` ${done} already swept are skipped; press \u2696 on one to re-check it.`:'')+
     (demo&&todo.length>40?` Note: the shared demo FEC key allows about 40 donation lookups an hour, so most of the donations half will come back rate-limited \u2014 the SEC half is unaffected. A free personal FEC_API_KEY (api.open.fec.gov/developers) lifts that to 1,000.`:''),
     'Sweep the list'))return;

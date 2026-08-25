@@ -2389,6 +2389,16 @@ async def _edgar_fetch(url: str):
 
 async def _edgar_get(url: str, as_json: bool = True):
     r = await _edgar_fetch(url)
+    # Seen live: the identical query answered 200 with full results, then 500
+    # with {"message": "Internal server error"} minutes later. EFTS throws
+    # transient 5xxs, and during a sweep each one would otherwise turn into a
+    # coverage gap on some lead. One retry, spaced by the same throttle.
+    if r.status_code >= 500:
+        r = await _edgar_fetch(url)
+    if r.status_code >= 500:
+        raise HTTPException(status_code=502,
+                            detail=f"SEC internal error ({r.status_code}) — transient, "
+                                   "try again shortly.")
     if r.status_code == 403:
         raise HTTPException(status_code=502,
                             detail="SEC returned 403 — usually a missing or rejected "

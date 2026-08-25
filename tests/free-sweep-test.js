@@ -22,8 +22,15 @@ const LEADS = [
   mk('b', 'Bravo'),                                  // plain donor
   mk('c', 'Charlie'),                                // nothing on record
   mk('d', 'Delta'),                                  // FEC rate-limited for this one
-  mk('e', 'Echo', { pub: { sources: {}, donations: {}, filings: [], links: {}, at: 1 } }), // already swept
-  mk('f', '')];                                      // no surname — nothing to search
+  mk('e', 'Echo', { pub: { sources: { fec: { ran: true }, edgar: { ran: true } },
+                           donations: {}, filings: [], links: {}, at: 1 } }), // swept, complete
+  mk('f', ''),                                       // no surname — nothing to search
+  // Swept while FEC was rate-limited: holds a result with a recorded hole.
+  // The first sweep version skipped it forever, which made "sweep again later
+  // to fill them" a false promise.
+  mk('g', 'Golf', { pub: { sources: { fec: { ran: false, reason: 'FEC rate limit hit' },
+                                      edgar: { ran: true } },
+                           donations: {}, filings: [], links: {}, at: 1 } })];
 
 const ANSWERS = {
   FAlpha: { sources: { fec: { ran: true }, edgar: { ran: true } },
@@ -44,7 +51,12 @@ const ANSWERS = {
     donations: {}, filings: [], links: {} },
   FDelta: { sources: { fec: { ran: false, reason: 'FEC rate limit hit' },
                        edgar: { ran: true } },
-    donations: {}, filings: [], links: {} } };
+    donations: {}, filings: [], links: {} },
+  FGolf: { sources: { fec: { ran: true }, edgar: { ran: true } },
+    donations: { count: 2, total: 700, employers: [], occupations: [],
+                 places: [{ value: 'Boise, ID', n: 2, last: '2025-01-01' }], streets: [],
+                 employer_match: null, says_retired: false },
+    filings: [], links: {} } };
 
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
@@ -90,9 +102,10 @@ const ANSWERS = {
   ck('it asks before starting', await p.evaluate(() =>
     document.getElementById('mConfirm').classList.contains('open')));
   const q = await p.evaluate(() => document.getElementById('cfMsg').textContent);
-  ck('  ...with the true count: 4, not 6', /4 leads/.test(q), q.slice(0, 60));
+  ck('  ...with the true count: 5 — four fresh plus the gap lead', /5 leads/.test(q), q.slice(0, 80));
+  ck('  ...naming the gap refill explicitly', /1 of them to fill gaps/.test(q), q);
   ck('  ...saying it is free', /no credits, no lookups spent/.test(q));
-  ck('  ...and that the swept lead is skipped', /1 already swept/.test(q), q);
+  ck('  ...and that the complete lead is skipped', /1 already swept/.test(q), q);
   await p.evaluate(() => cfDone(false));
   await p.waitForTimeout(300);
   ck('declining runs nothing', calls.length === 0, calls.length);
@@ -105,9 +118,9 @@ const ANSWERS = {
                           null, { timeout: 15000 });
   await p.waitForTimeout(400);
 
-  ck('exactly the four unswept, named leads were searched',
-     calls.sort().join() === 'FAlpha,FBravo,FCharlie,FDelta', calls.join());
-  ck('  ...the already-swept lead was not re-fetched', !calls.includes('FEcho'));
+  ck('the four unswept leads AND the gap lead were searched',
+     calls.sort().join() === 'FAlpha,FBravo,FCharlie,FDelta,FGolf', calls.join());
+  ck('  ...the complete lead was not re-fetched', !calls.includes('FEcho'));
   ck('  ...nor the lead with no surname', !calls.includes('Ff'));
   ck('  ...and no paid endpoint was touched', paid === 0, paid);
 
@@ -116,6 +129,7 @@ const ANSWERS = {
     return { aSec: by.a.pub.filings.length, aRet: by.a.pub.donations.says_retired,
              bDon: by.b.pub.donations.count, cEmpty: !by.c.pub.donations.count && by.c.pub.filings.length === 0,
              dFec: by.d.pub.sources.fec.ran, eAt: by.e.pub.at,
+             gFilled: by.g.pub.sources.fec.ran === true && by.g.pub.donations.count === 2,
              aLogged: by.a.activity.some(x => x.k === 'pub'),
              cLogged: by.c.activity.some(x => x.k === 'pub') };
   });
@@ -124,7 +138,8 @@ const ANSWERS = {
   ck('the donor result landed', after.bDon === 1);
   ck('an empty answer stays empty', after.cEmpty === true);
   ck('the rate-limited lead records that FEC did not run', after.dFec === false);
-  ck('the already-swept lead is untouched', after.eAt === 1, after.eAt);
+  ck('the complete lead is untouched', after.eAt === 1, after.eAt);
+  ck('the gap lead is filled: FEC now ran and the donations landed', after.gFilled === true);
   ck('a hit is logged in the activity', after.aLogged === true);
   ck('  ...but 300 "nothing found" entries are not written', after.cLogged === false);
 
@@ -148,14 +163,24 @@ const ANSWERS = {
   ck('the summary counts the officers', /1 SEC insider/.test(summary), summary);
   ck('  ...aiming the paid age lookup at them', /age lookup will work/.test(summary));
   ck('  ...counts who told the FEC they are retired', /1 told the FEC/.test(summary));
+  ck('  ...and the refilled gap lead counts among the donors', /3 donors/.test(summary), summary);
   ck('  ...and reports the rate-limited lookups as gaps, not as empties',
      /1 donation lookups did not run/.test(summary), summary);
 
   // --- running it again ------------------------------------------------------
   await p.evaluate(() => { sweepFree(); });
   await p.waitForTimeout(300);
+  const q2 = await p.evaluate(() => document.getElementById('cfMsg').textContent);
+  ck('a second sweep offers exactly the surviving gap — Delta — and nothing else',
+     /1 lead\?/.test(q2) && /1 of them to fill gaps/.test(q2), q2.slice(0, 90));
+  await p.evaluate(() => cfDone(false));
+  await p.waitForTimeout(200);
+  // Close Delta's gap by hand, and only then is the list truly done.
+  await p.evaluate(() => { state.leads.find(x => x.id === 'd').pub.sources.fec.ran = true; });
+  await p.evaluate(() => { sweepFree(); });
+  await p.waitForTimeout(300);
   const again = await p.evaluate(() => document.getElementById('mConfirm').classList.contains('open'));
-  ck('a second sweep has nothing to do and says so instead of asking',
+  ck('with every gap closed, a third sweep says there is nothing to do',
      !again && /already been swept/.test(await p.evaluate(() => document.getElementById('toast').textContent)),
      await p.evaluate(() => document.getElementById('toast').textContent));
 
