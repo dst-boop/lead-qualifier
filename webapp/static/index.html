@@ -1889,6 +1889,7 @@ async function ziSearch(path,body,method){
       ordinary browser.
    2. The connector in your Claude account, used when the app is running inside
       Claude. Nothing to save, but only available in that context. */
+function ziConnected(){return !!(window.ME&&ME.zi_connected);}
 function ziMcpReady(){return !!(window.ME&&ME.zi_mcp_connected);}
 
 async function callClaudeViaServer(prompt){
