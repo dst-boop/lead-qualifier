@@ -51,6 +51,17 @@ MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
 MS_TENANT_ID = os.environ.get("MS_TENANT_ID", "common")
 MS_AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 MS_SCOPES = ["User.Read", "Mail.Send", "Calendars.ReadWrite"]
+# The employer-mailbox scope set, learned from a working example. Magic List
+# connects to corporate tenants (Equitable's included — proven by a live
+# connection) with calendar scopes and no Mail.Send at all: creating an event
+# with attendees makes Exchange dispatch the invitation from the mailbox
+# itself, through the firm's normal transport — journaled like any other
+# outbound mail, no mail permission requested. Mail.Send is precisely the
+# scope a corporate tenant is most likely to refuse, so the calendar-only
+# footprint is what gets an employer account connected at all.
+# (Their example also requests Calendars.*.Shared; adding an attendee needs
+# only ReadWrite, so the narrower set is kept deliberately.)
+MS_CAL_SCOPES = ["User.Read", "Calendars.ReadWrite"]
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 # --- Money-in-motion sources (WARN notices, Form 5500) ---
@@ -439,6 +450,17 @@ def _ms_app(cache: Optional[msal.SerializableTokenCache] = None) -> msal.Confide
     )
 
 
+def _ms_mail_ok(session: dict) -> bool:
+    """Whether this Microsoft connection may send mail at all.
+
+    A calendar-only connection is a deliberate choice, not a failure: an
+    employer tenant that refuses Mail.Send will still approve calendar
+    scopes, and an invite created with attendees goes out from the mailbox
+    via Exchange itself — no mail permission involved.
+    """
+    return session.get("ms_mode", "full") != "calendar"
+
+
 def _ms_token(session: dict) -> Optional[str]:
     if not MS_CLIENT_ID:
         return None
@@ -447,7 +469,8 @@ def _ms_token(session: dict) -> Optional[str]:
     accounts = client.get_accounts()
     if not accounts:
         return None
-    result = client.acquire_token_silent(MS_SCOPES, account=accounts[0])
+    scopes = MS_CAL_SCOPES if not _ms_mail_ok(session) else MS_SCOPES
+    result = client.acquire_token_silent(scopes, account=accounts[0])
     _ms_save_cache(session, cache)
     if result and "access_token" in result:
         return result["access_token"]
@@ -463,10 +486,16 @@ async def ms_login(request: Request):
                    "MS_CLIENT_SECRET / MS_TENANT_ID (see SETUP-microsoft.md).",
         )
     cache = _ms_load_cache(request.state.session)
+    # mode=calendar is for an employer mailbox (an advisor's wirehouse or
+    # insurer account): invites only, no mail permission requested, because
+    # the narrow ask is what such tenants actually approve.
+    calendar_only = request.query_params.get("mode") == "calendar"
+    scopes = MS_CAL_SCOPES if calendar_only else MS_SCOPES
     flow = _ms_app(cache).initiate_auth_code_flow(
-        MS_SCOPES, redirect_uri=BASE_URL + "/auth/callback"
+        scopes, redirect_uri=BASE_URL + "/auth/callback"
     )
     request.state.session["ms_flow"] = flow
+    request.state.session["ms_mode"] = "calendar" if calendar_only else "full"
     return RedirectResponse(flow["auth_uri"])
 
 
@@ -861,10 +890,14 @@ async def _google_senders(session: dict) -> list[dict]:
         out.append({"id": "google:" + addr, "provider": "google", "address": addr,
                     "name": row.get("displayName") or "",
                     "primary": bool(row.get("isPrimary")),
-                    "kind": "primary" if row.get("isPrimary") else "alias"})
+                    "kind": "primary" if row.get("isPrimary") else "alias",
+                    # An alias can front an email, but an invite is owned by a
+                    # calendar and an alias does not have one.
+                    "mail": True, "calendar": bool(row.get("isPrimary"))})
     if primary and primary not in seen:
         out.insert(0, {"id": "google:" + primary, "provider": "google", "address": primary,
-                       "name": "", "primary": True, "kind": "primary"})
+                       "name": "", "primary": True, "kind": "primary",
+                       "mail": True, "calendar": True})
     return out
 
 
@@ -881,7 +914,11 @@ async def _ms_senders(session: dict) -> list[dict]:
     if not addr:
         return []
     return [{"id": "microsoft:" + addr, "provider": "microsoft", "address": addr,
-             "name": d.get("displayName") or "", "primary": True, "kind": "primary"}]
+             "name": d.get("displayName") or "", "primary": True, "kind": "primary",
+             # A calendar-only employer connection can invite but not mail;
+             # the client uses this to keep the address out of the email
+             # dialog rather than let a send fail at Graph.
+             "mail": _ms_mail_ok(session), "calendar": True}]
 
 
 async def _senders(request: Request) -> list[dict]:
@@ -999,6 +1036,13 @@ class EmailRequest(BaseModel):
 @app.post("/api/send-email")
 async def send_email(req: EmailRequest, request: Request):
     provider, token, from_addr = await _sender_token(request, req.sender)
+    if provider == "microsoft" and not _ms_mail_ok(request.state.session):
+        raise HTTPException(
+            status_code=400,
+            detail="This Microsoft account is connected for calendar invites only — "
+                   "its tenant was asked for no mail permission. Send the email from "
+                   "a Gmail address (an alias of this address works), or reconnect "
+                   "the account without calendar-only mode.")
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30) as cx:
         if provider == "google":
