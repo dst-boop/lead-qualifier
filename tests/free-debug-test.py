@@ -29,6 +29,7 @@ from fastapi import FastAPI, Response
 
 stub = FastAPI()
 MODE = {"efts": "ok", "fec": "ok"}
+COUNT = {"efts": 0}
 
 EFTS_OK = {"hits": {"total": {"value": 1}, "hits": [
     {"_source": {"display_names": ["Melter Janet K (CIK 0009999999)",
@@ -39,6 +40,11 @@ EFTS_OK = {"hits": {"total": {"value": 1}, "hits": [
 
 @stub.get("/LATEST/search-index")
 async def efts(q: str = "", forms: str = ""):
+    COUNT["efts"] += 1
+    # Seen live: identical query, 200 with results, then 500 minutes later.
+    if MODE["efts"] == "flaky" and COUNT["efts"] % 2 == 1:
+        return Response(status_code=500, content='{"message": "Internal server error"}',
+                        media_type="application/json")
     if MODE["efts"] == "403":
         return Response(status_code=403,
                         content="<html>Your Request Originates from an Undeclared "
@@ -125,6 +131,15 @@ ck("a good answer carries the census", any("display_names" in f for f in d.get("
 ck("  ...and the query is unquoted, because filings write names surname-first",
    "%22" not in d.get("url", "") and 'q=Janet+Melter' in d.get("url", ""), d.get("url"))
 ck("  ...and the parsed filings", d.get("read") and d["read"][0]["form"] == "4", d.get("read"))
+
+# --- a transient SEC 500 is retried, not recorded as a gap -------------------
+MODE["efts"] = "flaky"
+COUNT["efts"] = 0
+r = c.post("/api/free-enrich", json={"first_name": "Janet", "last_name": "Melter"})
+ck("one SEC hiccup does not cost the lead its EDGAR coverage",
+   r.json()["sources"]["edgar"]["ran"] is True, r.json()["sources"]["edgar"])
+ck("  ...because the request was retried once", COUNT["efts"] == 2, COUNT["efts"])
+MODE["efts"] = "ok"
 
 # --- the FEC half held to the same standard ----------------------------------
 MODE["fec"] = "403"

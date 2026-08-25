@@ -36,8 +36,12 @@ not press them.
 On the demo FEC key a large list will out-run the shared 40-lookups-an-hour
 limit partway through. Each lead records which sources actually ran, the
 summary counts the gaps ("N donation lookups did not run"), and sweeping
-again later fills only those gaps — a rate limit is never allowed to read as
-"no donations".
+again later re-checks exactly the leads with gaps — a rate limit is never
+allowed to read as "no donations", and a gap is never permanent.
+
+The SEC's search occasionally answers a one-off "Internal server error"; the
+app retries once before recording a gap, and a gap it does record is filled
+by the next sweep like any other.
 
 ## The restriction that matters
 
