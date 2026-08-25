@@ -1912,3 +1912,35 @@ The lesson §12 has been building toward, stated once: the census endpoint is
 what turned five past schema surprises from shipped bugs into this — a
 same-day diff between what was guessed and what is true, applied while the
 guess was still warm.
+
+## 28. The employer calendar, learned from a competitor's authorize URL
+
+Dan shared an analysis of Magic List's page source. The load-bearing line was
+its Microsoft authorize URL: multi-tenant `/common`, and a scope list with
+**no Mail.Send** — `offline_access openid Calendars.Read[.Shared]
+Calendars.ReadWrite[.Shared] User.Read`. And the connected-account card
+showed `daniel.treacy@equitable.com`, working.
+
+That is an empirical answer to a question this app could not answer from
+documentation: **does Equitable's tenant permit user-level consent for a
+third-party app?** Yes — for that scope set. The narrowness is not a
+limitation, it is the mechanism: Mail.Send is the scope corporate tenants
+refuse, and invites never needed it, because an event created with attendees
+is dispatched by Exchange itself, from the mailbox, through the firm's
+transport — journaled like any outbound mail. That also closes this
+document's open question about compliance capture of Graph-initiated mail.
+
+So `/auth/login?mode=calendar` requests `User.Read` + `Calendars.ReadWrite`
+and nothing else, the session records the mode, and the app is honest about
+the asymmetry it creates: the sender list marks the account "invites only",
+the email dialog does not offer it, and a mail attempt through the API is
+refused naming the Gmail-alias route that covers the email half. §20 already
+put the two halves on different rails — Gmail aliases for From, calendars
+for invites — and this entry is that split reaching its natural conclusion:
+each rail asks its provider for exactly what that rail needs.
+
+Two things deliberately not copied from the example: `.Shared` scopes
+(adding an attendee needs only ReadWrite; a narrower footprint consents more
+easily and reads better in a tenant review), and the absence of a `state`
+parameter in its authorize URL (MSAL supplies state and PKCE here; the CSRF
+hole is theirs to keep).

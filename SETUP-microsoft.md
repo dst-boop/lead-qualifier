@@ -103,3 +103,31 @@ python -m webapp
   calendar a month before — an expired secret takes Microsoft sign-in down with
   a token-endpoint error, while Google sign-in keeps working, which makes for a
   confusing morning.
+
+## Employer mailboxes: connect the calendar without asking for mail
+
+**Add an employer calendar** (in the account bar, next to "Add an Outlook
+address") connects a Microsoft account with `/auth/login?mode=calendar`,
+which requests only `User.Read` and `Calendars.ReadWrite` — **no Mail.Send**.
+
+Why this exists, verbatim from a working example: Magic List connects to
+corporate tenants — Equitable's included, proven by a live connection — with
+calendar scopes only. Two facts make that the right footprint:
+
+1. **Invites don't need mail permission.** Creating an event with attendees
+   makes Exchange dispatch the invitation itself, from the mailbox, through
+   the firm's normal transport — so it is journaled and archived like any
+   other outbound message. The meeting request the lead receives is
+   indistinguishable from one sent from Outlook.
+2. **Mail.Send is the scope corporate tenants refuse.** The narrow ask is
+   what actually gets approved by user-level consent, with no admin involved.
+
+A calendar-only connection shows in the sender pickers as *"invites only"*:
+it appears in the invite dialog, stays out of the email dialog, and an API
+call that tries to mail from it anyway is refused with the way forward named
+(a Gmail send-as alias of the same address covers the email half).
+
+The example requested `Calendars.ReadWrite.Shared` too; adding an attendee
+needs only `Calendars.ReadWrite`, so this app deliberately asks for less.
+Its authorize URL also carried no `state` parameter — ours does, plus PKCE,
+both supplied by MSAL. Borrow the scope set, not the CSRF hole.

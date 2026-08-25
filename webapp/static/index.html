@@ -2571,19 +2571,25 @@ async function loadSenders(){
 }
 function senderLabel(x){
   const tag=x.provider==='google'?'Gmail':'Outlook';
-  return `${x.address} (${tag}${x.kind==='alias'?' alias':''})`;
+  return `${x.address} (${tag}${x.kind==='alias'?' alias':''}${x.mail===false?' \u2014 invites only':''})`;
 }
 function fillSenders(){
   const chosen=state.settings.sendAs||'';
-  [['emFrom','emFromRow'],['invFrom','invFromRow']].forEach(([sid,rid])=>{
+  // Each dialog offers only the addresses that can do its job: a calendar-only
+  // employer account cannot front an email, and a Gmail alias owns no
+  // calendar. Offering either where it cannot work turns a clear refusal at
+  // connect time into a confusing failure at send time.
+  [['emFrom','emFromRow',x=>x.mail!==false],
+   ['invFrom','invFromRow',x=>x.calendar!==false]].forEach(([sid,rid,fit])=>{
     const sel=document.getElementById(sid), row=document.getElementById(rid);
     if(!sel||!row)return;
+    const usable=senders.filter(fit);
     // One address is not a choice; showing a dropdown with a single option
     // just asks the user to confirm something they cannot change.
-    row.style.display=senders.length>1?'':'none';
-    sel.innerHTML=senders.map(x=>
+    row.style.display=usable.length>1?'':'none';
+    sel.innerHTML=usable.map(x=>
       `<option value="${esc(x.id)}" ${x.id===chosen?'selected':''}>${esc(senderLabel(x))}</option>`).join('');
-    if(!senders.some(x=>x.id===chosen)&&senders.length)sel.value=senders[0].id;
+    if(!usable.some(x=>x.id===chosen)&&usable.length)sel.value=usable[0].id;
   });
 }
 function chosenSender(id){
@@ -3484,7 +3490,7 @@ async function loadMe(){
     // possible at all.
     const pr=ME.providers||{};
     const other=ME.provider==='google'
-      ? (pr.microsoft&&!ME.linked_microsoft?` \u00b7 <a href="/auth/login" ${A}>Add an Outlook address</a>`:'')
+      ? (pr.microsoft&&!ME.linked_microsoft?` \u00b7 <a href="/auth/login" ${A}>Add an Outlook address</a> \u00b7 <a href="/auth/login?mode=calendar" ${A} title="For an employer mailbox (a wirehouse or insurer account): asks the tenant for calendar access only \u2014 no mail permission \u2014 which is the request corporate tenants actually approve. Invites go out from that mailbox itself, through the firm's normal mail pipeline.">Add an employer calendar</a>`:'')
       : (pr.google&&!ME.linked_google?` \u00b7 <a href="/auth/google/login" ${A}>Add a Google address</a>`:'');
     bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'})<span id="syncNote"></span>${other}${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{

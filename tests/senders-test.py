@@ -65,7 +65,7 @@ async def graph_send(request: Request):
 @stub.post("/graph/me/events")
 async def graph_event(request: Request):
     sent.append(("graph-event", await request.json()))
-    return {"id": "e1"}
+    return JSONResponse({"id": "e1"}, status_code=201)
 
 
 threading.Thread(target=lambda: uvicorn.run(stub, host="127.0.0.1", port=8743,
@@ -192,5 +192,45 @@ ck("omitting the sender still works, on the signed-in account",
    ok.status_code == 200 and sent[0][0] == "gmail", ok.status_code)
 
 print()
+# --- a calendar-only employer connection --------------------------------------
+# Learned from a working example: Magic List connects to Equitable's tenant
+# with calendar scopes and no Mail.Send, and the connection stands. Creating
+# an event with attendees makes Exchange send the invitation from the mailbox
+# itself, through the firm's own mail pipeline. So the app offers the same
+# narrow footprint for employer mailboxes — and must then be honest about
+# what that connection can and cannot do.
+HAVE["microsoft"] = True                     # reconnect after the section above
+M._MEM_SESSIONS["cal-sid"] = {"ms_mode": "calendar"}
+c.cookies.set(M.SESSION_COOKIE, "cal-sid")
+
+r = c.get("/api/senders").json()
+ms = next(x for x in r["senders"] if x["provider"] == "microsoft")
+ck("a calendar-only connection says so: invites yes, mail no",
+   ms["mail"] is False and ms["calendar"] is True, ms)
+gm = [x for x in r["senders"] if x["provider"] == "google"]
+ck("gmail addresses all mail, but only the primary owns a calendar",
+   all(x["mail"] for x in gm) and
+   all(x["calendar"] == (x["kind"] == "primary") for x in gm),
+   [(x["address"], x["mail"], x["calendar"]) for x in gm])
+
+sent.clear()
+refuse = c.post("/api/send-email", json={"to": "lead@x.com", "subject": "s", "body": "b",
+                                         "sender": "microsoft:dan.treacy@equitable.com"})
+ck("mailing from it is refused before Graph is even asked",
+   refuse.status_code == 400 and not sent, (refuse.status_code, sent[:1]))
+ck("  ...naming what the connection is for", "calendar invites only" in refuse.json()["detail"],
+   refuse.json()["detail"])
+ck("  ...and the way forward", "Gmail" in refuse.json()["detail"])
+
+sent.clear()
+inv = c.post("/api/create-event", json={"attendee": "lead@x.com", "subject": "Intro call",
+                                        "body": "15 minutes", "start": "2026-09-01T10:00:00",
+                                        "end": "2026-09-01T10:30:00",
+                                        "sender": "microsoft:dan.treacy@equitable.com"})
+ck("an invite from it works — Exchange dispatches it, no mail permission involved",
+   inv.status_code == 200 and sent and sent[0][0] == "graph-event", (inv.status_code, sent[:1]))
+ck("  ...with the lead as attendee",
+   sent[0][1]["attendees"][0]["emailAddress"]["address"] == "lead@x.com")
+
 print(f"FAILURES {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)
