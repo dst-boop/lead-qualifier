@@ -2356,8 +2356,13 @@ _edgar_last = [0.0]
 _edgar_lock = asyncio.Lock()
 
 
-async def _edgar_get(url: str, as_json: bool = True):
-    """One rate-limited EDGAR request, with the User-Agent the SEC asks for."""
+async def _edgar_fetch(url: str):
+    """One rate-limited EDGAR request, with the User-Agent the SEC asks for.
+
+    Returns the raw response, whatever its status — the judgement about what a
+    status means lives in _edgar_get, so the debug endpoint can show a failure
+    verbatim instead of converting it into an exception page.
+    """
     if not EDGAR_USER_AGENT:
         raise HTTPException(
             status_code=500,
@@ -2373,10 +2378,14 @@ async def _edgar_get(url: str, as_json: bool = True):
             await asyncio.sleep(wait)
         _edgar_last[0] = time.monotonic()
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
-        r = await cx.get(url, headers={
+        return await cx.get(url, headers={
             "User-Agent": EDGAR_USER_AGENT,
             "Accept-Encoding": "gzip, deflate",
         })
+
+
+async def _edgar_get(url: str, as_json: bool = True):
+    r = await _edgar_fetch(url)
     if r.status_code == 403:
         raise HTTPException(status_code=502,
                             detail="SEC returned 403 — usually a missing or rejected "
@@ -2839,12 +2848,41 @@ async def free_debug(request: Request, source: str = "fec", name: str = ""):
     if not name:
         return {"error": "Pass ?name=First Last"}
     if source == "fec":
-        payload = await _fec_get({"contributor_name": name, "per_page": 3})
+        try:
+            payload = await _fec_get({"contributor_name": name, "per_page": 3})
+        except HTTPException as e:
+            return {"source": source, "error": e.detail,
+                    "fec_key": "personal" if FEC_API_KEY != "DEMO_KEY" else "DEMO_KEY"}
         parsed = freesources.fec_rows(payload)
     elif source == "efts":
-        payload = await _edgar_get(
-            EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"}))
-        parsed = freesources.efts_hits(payload)
+        # Raw round-trip on purpose: when the SEC refuses, the refusal itself —
+        # status, headers' story, body — is the diagnostic, and an exception
+        # page that says "does not work" hides all three.
+        url = EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"})
+        if not EDGAR_USER_AGENT:
+            return {"source": source, "url": url, "ua_set": False,
+                    "error": "EDGAR_USER_AGENT is not set on this service. The SEC "
+                             "requires a descriptive User-Agent with a contact email "
+                             "(e.g. 'Financial Planners of America "
+                             "dst@financialplannersofamerica.com'). Cloud Run -> Edit & "
+                             "deploy new revision -> Variables. See SETUP-edgar.md."}
+        r = await _edgar_fetch(url)
+        try:
+            payload = r.json()
+        except ValueError:
+            payload = None
+        out = {"source": source, "url": url, "status": r.status_code,
+               "ua_set": True, "ua_len": len(EDGAR_USER_AGENT)}
+        if r.status_code != 200 or payload is None:
+            out["error"] = ("The SEC refused this request — a 403 here usually means "
+                            "the User-Agent lacks a firm name and contact email."
+                            if r.status_code == 403 else
+                            "Non-JSON or non-200 answer; the body below is the SEC's own words.")
+            out["body"] = r.text[:2000]
+            return out
+        out["fields"] = _key_census(payload)
+        out["read"] = freesources.efts_hits(payload)[:3]
+        return out
     else:
         return {"error": "source must be fec or efts"}
     return {"source": source, "fields": _key_census(payload), "read": parsed[:3]}
