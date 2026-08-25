@@ -5,18 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lead Qualifier — FPA Command Center</title>
 <style>
+  /* Public Sans, self-hosted (@fontsource, OFL): no third-party request on
+     page load — faster, private, and it works offline. */
+  @font-face{font-family:"Public Sans";font-weight:200;font-style:normal;font-display:swap;
+    src:url(/static/fonts/public-sans-latin-200-normal.woff2) format("woff2")}
+  @font-face{font-family:"Public Sans";font-weight:300;font-style:normal;font-display:swap;
+    src:url(/static/fonts/public-sans-latin-300-normal.woff2) format("woff2")}
+  @font-face{font-family:"Public Sans";font-weight:400;font-style:normal;font-display:swap;
+    src:url(/static/fonts/public-sans-latin-400-normal.woff2) format("woff2")}
+  @font-face{font-family:"Public Sans";font-weight:500;font-style:normal;font-display:swap;
+    src:url(/static/fonts/public-sans-latin-500-normal.woff2) format("woff2")}
+  @font-face{font-family:"Public Sans";font-weight:600;font-style:normal;font-display:swap;
+    src:url(/static/fonts/public-sans-latin-600-normal.woff2) format("woff2")}
   :root{
-    --ink:#1b2a3a; --ink-soft:#44556b; --ink-faint:#7a8899;
-    --paper:#f4f5f2; --panel:#ffffff; --line:#dde1da; --line-soft:#eaece6;
-    --brass:#a87e2f; --brass-soft:#f3ead6;
-    --tierA:#1e6b4e; --tierA-bg:#e3efe8;
-    --tierB:#8a6d1f; --tierB-bg:#f4edd8;
-    --tierC:#5b6672; --tierC-bg:#e9ecef;
-    --tierX:#8c3a31; --tierX-bg:#f5e4e1;
-    --set:#1e6b4e; --called:#2c5f8a; --callback:#8a6d1f; --notint:#8c3a31; --hasadv:#5b6672;
-    --focus:#2c5f8a;
-    --font-body:"Segoe UI",system-ui,-apple-system,sans-serif;
-    --font-disp:Georgia,"Times New Roman",serif;
+    /* Brand palette. EA Blue carries the text — deep enough to read as near-
+       black while staying unmistakably the brand. Warm Gray misses AA
+       contrast on Warm White, so secondary text uses Dark Gray and Warm Gray
+       is reserved for borders-adjacent decoration only. */
+    --ink:#051D4B; --ink-soft:#6A635D; --ink-faint:#6A635D;
+    --paper:#FFFBF6; --panel:#FFFFFF; --line:#E5E0D5; --line-soft:#F0EDE6;
+    --ice:#B6D3DF; --mint:#CAF4E1; --warmgray:#988E85;
+    /* The accent slots keep their historical names; the values are the
+       brand's. Renaming them would touch four hundred call sites to say the
+       same thing. */
+    --brass:#0E46D8; --brass-soft:#E9EEFB;
+    --tierA:#1e6b4e; --tierA-bg:#DDF2E6;
+    --tierB:#8a6d1f; --tierB-bg:#F2ECDA;
+    --tierC:#6A635D; --tierC-bg:#EDEAE2;
+    --tierX:#8c3a31; --tierX-bg:#F5E5E0;
+    --set:#1e6b4e; --called:#0E46D8; --callback:#8a6d1f; --notint:#8c3a31; --hasadv:#6A635D;
+    --focus:#0E46D8;
+    --font-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --font-disp:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
     --font-mono:Consolas,"SF Mono",Menlo,monospace;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -275,6 +295,52 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:5px;font-size:.85rem;z-index:99;opacity:0;transition:opacity .25s;pointer-events:none}
   .toast.show{opacity:1}
   @media(prefers-reduced-motion:reduce){.toast{transition:none}}
+
+  /* ---------- Brand refresh: sharp, familiar, thoughtful ---------- */
+  body{font-weight:300;
+       background:linear-gradient(180deg,var(--paper) 0%,#F6F3EA 45%,#E9F0F4 100%);
+       background-attachment:fixed}
+  h1,h2,h3{font-weight:200;letter-spacing:-.01em}
+  h2{font-size:1.5rem}
+  b,strong,.mbtn.save,.tbtn.primary{font-weight:500}
+  th{font-weight:500;letter-spacing:.08em}
+
+  /* One strong brand block: the EA Blue bar, with the shield's arcs drawn
+     once, quietly, as concentric forms fading off the right edge. */
+  .topbar{position:relative;overflow:hidden;padding:16px 24px}
+  .topbar::before{content:"";position:absolute;right:-140px;top:-190px;width:420px;height:420px;
+    border:1.5px solid rgba(182,211,223,.35);border-radius:50%;pointer-events:none}
+  .topbar::after{content:"";position:absolute;right:-90px;top:-140px;width:320px;height:320px;
+    border:1px solid rgba(182,211,223,.22);border-radius:50%;pointer-events:none}
+  .topbar>*{position:relative;z-index:1}
+  .brand h1{font-weight:200;font-size:1.45rem;letter-spacing:.015em}
+  .brand h1 .amp{color:var(--ice)}
+  .brand .sub{color:var(--ice);opacity:.85}
+  .tbtn{border-color:rgba(182,211,223,.4);color:#EAF2F6;border-radius:6px}
+  .tbtn:hover{border-color:var(--ice);color:#fff}
+  .tbtn.primary{background:var(--brass);border-color:var(--brass);color:#fff}
+  .tbtn.primary:hover{background:#1E55E4}
+
+  /* Softer geometry: quiet radii, one warm shadow, generous panel padding. */
+  .menu,.modal{border-radius:10px;box-shadow:0 12px 34px rgba(5,29,75,.12)}
+  .menu button:hover{background:var(--brass-soft)}
+  .badge{border-radius:9px}
+  .abtn,.mbtn{border-radius:6px}
+  .mbtn.save{background:var(--brass);border-color:var(--brass);color:#fff}
+  a{color:var(--brass)}
+
+  /* The positive states borrow the mint, sparingly: confirmed-age rows and
+     the A-tier chip, nothing else. */
+  .sigrow.hit .pts{color:var(--tierA)}
+
+  /* Brass-era leftovers, retired: amber borders and old-navy hovers. */
+  .tbtn.listbtn{background:rgba(182,211,223,.14);border-color:rgba(182,211,223,.4)}
+  .pbtn.primary:hover:not(:disabled){background:#1E55E4;border-color:#1E55E4}
+  .bp-actions .tbtn.primary:hover:not(:disabled){background:#1E55E4;border-color:#1E55E4;color:#fff}
+  .sellbadge.soon{background:var(--tierB-bg);color:var(--tierB);border-color:#E0D6B4}
+  .abtn.cb.soon{border-color:#E0D6B4;color:var(--tierB)}
+  .abtn.em{border-color:#C8D5F2}
+  .badge.manual{background:var(--tierB-bg);color:var(--tierB);border-color:#E0D6B4}
 </style>
 </head>
 <body>
@@ -313,13 +379,13 @@
         <button id="btnQC" style="display:none">AI quality control</button>
         <button id="btnAssign" style="display:none">Auto-assign to advisors</button>
         <button id="btnBackup">Back up list</button>
-        <button onclick="document.getElementById('jsonFile').click()">Restore a backup</button>
+        <button id="btnRestore" onclick="document.getElementById('jsonFile').click()">Restore a backup</button>
       </div>
     </div>
     <input type="file" id="jsonFile" accept=".json" hidden>
   </div>
 </header>
-<div id="authbar" style="display:none;padding:7px 22px;background:#243448;color:#cfd9e4;font-size:.8rem"></div>
+<div id="authbar" style="display:none;padding:8px 24px;background:#0A2558;color:#DCE8EE;font-size:.8rem"></div>
 
 <!-- The four things the job consists of, in the order they happen. Each stage
      shows how many leads are waiting in it and offers only the actions that
@@ -1803,7 +1869,6 @@ const OUTSIDE_MSG='To use ZoomInfo here, save your ZoomInfo MCP token under ICP 
       attributed and billed to them, and it works in an ordinary browser.
    2. The in-Claude bridge below, which borrows whatever ZoomInfo connector that
       Claude user happens to have enabled. Kept for running inside Claude. */
-function ziConnected(){return !!(window.ME&&ME.zi_connected);}
 
 async function ziSearch(path,body,method){
   const r=await fetch('/api/zi/search',{method:'POST',
@@ -2028,7 +2093,6 @@ Every personId value must be passed as a string, exactly as given. Make exactly 
       try{
         const payloads=await callClaude(prompt);
         const recs=[];payloads.forEach(pl=>harvestEnriched(pl,recs,0));
-        window.__lastEnrich=payloads;
         if(!recs.length){
           const snippet=payloads.map(x=>typeof x==='string'?x:JSON.stringify(x)).join(' ').replace(/\s+/g,' ').slice(0,280);
           throw new Error('ZoomInfo replied but no contact records were found. Raw reply: "'+snippet+'"');
@@ -2846,7 +2910,6 @@ const TEMPLATE_COLS=[
 ];
 const TEMPLATE_EXTRA=['Personal Email','ZoomInfo Contact ID','Number of Employees','Number of Companies',
   'First Work Year','Has Email','Has Mobile Phone','Mobile Phone Do Not Call','Direct Phone Do Not Call'];
-function fieldLabel(k){const f=FIELDS.find(x=>x[0]===k);return f?f[1]:k;}
 function templateCSV(){
   const q=v=>/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
   const head=TEMPLATE_COLS.map(([,h])=>h);
@@ -3068,7 +3131,9 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
-['q','fStatus','fSort','fEmailFirst','fSellable','fDue','fIntl','fAgeMin','fAgeMax'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+let _qT=null;
+document.getElementById('q').addEventListener('input',()=>{clearTimeout(_qT);_qT=setTimeout(render,160);});
+['fStatus','fSort','fEmailFirst','fSellable','fDue','fIntl','fAgeMin','fAgeMax'].forEach(id=>document.getElementById(id).addEventListener('input',render));
 
 /* ---- named lists ----
    An advisor runs more than one campaign at a time and the lists should not
@@ -3545,6 +3610,12 @@ async function loadMe(){
     bar.innerHTML=l.join(' \u00b7 ')+' \u2014 any email works; Google and Microsoft are optional';
   }
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
+  // With server-side storage the JSON backup pair is a localStorage-era
+  // vestige — the server is the backup. Kept for local mode only.
+  if(ME.features&&ME.features.server_state){
+    document.getElementById('btnBackup').style.display='none';
+    document.getElementById('btnRestore').style.display='none';
+  }
   if(ME.features&&ME.features.drive)document.getElementById('btnDrive').style.display='';
   // The sheet is the primary source, so it is checked on arrival rather than
   // waiting for someone to press anything.

@@ -378,6 +378,8 @@ async def drop_session(sid: str) -> None:
 
 
 app = FastAPI(title="Lead Qualifier")
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
 @app.middleware("http")
@@ -1122,7 +1124,6 @@ async def me(request: Request):
                         "name": d.get("name"), "email": d.get("email"),
                         "providers": providers, "features": features,
                         "zi_connected": bool(session.get("zoominfo")),
-                    "zi_mcp_connected": bool(_zi_mcp_token(session)),
                         "zi_mcp_connected": bool(_zi_mcp_token(session)),
                         "storage": storage, "encryption": encryption}
     token = _ms_token(session)
@@ -4069,10 +4070,6 @@ class BattleCreate(BaseModel):
     days: int = 1
     opponents: list = []
     metric: str = "points"
-
-
-def _battle_key(bid: str) -> str:
-    return bid
 
 
 @app.get("/api/battles")
