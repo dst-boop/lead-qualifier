@@ -2796,7 +2796,7 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
     name = f"{req.first_name.strip()} {last}".strip()
 
     sources = {}
-    donations, filings = {}, []
+    donations, filings, insiders = {}, [], []
 
     try:
         payload = await _fec_get({"contributor_name": name, "per_page": 100,
@@ -2821,8 +2821,11 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
                 EFTS_URL + "?" + urlencode({"q": name, "forms": "3,4,5"}))
             hits = freesources.efts_hits(payload)
             filings = freesources.match_filings(hits, last, req.first_name)[:8]
+            insiders = freesources.match_entities(
+                freesources.efts_entities(payload), last, req.first_name)[:3]
             sources["edgar"] = {"ran": True,
-                                "note": "" if filings else "no insider filings under this name"}
+                                "note": "" if (filings or insiders)
+                                        else "no insider filings under this name"}
         except HTTPException as e:
             sources["edgar"] = {"ran": False, "reason": e.detail}
     else:
@@ -2833,6 +2836,10 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
         "sources": sources,
         "donations": donations,
         "filings": filings,
+        # The person-level verdict from the response's own aggregation — set
+        # only when the EDGAR search ran; [] then means "searched, not an
+        # insider", which is an answer, not an absence.
+        "insider_entities": insiders if sources.get("edgar", {}).get("ran") else [],
         # Deep links to the same searches on the source's own site, so every
         # number above can be checked by a person in one click.
         "links": {
@@ -2891,7 +2898,11 @@ async def free_debug(request: Request, source: str = "fec", name: str = ""):
             out["body"] = r.text[:2000]
             return out
         out["fields"] = _key_census(payload)
+        # read is the raw parsed hits, BEFORE the who-is-it guard — prose
+        # mentions of the name in other people's paperwork appear here on
+        # purpose. entities is the aggregation the verdict comes from.
         out["read"] = freesources.efts_hits(payload)[:3]
+        out["entities"] = freesources.efts_entities(payload)[:5]
         return out
     else:
         return {"error": "source must be fec or efts"}

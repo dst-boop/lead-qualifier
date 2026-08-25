@@ -260,6 +260,59 @@ def efts_hits(payload) -> list:
     return out
 
 
+def efts_entities(payload) -> list:
+    """Who the matched filings belong to, from the response's own aggregation.
+
+    Seen live before being coded (a first for this repo): a search for
+    "Timothy Cook" returned three prose mentions in other people's paperwork
+    as its top hits — but its aggregations.entity_filter block put "COOK
+    TIMOTHY D (CIK 0001214156), 45 documents" at the top. The aggregation is
+    keyed on the filings' named parties, so it answers "is this person an
+    insider" directly, at person level, immune to word order and to prose
+    mentions. The hits stay useful as the detail; this is the verdict.
+    """
+    if not isinstance(payload, dict):
+        return []
+    buckets = (((payload.get("aggregations") or {}).get("entity_filter") or {})
+               .get("buckets"))
+    if not isinstance(buckets, list):
+        return []
+    out = []
+    for b in buckets:
+        if not isinstance(b, dict):
+            continue
+        key = str(b.get("key") or "")
+        if not key:
+            continue
+        m = re.search(r"\(CIK\s*(\d+)\)", key)
+        out.append({"name": re.sub(r"\s*\(CIK[^)]*\)", "", key).strip(),
+                    "cik": (m.group(1).lstrip("0") or m.group(1)) if m else "",
+                    "count": b.get("doc_count") or 0})
+    return out
+
+
+def match_entities(entities: list, last_name: str, first_name: str = "") -> list:
+    """The aggregation buckets that plausibly are this person.
+
+    Same rule as match_filings: surname required, first name by its first
+    three letters when we have one — companies aggregate here too, and ACME
+    CORP must not read as a person's insider record.
+    """
+    ln = (last_name or "").strip().lower()
+    fn = (first_name or "").strip().lower()
+    if not ln:
+        return []
+    out = []
+    for e in entities:
+        nm = e["name"].lower()
+        if ln not in nm:
+            continue
+        if fn and fn[:3] not in nm:
+            continue
+        out.append(e)
+    return out
+
+
 def match_filings(hits: list, last_name: str, first_name: str = "") -> list:
     """Filings whose named parties plausibly include this person.
 

@@ -3828,11 +3828,13 @@ function pubSection(L){
   } else if(src.fec&&src.fec.ran){
     bits.push('<div class="sigrow miss"><span>Political donations on record</span><span class="pts">none found</span></div>');
   }
+  const ins=(P.insiders&&P.insiders[0])||null;
+  if(ins)bits.push(`<div class="sigrow hit"><span>SEC insider, on record as</span><span class="pts">${esc(ins.name)} \u00b7 ${ins.count} filing${ins.count>1?'s':''}</span></div>`);
   if(f.length){
-    bits.push('<div class="sigrow hit"><span>SEC insider filings</span><span class="pts">'+f.length+'</span></div>');
+    if(!ins)bits.push('<div class="sigrow hit"><span>SEC insider filings</span><span class="pts">'+f.length+'</span></div>');
     f.slice(0,4).forEach(x=>bits.push(`<div class="hint mono" style="margin-top:2px">Form ${esc(x.form)} &middot; ${esc(x.date)} &middot; ${esc(x.company)}${x.url?` &middot; <a target="_blank" rel="noopener" href="${esc(x.url)}">filing</a>`:''}</div>`));
     bits.push('<p class="hint" style="margin-top:2px"><strong>An insider filing means equity compensation.</strong> Concentrated employer stock is its own planning conversation, before any rollover.</p>');
-  } else if(src.edgar&&src.edgar.ran){
+  } else if(!ins&&src.edgar&&src.edgar.ran){
     bits.push('<div class="sigrow miss"><span>SEC insider filings</span><span class="pts">none found</span></div>');
   }
   const lk=P.links||{};
@@ -3844,20 +3846,25 @@ function pubSection(L){
    found: a sweep writing "nothing on record" into 300 activity logs would
    bury the entries that matter. */
 function storePub(L,d,quiet){
-  L.pub={sources:d.sources||{},donations:d.donations||{},filings:d.filings||[],links:d.links||{},at:Date.now()};
+  L.pub={sources:d.sources||{},donations:d.donations||{},filings:d.filings||[],
+         insiders:d.insider_entities||[],links:d.links||{},at:Date.now()};
   L.updatedAt=Date.now();
   const dn=L.pub.donations,parts=[];
   if(dn.count)parts.push(dn.count+' donation'+(dn.count>1?'s':'')+' $'+(dn.total||0).toLocaleString()+((dn.places&&dn.places[0])?' from '+dn.places[0].value:''));
   if(dn.says_retired)parts.push('told the FEC they are retired');
-  if(L.pub.filings.length)parts.push(L.pub.filings.length+' insider filing'+(L.pub.filings.length>1?'s':''));
+  const ins=(L.pub.insiders&&L.pub.insiders[0])||null;
+  if(ins)parts.push('SEC insider \u2014 '+ins.count+' filing'+(ins.count>1?'s':'')+' as '+ins.name);
+  else if(L.pub.filings.length)parts.push(L.pub.filings.length+' insider filing'+(L.pub.filings.length>1?'s':''));
   if(parts.length||!quiet)logAct(L.id,'pub',(parts.join(' \u00b7 ')||'nothing on record')+' [free \u2014 no lookups spent]');
   return parts;
 }
 function secBadge(L){
   const f=(L.pub&&L.pub.filings)||[];
-  if(!f.length)return '';
-  const co=f[0].company||'';
-  return ` <span class="badge sec" title="SEC insider filings on record \u2014 an officer, director or 10% owner. Latest: Form ${esc(f[0].form)} ${esc(f[0].date)}${co?' \u00b7 '+esc(co):''}. Equity compensation is its own planning conversation.">SEC</span>`;
+  const ins=(L.pub&&L.pub.insiders&&L.pub.insiders[0])||null;
+  if(!f.length&&!ins)return '';
+  const detail=ins?`${ins.count} filing${ins.count>1?'s':''} on record as ${ins.name}`
+                  :`Latest: Form ${f[0].form} ${f[0].date}${f[0].company?' \u00b7 '+f[0].company:''}`;
+  return ` <span class="badge sec" title="SEC insider on record \u2014 an officer, director or 10% owner. ${esc(detail)}. Equity compensation is its own planning conversation.">SEC</span>`;
 }
 function fecRetBadge(L){
   const d=L.pub&&L.pub.donations;
