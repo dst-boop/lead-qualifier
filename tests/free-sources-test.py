@@ -118,6 +118,64 @@ prose = F.efts_hits({"hits": {"hits": [{"_source": {
 ck("a company-only hit does not become an insider filing",
    F.match_filings(prose, "Melter") == [])
 
+# --- against the production response ----------------------------------------
+# This fixture mirrors the first live response this feature ever saw — the
+# /api/free-debug census Dan ran against the deployed app. The earlier
+# fixtures were guesses that happened to be right; this one is a record.
+LIVE = {"api_version": "1.0",
+        "pagination": {"count": 12, "pages": 4, "per_page": 3},
+        "results": [{
+            "amendment_indicator": "A", "amendment_indicator_desc": "ADD",
+            "committee": {"name": "ACTBLUE", "committee_id": "C00401224",
+                          "state": "MA", "treasurer_name": "GILMER, GEORGE"},
+            "contribution_receipt_amount": 5.0,
+            "contribution_receipt_date": "2024-10-04",
+            "contributor_aggregate_ytd": 55.0,
+            "contributor_city": "ESCONDIDO",
+            "contributor_employer": "NOT EMPLOYED",
+            "contributor_first_name": "TERESA",
+            "contributor_last_name": "TELLS HIS NAME",
+            "contributor_name": "TELLS HIS NAME, TERESA",
+            "contributor_occupation": "NOT EMPLOYED",
+            "contributor_state": "CA",
+            "contributor_street_1": "1449 COUNTRY CLUB DRIVE",
+            "contributor_zip": "92029",
+            "entity_type": "IND", "is_individual": True,
+            "memo_text": "EARMARKED FOR DSCC (C00042366)",
+            "sub_id": "4110720241064774322",
+        }]}
+live = F.fec_rows(LIVE)
+ck("the production shape reads exactly as the blind parser expected",
+   live[0]["city"] == "Escondido" and live[0]["state"] == "CA"
+   and live[0]["amount"] == 5.0 and live[0]["date"] == "2024-10-04")
+ck("  ...and the plain date (no timestamp) parses", live[0]["date"] == "2024-10-04")
+ck("the street the live data carries is now read", live[0]["street"] == "1449 Country Club Drive")
+ck("  ...and the year-to-date aggregate", live[0]["ytd"] == 55.0)
+ck("  ...and the transaction id", live[0]["sub"] == "4110720241064774322")
+
+# An amended filing re-reports the same transaction. Counting it twice would
+# overstate the giving — the one mistake a dollar figure must never make.
+twice = {"results": [LIVE["results"][0], dict(LIVE["results"][0])]}
+m2 = F.match_rows(F.fec_rows(twice), "Tells His Name", "Teresa")
+ck("the same transaction re-reported counts once", len(m2) == 1, len(m2))
+ck("  ...so the total is the true total",
+   F.summarize_fec(m2)["total"] == 5.0)
+
+corp = {"results": [dict(LIVE["results"][0], entity_type="ORG", is_individual=False)]}
+ck("a non-individual record is not a person's giving", F.fec_rows(corp) == [])
+ck("  ...but a record silent about its type is kept",
+   len(F.fec_rows({"results": [{"contributor_name": "MELTER, J",
+                                "contribution_receipt_amount": 10,
+                                "contribution_receipt_date": "2024-01-01"}]})) == 1)
+
+s2 = F.summarize_fec(m2)
+ck("the street reaches the summary, dated and counted",
+   s2["streets"][0]["value"] == "1449 Country Club Drive, Escondido"
+   and s2["streets"][0]["n"] == 1)
+ck("  ...and the YTD high-water mark", s2["ytd_max"] == 55.0)
+ck("'NOT EMPLOYED' is not an employer",
+   all(e["value"] != "NOT EMPLOYED" for e in s2["employers"]), s2["employers"])
+
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)

@@ -43,6 +43,11 @@ _F = {
     "occupation": ("contributor_occupation", "contbr_occupation"),
     "amount":     ("contribution_receipt_amount", "contb_receipt_amt"),
     "date":       ("contribution_receipt_date", "contb_receipt_dt"),
+    # Confirmed present in a production response (the first parser in this
+    # repo to be checked against one before shipping its second version):
+    "street":     ("contributor_street_1", "contbr_st1"),
+    "ytd":        ("contributor_aggregate_ytd", "contb_aggregate_ytd"),
+    "sub":        ("sub_id", "transaction_id"),
 }
 
 
@@ -79,6 +84,12 @@ def fec_rows(payload) -> list:
     for r in results:
         if not isinstance(r, dict):
             continue
+        # The live data carries an entity type. A committee or a company that
+        # happens to share a surname with the lead is not a person's giving;
+        # a record that says nothing about its type is kept, as always.
+        ent = str(r.get("entity_type") or "").upper()
+        if r.get("is_individual") is False or (ent and ent != "IND"):
+            continue
         committee = r.get("committee") if isinstance(r.get("committee"), dict) else {}
         out.append({
             "name": str(_first(r, _F["name"]) or ""),
@@ -90,6 +101,9 @@ def fec_rows(payload) -> list:
             "amount": _amount(_first(r, _F["amount"])),
             "date": _day(_first(r, _F["date"])),
             "committee": str((committee.get("name") if committee else "") or ""),
+            "street": str(_first(r, _F["street"]) or "").title(),
+            "ytd": _amount(_first(r, _F["ytd"])),
+            "sub": str(_first(r, _F["sub"]) or ""),
         })
     return out
 
@@ -112,13 +126,21 @@ def match_rows(rows: list, last_name: str, first_name: str = "") -> list:
     fn = (first_name or "").strip().lower()
     if not ln:
         return []
-    out = []
+    out, seen = [], set()
     for r in rows:
         nm = r["name"].lower()
         if ln not in nm:
             continue
         if fn and fn not in nm and not re.search(r"\b" + re.escape(fn[0]) + r"\b|\b" + re.escape(fn[:3]), nm):
             continue
+        # Amendments re-report the same transaction under the same id. One
+        # gift counted twice would overstate the giving — and an overstated
+        # dollar figure that looks looked-up is this file's cardinal sin.
+        sub = r.get("sub") or ""
+        if sub and sub in seen:
+            continue
+        if sub:
+            seen.add(sub)
         out.append(r)
     return out
 
@@ -168,13 +190,23 @@ def summarize_fec(rows: list, lead_employer: str = "") -> dict:
     if want and employers:
         employer_match = any(norm_company(e) == want for e in employers
                              if e != "RETIRED")
+    streets = {}
+    for r in rows:
+        if r.get("street") and r["city"]:
+            key = f"{r['street']}, {r['city']}"
+            streets.setdefault(key, {"n": 0, "last": ""})
+            streets[key]["n"] += 1
+            streets[key]["last"] = max(streets[key]["last"], r["date"])
     biggest = max((r["amount"] for r in rows if r["amount"]), default=None)
+    ytd_max = max((r["ytd"] for r in rows if r.get("ytd")), default=None)
     return {
         "count": len(rows),
         "total": round(total, 2),
         "biggest": biggest,
         "first": dates[0] if dates else "",
         "latest": dates[-1] if dates else "",
+        "streets": _ranked(streets),
+        "ytd_max": ytd_max,
         "employers": _ranked(employers),
         "occupations": _ranked(occupations),
         "places": _ranked(places),
