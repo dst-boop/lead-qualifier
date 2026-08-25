@@ -78,3 +78,33 @@ does not carry the new permission.
 - While the OAuth consent screen is in "Testing" mode, refresh tokens expire
   after 7 days — publish the app in the consent screen settings for
   long-lived sign-ins.
+
+
+## If the consent screen keeps coming back
+
+Two different causes produce the same screen, and they need different fixes.
+
+**The app kept asking (fixed in code).** Sign-in decides whether to request
+consent, and the first version of that decision looked for a saved token in
+the browser session — which a fresh sign-in never has. Refresh tokens now
+live in a `token_vault` Firestore collection keyed by the person
+(`google:email`), sealed with the same KMS envelope as sessions, so the
+consent you gave last month is found from any browser. You should see the
+consent screen exactly twice in the app's life: your first ever sign-in, and
+after a revocation.
+
+**Google kept expiring the grant (fixed in the Cloud Console).** If the OAuth
+consent screen's publishing status is **Testing**, Google expires every
+refresh token after 7 days — the app then genuinely needs re-consent weekly,
+and no code can change that. Fix it once:
+
+1. Google Cloud Console → **APIs & Services → OAuth consent screen**
+2. If **User Type** is *External* and everyone who signs in is
+   @financialplannersofamerica.com, switch to (or recreate as) **Internal** —
+   no verification, no 7-day expiry, done.
+3. If External is genuinely needed (users outside the Workspace), press
+   **Publish app** so status reads *In production*. Google will list the
+   sensitive scopes for verification; until verified, outside users see an
+   unverified-app warning, but tokens stop expiring weekly.
+
+Internal is the right answer for a firm-internal tool, and it is one click.

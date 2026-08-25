@@ -170,6 +170,10 @@ SESSION_TTL = 8 * 3600
 
 USE_FIRESTORE = os.environ.get("USE_FIRESTORE", "1") != "0"
 FS_SESSIONS = os.environ.get("FIRESTORE_SESSIONS_COLLECTION", "sessions")
+# Refresh tokens keyed by who the person is, not by which browser cookie they
+# happen to hold. A session dies with its cookie; the grant the user made does
+# not, and pretending it did is why the consent screen kept coming back.
+FS_VAULT = os.environ.get("FIRESTORE_VAULT_COLLECTION", "token_vault")
 FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
 # One document per list rather than one per user. An advisor working four
 # campaigns keeps four independent documents, so a five-thousand-row import
@@ -488,6 +492,29 @@ async def ms_callback(request: Request):
 
 # ------------------------- Google (OAuth 2.0) -------------------------
 
+async def _vault_put(provider: str, email: str, refresh_token: str) -> None:
+    """Store one user's refresh token, sealed with the same KMS envelope as
+    sessions. Best-effort: without Firestore this is a no-op and sign-in
+    degrades to the per-session behaviour it had before."""
+    if not (email and refresh_token):
+        return
+    doc = _seal(refresh_token)
+    doc["updated_at"] = time.time()
+    await _fs_set(FS_VAULT, f"{provider}:{email.lower()}", doc)
+
+
+async def _vault_get(provider: str, email: str) -> Optional[str]:
+    if not email:
+        return None
+    doc = await _fs_get(FS_VAULT, f"{provider}:{email.lower()}")
+    return _unseal(doc) if doc else None
+
+
+async def _vault_del(provider: str, email: str) -> None:
+    if email:
+        await _fs_del(FS_VAULT, f"{provider}:{email.lower()}")
+
+
 async def _google_token(session: dict) -> Optional[str]:
     g = session.get("google")
     if not g:
@@ -505,6 +532,10 @@ async def _google_token(session: dict) -> Optional[str]:
             "grant_type": "refresh_token",
         })
     if r.status_code != 200:
+        # Revoked or expired. Clear the vault too: a dead token left there
+        # would be handed to the next sign-in, which would fail the same way
+        # instead of showing the one consent screen that fixes it.
+        await _vault_del("google", (g or {}).get("email") or "")
         session.pop("google", None)
         return None
     tok = r.json()
@@ -536,7 +567,6 @@ async def google_login(request: Request):
     force = request.query_params.get("force") == "1"
     if force:
         session["g_forced"] = True      # so the callback cannot bounce twice
-    have_refresh = bool((session.get("google") or {}).get("refresh_token"))
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": BASE_URL + "/auth/google/callback",
@@ -545,7 +575,10 @@ async def google_login(request: Request):
         "access_type": "offline",   # refresh token, so sign-in survives the hour
         # select_account still lets someone switch identity — the thing a
         # sign-in button is actually for — without re-approving every scope.
-        "prompt": "consent" if (force or not have_refresh) else "select_account",
+        # Consent is never requested on the first pass: at this point we do
+        # not know who the user is, so we cannot know whether they already
+        # granted it. The callback decides, with the vault in hand.
+        "prompt": "consent" if force else "select_account",
         "include_granted_scopes": "true",
         "state": state,
     }
@@ -574,6 +607,17 @@ async def google_callback(request: Request):
     if r.status_code != 200:
         raise HTTPException(status_code=400, detail=f"Google sign-in failed: {r.text[:200]}")
     tok = r.json()
+    # Who just signed in? The vault is keyed by the person, so a returning
+    # user on a brand-new browser still finds the grant they already made.
+    email = ""
+    try:
+        async with httpx.AsyncClient(timeout=20) as cx:
+            u = await cx.get(GOOGLE_USERINFO_URL,
+                             headers={"Authorization": f"Bearer {tok['access_token']}"})
+        if u.status_code == 200:
+            email = (u.json().get("email") or "").lower()
+    except httpx.HTTPError:
+        pass
     # A re-authorisation returns no refresh token, because the existing one is
     # still valid. Writing tok.get("refresh_token") straight in would replace a
     # working token with None and silently end the session an hour later — a
@@ -581,14 +625,25 @@ async def google_callback(request: Request):
     # would have started biting the moment it stopped.
     keep = (session.get("google") or {}).get("refresh_token")
     refresh = tok.get("refresh_token") or keep
+    if not refresh:
+        # The cookie is new but the person may not be: the consent they gave
+        # last month is in the vault. This lookup is the difference between
+        # "approve Drive, Calendar and Gmail once" and "approve them on every
+        # sign-in", which is what was actually happening — the old check
+        # looked in the session, and a fresh sign-in never has one.
+        refresh = await _vault_get("google", email)
+    if tok.get("refresh_token"):
+        await _vault_put("google", email, tok["refresh_token"])
     session["google"] = {
         "access_token": tok["access_token"],
         "refresh_token": refresh,
         "expires_at": time.time() + tok.get("expires_in", 3600) - 60,
+        "email": email,
     }
     session["provider"] = "google"
-    # No refresh token and none on file: this grant cannot outlive the hour.
-    # Ask for consent exactly once, and only here, where we know it is needed.
+    # No refresh token anywhere — grant, session, vault. This person has
+    # genuinely never granted offline access, so ask for consent exactly
+    # once, here, where we finally know it is needed.
     if not refresh and not already_forced:
         return RedirectResponse("/auth/google/login?force=1")
     return RedirectResponse("/")
