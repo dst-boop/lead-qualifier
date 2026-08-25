@@ -2811,8 +2811,14 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
 
     if EDGAR_USER_AGENT:
         try:
+            # Unquoted on purpose. EDGAR writes people surname-first — Tim
+            # Cook's filings say "COOK TIMOTHY D" — and a quoted phrase is
+            # order-sensitive, so it misses real officers filed the other way
+            # round. Unquoted means every word must appear, in any order; the
+            # surname guard in match_filings does the disambiguation a phrase
+            # was doing, without the false negatives.
             payload = await _edgar_get(
-                EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"}))
+                EFTS_URL + "?" + urlencode({"q": name, "forms": "3,4,5"}))
             hits = freesources.efts_hits(payload)
             filings = freesources.match_filings(hits, last, req.first_name)[:8]
             sources["edgar"] = {"ran": True,
@@ -2833,7 +2839,7 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
             "fec": "https://www.fec.gov/data/receipts/individual-contributions/"
                    f"?{urlencode({'contributor_name': name})}",
             "edgar": "https://www.sec.gov/edgar/search/#/"
-                     f"q=%22{name.replace(' ', '%20')}%22&forms=3,4,5",
+                     f"q={name.replace(' ', '%20')}&forms=3,4,5",
         },
     }
 
@@ -2861,7 +2867,8 @@ async def free_debug(request: Request, source: str = "fec", name: str = ""):
         # Raw round-trip on purpose: when the SEC refuses, the refusal itself —
         # status, headers' story, body — is the diagnostic, and an exception
         # page that says "does not work" hides all three.
-        url = EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"})
+        # Unquoted for the same word-order reason as the live route.
+        url = EFTS_URL + "?" + urlencode({"q": name, "forms": "3,4,5"})
         if not EDGAR_USER_AGENT:
             return {"source": source, "url": url, "ua_set": False,
                     "error": "EDGAR_USER_AGENT is not set on this service. The SEC "
