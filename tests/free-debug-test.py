@@ -120,6 +120,10 @@ MODE["efts"] = "ok"
 d = c.get("/api/free-debug", params={"source": "efts", "name": "Janet Melter"}).json()
 ck("a good answer carries the census", any("display_names" in f for f in d.get("fields", [])),
    (d.get("fields") or [])[:2])
+# EDGAR writes people surname-first ("COOK TIMOTHY D"), so the query must NOT
+# be a quoted phrase — a phrase is order-sensitive and misses real officers.
+ck("  ...and the query is unquoted, because filings write names surname-first",
+   "%22" not in d.get("url", "") and 'q=Janet+Melter' in d.get("url", ""), d.get("url"))
 ck("  ...and the parsed filings", d.get("read") and d["read"][0]["form"] == "4", d.get("read"))
 
 # --- the FEC half held to the same standard ----------------------------------

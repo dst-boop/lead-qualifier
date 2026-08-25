@@ -2796,7 +2796,7 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
     name = f"{req.first_name.strip()} {last}".strip()
 
     sources = {}
-    donations, filings = {}, []
+    donations, filings, insiders = {}, [], []
 
     try:
         payload = await _fec_get({"contributor_name": name, "per_page": 100,
@@ -2811,12 +2811,21 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
 
     if EDGAR_USER_AGENT:
         try:
+            # Unquoted on purpose. EDGAR writes people surname-first — Tim
+            # Cook's filings say "COOK TIMOTHY D" — and a quoted phrase is
+            # order-sensitive, so it misses real officers filed the other way
+            # round. Unquoted means every word must appear, in any order; the
+            # surname guard in match_filings does the disambiguation a phrase
+            # was doing, without the false negatives.
             payload = await _edgar_get(
-                EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"}))
+                EFTS_URL + "?" + urlencode({"q": name, "forms": "3,4,5"}))
             hits = freesources.efts_hits(payload)
             filings = freesources.match_filings(hits, last, req.first_name)[:8]
+            insiders = freesources.match_entities(
+                freesources.efts_entities(payload), last, req.first_name)[:3]
             sources["edgar"] = {"ran": True,
-                                "note": "" if filings else "no insider filings under this name"}
+                                "note": "" if (filings or insiders)
+                                        else "no insider filings under this name"}
         except HTTPException as e:
             sources["edgar"] = {"ran": False, "reason": e.detail}
     else:
@@ -2827,13 +2836,17 @@ async def free_enrich(req: FreeEnrichRequest, request: Request):
         "sources": sources,
         "donations": donations,
         "filings": filings,
+        # The person-level verdict from the response's own aggregation — set
+        # only when the EDGAR search ran; [] then means "searched, not an
+        # insider", which is an answer, not an absence.
+        "insider_entities": insiders if sources.get("edgar", {}).get("ran") else [],
         # Deep links to the same searches on the source's own site, so every
         # number above can be checked by a person in one click.
         "links": {
             "fec": "https://www.fec.gov/data/receipts/individual-contributions/"
                    f"?{urlencode({'contributor_name': name})}",
             "edgar": "https://www.sec.gov/edgar/search/#/"
-                     f"q=%22{name.replace(' ', '%20')}%22&forms=3,4,5",
+                     f"q={name.replace(' ', '%20')}&forms=3,4,5",
         },
     }
 
@@ -2861,7 +2874,8 @@ async def free_debug(request: Request, source: str = "fec", name: str = ""):
         # Raw round-trip on purpose: when the SEC refuses, the refusal itself —
         # status, headers' story, body — is the diagnostic, and an exception
         # page that says "does not work" hides all three.
-        url = EFTS_URL + "?" + urlencode({"q": f'"{name}"', "forms": "3,4,5"})
+        # Unquoted for the same word-order reason as the live route.
+        url = EFTS_URL + "?" + urlencode({"q": name, "forms": "3,4,5"})
         if not EDGAR_USER_AGENT:
             return {"source": source, "url": url, "ua_set": False,
                     "error": "EDGAR_USER_AGENT is not set on this service. The SEC "
@@ -2884,7 +2898,11 @@ async def free_debug(request: Request, source: str = "fec", name: str = ""):
             out["body"] = r.text[:2000]
             return out
         out["fields"] = _key_census(payload)
+        # read is the raw parsed hits, BEFORE the who-is-it guard — prose
+        # mentions of the name in other people's paperwork appear here on
+        # purpose. entities is the aggregation the verdict comes from.
         out["read"] = freesources.efts_hits(payload)[:3]
+        out["entities"] = freesources.efts_entities(payload)[:5]
         return out
     else:
         return {"error": "source must be fec or efts"}

@@ -176,6 +176,47 @@ ck("  ...and the YTD high-water mark", s2["ytd_max"] == 55.0)
 ck("'NOT EMPLOYED' is not an employer",
    all(e["value"] != "NOT EMPLOYED" for e in s2["employers"]), s2["employers"])
 
+# --- the aggregation, from the second live response ---------------------------
+# Dan searched "Timothy Cook" against production. The top HITS were three Form
+# 3s from Oak Street Health — documents that merely mention the name in their
+# text — while the response's entity aggregation put the real person on top:
+# COOK TIMOTHY D (CIK 0001214156), 45 documents. Both halves of the design are
+# in that one response: the guard must reject the hits, the aggregation must
+# supply the verdict.
+LIVE_EFTS = {
+    "hits": {"total": {"value": 69}, "hits": [
+        {"_id": "0000899243-20-021515:attachment1.htm",
+         "_source": {"ciks": ["1818185", "1564406"],
+                     "display_names": ["DALEY CARL  (CIK 0001818185)",
+                                       "Oak Street Health, Inc.  (CIK 0001564406)"],
+                     "root_forms": ["3"], "form": "3", "file_date": "2020-08-05",
+                     "adsh": "0000899243-20-021515", "file_type": "EX-24.1"}},
+        {"_source": {"ciks": ["1793313"],
+                     "display_names": ["PRICE GEOFFREY M  (CIK 0001793313)",
+                                       "Oak Street Health, Inc.  (CIK 0001564406)"],
+                     "root_forms": ["3"], "file_date": "2020-08-05",
+                     "adsh": "0000899243-20-021539"}}]},
+    "aggregations": {"entity_filter": {"buckets": [
+        {"key": "COOK TIMOTHY D  (CIK 0001214156)", "doc_count": 45},
+        {"key": "Oak Street Health, Inc.  (CIK 0001564406)", "doc_count": 19},
+    ]}, "form_filter": {"buckets": [{"key": "4", "doc_count": 54}]}}}
+
+raw = F.efts_hits(LIVE_EFTS)
+ck("the live hits parse", len(raw) == 2 and raw[0]["form"] == "3")
+ck("the guard rejects every prose mention: none of Oak Street's people is Cook",
+   F.match_filings(raw, "Cook", "Timothy") == [])
+ents = F.efts_entities(LIVE_EFTS)
+ck("the aggregation parses: name, CIK, count",
+   ents[0] == {"name": "COOK TIMOTHY D", "cik": "1214156", "count": 45}, ents[:1])
+mine = F.match_entities(ents, "Cook", "Timothy")
+ck("the verdict finds the real person", len(mine) == 1 and mine[0]["count"] == 45)
+ck("  ...and refuses the company bucket",
+   all("Oak Street" not in e["name"] for e in mine))
+ck("  ...and a stranger's surname finds nothing", F.match_entities(ents, "Daley") == [])
+ck("no aggregation block means no entities, not a crash",
+   F.efts_entities({"hits": {"hits": []}}) == [] and F.efts_entities(None) == [])
+ck("no surname, no entities", F.match_entities(ents, "") == [])
+
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)
