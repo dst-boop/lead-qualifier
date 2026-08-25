@@ -185,6 +185,9 @@ FS_SESSIONS = os.environ.get("FIRESTORE_SESSIONS_COLLECTION", "sessions")
 # happen to hold. A session dies with its cookie; the grant the user made does
 # not, and pretending it did is why the consent screen kept coming back.
 FS_VAULT = os.environ.get("FIRESTORE_VAULT_COLLECTION", "token_vault")
+# Password accounts: identity for people whose email is not a Google or
+# Microsoft login. The account is the identity; providers are attachments.
+FS_ACCOUNTS = os.environ.get("FIRESTORE_ACCOUNTS_COLLECTION", "accounts")
 FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
 # One document per list rather than one per user. An advisor working four
 # campaigns keeps four independent documents, so a five-thousand-row import
@@ -515,7 +518,8 @@ async def ms_callback(request: Request):
     _ms_save_cache(session, cache)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result.get("error_description", "Sign-in failed"))
-    session["provider"] = "microsoft"
+    if session.get("provider") != "password":
+        session["provider"] = "microsoft"
     return RedirectResponse("/")
 
 
@@ -669,7 +673,8 @@ async def google_callback(request: Request):
         "expires_at": time.time() + tok.get("expires_in", 3600) - 60,
         "email": email,
     }
-    session["provider"] = "google"
+    if session.get("provider") != "password":
+        session["provider"] = "google"
     # No refresh token anywhere — grant, session, vault. This person has
     # genuinely never granted offline access, so ask for consent exactly
     # once, here, where we finally know it is needed.
@@ -808,9 +813,92 @@ async def logout(request: Request):
 
 # ------------------------- Shared helpers -------------------------
 
-async def _signed_in_email(request: Request) -> str:
-    """Email of the signed-in user — the key their saved list is stored under."""
+_MEM_ACCOUNTS: dict[str, dict] = {}
+
+
+def _hash_password(password: str, salt: bytes = None) -> tuple[str, str]:
+    """scrypt from the standard library — no new dependency, memory-hard, and
+    the parameters are the library documentation's interactive-login set."""
+    salt = salt or secrets.token_bytes(16)
+    h = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return base64.b64encode(salt).decode(), base64.b64encode(h).decode()
+
+
+def _password_ok(password: str, salt_b64: str, hash_b64: str) -> bool:
+    import hmac
+    try:
+        salt = base64.b64decode(salt_b64)
+        want = base64.b64decode(hash_b64)
+    except Exception:
+        return False
+    _, got = _hash_password(password, salt)
+    return hmac.compare_digest(base64.b64decode(got), want)
+
+
+async def _account_get(email: str) -> Optional[dict]:
+    doc = await _fs_get(FS_ACCOUNTS, email)
+    return doc if doc is not None else _MEM_ACCOUNTS.get(email)
+
+
+async def _account_put(email: str, doc: dict) -> None:
+    if not await _fs_set(FS_ACCOUNTS, email, doc):
+        _MEM_ACCOUNTS[email] = doc
+
+
+class AccountRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+@app.post("/auth/signup")
+async def signup(req: AccountRequest, request: Request):
+    """An account is an email and a password — any email.
+
+    No verification mail goes out yet, because the server has no mailbox of
+    its own to send from; the gap is documented rather than papered over.
+    What an unverified account gets is only its own empty workspace, so the
+    thing verification protects is the email's owner being impersonated in
+    shares — worth closing before strangers are invited, said out loud here.
+    """
+    email = str(req.email).lower().strip()
+    if len(req.password) < 10:
+        raise HTTPException(status_code=400,
+                            detail="Use at least 10 characters — a short phrase beats a complex word.")
+    if await _account_get(email):
+        raise HTTPException(status_code=409,
+                            detail="That email already has an account — sign in instead.")
+    salt, h = _hash_password(req.password)
+    await _account_put(email, {"salt": salt, "hash": h, "created_at": time.time()})
     session = request.state.session
+    session["provider"] = "password"
+    session["account_email"] = email
+    return {"ok": True, "email": email}
+
+
+@app.post("/auth/password-login")
+async def password_login(req: AccountRequest, request: Request):
+    email = str(req.email).lower().strip()
+    acct = await _account_get(email)
+    # One message for both failures: which half was wrong is exactly what a
+    # guessing attacker wants confirmed.
+    if not acct or not _password_ok(req.password, acct.get("salt", ""), acct.get("hash", "")):
+        raise HTTPException(status_code=401, detail="Wrong email or password.")
+    session = request.state.session
+    session["provider"] = "password"
+    session["account_email"] = email
+    return {"ok": True, "email": email}
+
+
+async def _signed_in_email(request: Request) -> str:
+    """Email of the signed-in user — the key their saved list is stored under.
+
+    For a password account this is the account email, deliberately even after
+    a Google or Microsoft address is linked: linking a sender must never move
+    someone's leads to a different key.
+    """
+    session = request.state.session
+    if session.get("provider") == "password" and session.get("account_email"):
+        return session["account_email"]
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -829,8 +917,22 @@ async def _signed_in_email(request: Request) -> str:
 
 
 async def _active_token(request: Request) -> tuple[str, str]:
-    """Return (provider, access_token) for the signed-in account, else 401."""
+    """Return (provider, access_token) for the signed-in account, else 401.
+
+    A password session is signed in with no provider token at all; callers
+    that only use this as a gate work unchanged, and the ones that need a
+    real Google or Microsoft token already handle its absence with their own
+    sentence.
+    """
     session = request.state.session
+    if session.get("provider") == "password" and session.get("account_email"):
+        token = await _google_token(session)
+        if token:
+            return "google", token
+        token = _ms_token(session)
+        if token:
+            return "microsoft", token
+        return "password", ""
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -937,6 +1039,10 @@ async def _sender_token(request: Request, sender_id: str) -> tuple[str, str, str
     session = request.state.session
     if not sender_id:
         provider, token = await _active_token(request)
+        if provider == "password" and not token:
+            raise HTTPException(status_code=400,
+                                detail="No sending address yet — link a Google or Microsoft "
+                                       "account from the bar at the top, then choose it here.")
         return provider, token, ""
     available = await _senders(request)
     match = next((s for s in available if s["id"] == sender_id), None)
@@ -990,6 +1096,20 @@ async def me(request: Request):
     }
     encryption = encryption_backend()
     storage = storage_backend()
+    if session.get("provider") == "password" and session.get("account_email"):
+        email = session["account_email"]
+        # Linked providers light their features up exactly as a native
+        # sign-in would; the identity just stays the account's own.
+        if session.get("google") and await _google_token(session):
+            features["drive"] = True
+        return {"signed_in": True, "provider": "password",
+                "name": email.split("@")[0], "email": email,
+                "providers": providers, "features": features,
+                "linked_google": bool(session.get("google")),
+                "linked_microsoft": bool(session.get("ms_token_cache")),
+                "zi_connected": bool(session.get("zoominfo")),
+                "zi_mcp_connected": bool(_zi_mcp_token(session)),
+                "storage": storage, "encryption": encryption}
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:

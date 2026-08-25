@@ -691,6 +691,22 @@
   </div>
 </div></div>
 
+<div class="overlay" id="mAuth"><div class="modal" style="max-width:440px">
+  <h2 id="auTitle">Sign in with email</h2>
+  <p class="hint">Any email address works &mdash; you don&rsquo;t need a Google or Microsoft
+  account to use the app. Link one later only if you want to send from it.</p>
+  <input type="email" id="auEmail" placeholder="you@anywhere.com" autocomplete="username"
+         style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:4px;font-size:.95rem;margin-bottom:8px">
+  <input type="password" id="auPass" placeholder="Password (10+ characters)" autocomplete="current-password"
+         style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:4px;font-size:.95rem">
+  <p class="hint" id="auErr" style="color:var(--tierX);min-height:1.2em;margin-top:6px"></p>
+  <div class="mfoot">
+    <button class="mbtn" onclick="document.getElementById('mAuth').classList.remove('open')">Cancel</button>
+    <button class="mbtn" onclick="authGo('signup')">Create account</button>
+    <button class="mbtn save" onclick="authGo('login')">Sign in</button>
+  </div>
+</div></div>
+
 <!-- Paste a list -->
 <div class="overlay" id="mPaste"><div class="modal" style="max-width:620px">
   <h2>Paste a list</h2>
@@ -1008,6 +1024,29 @@ function syncCampaignUI(){
   }catch(e){/* pre-render */}
 }
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
+window.openAuth=()=>{document.getElementById('auErr').textContent='';
+  document.getElementById('mAuth').classList.add('open');
+  setTimeout(()=>document.getElementById('auEmail').focus(),30);};
+window.authGo=async mode=>{
+  const email=document.getElementById('auEmail').value.trim();
+  const pass=document.getElementById('auPass').value;
+  const err=document.getElementById('auErr');
+  if(!email||!pass){err.textContent='Both fields, please.';return;}
+  try{
+    const r=await fetch(mode==='signup'?'/auth/signup':'/auth/password-login',
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({email:email,password:pass})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){
+      // A signup against an existing account is almost always a returning
+      // user on the wrong button; try the sign-in for them before saying no.
+      if(mode==='signup'&&r.status===409)return authGo('login');
+      err.textContent=(d.detail&&(''+d.detail).slice(0,160))||('Failed ('+r.status+')');
+      return;
+    }
+    location.reload();
+  }catch(e){err.textContent='Network error — try again.';}
+};
 let _cfResolve=null;
 function appConfirm(msg,title){return new Promise(res=>{_cfResolve=res;
   document.getElementById('cfTitle').textContent=title||'Confirm';
@@ -3489,15 +3528,21 @@ async function loadMe(){
     // of tokens sit on the same session, which is what makes a From picker
     // possible at all.
     const pr=ME.providers||{};
-    const other=ME.provider==='google'
-      ? (pr.microsoft&&!ME.linked_microsoft?` \u00b7 <a href="/auth/login" ${A}>Add an Outlook address</a> \u00b7 <a href="/auth/login?mode=calendar" ${A} title="For an employer mailbox (a wirehouse or insurer account): asks the tenant for calendar access only \u2014 no mail permission \u2014 which is the request corporate tenants actually approve. Invites go out from that mailbox itself, through the firm's normal mail pipeline.">Add an employer calendar</a>`:'')
-      : (pr.google&&!ME.linked_google?` \u00b7 <a href="/auth/google/login" ${A}>Add a Google address</a>`:'');
-    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${ME.provider==='google'?'Google':'Microsoft'})<span id="syncNote"></span>${other}${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
+    const gLinked=ME.provider==='google'||ME.linked_google;
+    const mLinked=ME.provider==='microsoft'||ME.linked_microsoft;
+    const links=[];
+    if(pr.google&&!gLinked)links.push(`<a href="/auth/google/login" ${A}>Add a Google address</a>`);
+    if(pr.microsoft&&!mLinked)links.push(`<a href="/auth/login" ${A}>Add an Outlook address</a>`,
+      `<a href="/auth/login?mode=calendar" ${A} title="For an employer mailbox (a wirehouse or insurer account): asks the tenant for calendar access only \u2014 no mail permission \u2014 which is the request corporate tenants actually approve. Invites go out from that mailbox itself, through the firm's normal mail pipeline.">Add an employer calendar</a>`);
+    const other=links.length?' \u00b7 '+links.join(' \u00b7 '):'';
+    const tag=ME.provider==='google'?'Google':ME.provider==='microsoft'?'Microsoft':'email account';
+    bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${tag})<span id="syncNote"></span>${other}${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
-    const l=[];const pr=ME.providers||{};
+    const l=[`<a href="#" onclick="openAuth();return false" ${A}>Sign in / create an account</a>`];
+    const pr=ME.providers||{};
     if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);
     if(pr.microsoft)l.push(`<a href="/auth/login" ${A}>Sign in with Microsoft</a>`);
-    bar.innerHTML=l.length?l.join(' \u00b7 ')+' \u2014 sign in to send email, invites & verify phones':'';
+    bar.innerHTML=l.join(' \u00b7 ')+' \u2014 any email works; Google and Microsoft are optional';
   }
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
   if(ME.features&&ME.features.drive)document.getElementById('btnDrive').style.display='';

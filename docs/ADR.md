@@ -1944,3 +1944,41 @@ Two things deliberately not copied from the example: `.Shared` scopes
 easily and reads better in a tenant review), and the absence of a `state`
 parameter in its authorize URL (MSAL supplies state and PKCE here; the CSRF
 hole is theirs to keep).
+
+## 29. The account is the identity; providers are attachments
+
+"This app needs to be accessible and usable by ANYone, not just me and
+financialplannersofamerica."
+
+Until now, signing in WAS a Google or Microsoft grant — identity and sending
+capability arrived welded together. §28 loosened the weld on the sending
+side (an employer calendar as a second attachment); this entry cuts it: an
+account is an email and a password, any email, and Google/Microsoft are
+things an account links, not things it is.
+
+The one decision with teeth is the identity key. `_signed_in_email` is what
+lead lists are stored under, and for a password account it returns the
+account email **even after a Google address is linked** — linking a sender
+that silently re-keyed someone's leads would be indistinguishable from the
+app deleting them. The test asserts exactly that sequence: create list, link
+Google, list still there.
+
+Everything downstream follows from the split being honest:
+
+- OAuth callbacks no longer overwrite `provider` on a password session —
+  linking is attachment, not conversion.
+- `_active_token` treats a password session as signed in, handing back a
+  linked provider token when one exists and a bare identity when not; the
+  few callers that truly need a provider token already say so in their own
+  words ("link a Google or Microsoft account", named in the refusal).
+- Sign-in failures use one message for both wrong-password and no-account —
+  which half was wrong is precisely what an enumerating attacker asks.
+- scrypt from the standard library; no new dependency for the first
+  password this codebase has ever stored.
+
+Stated gaps, not papered over: no verification mail and no password reset,
+both because the server owns no mailbox to send from. The risk unverified
+accounts carry is impersonation in shares, so it must close before strangers
+share lists. And the Google OAuth app must go External + published for
+"anyone" to include Google-linking — §SETUP-accounts has the trade against
+the Internal advice that fixed the consent nag for a firm-internal app.
