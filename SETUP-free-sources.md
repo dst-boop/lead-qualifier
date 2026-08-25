@@ -56,3 +56,21 @@ doubt with one line:
 `fields` is every path in the raw response with a sample; `read` is what the
 app extracted. If those two disagree, send them to me — it is a five-minute
 fix.
+
+## "edgar API does not work"
+
+`/api/free-debug?source=efts&name=…` no longer answers a failure with an
+exception page — it reports what actually happened:
+
+- **`ua_set: false`** — `EDGAR_USER_AGENT` is not set on the service. This is
+  the usual cause: the FEC half works out of the box, the SEC half needs this
+  one variable. Set it to your firm name plus a contact email, e.g.
+  `Financial Planners of America dst@financialplannersofamerica.com`
+  (Cloud Run → Edit & deploy new revision → Variables).
+- **`status: 403`** with the SEC's body shown — the User-Agent was sent but
+  rejected; make sure it contains a real firm name and email address.
+- **`status` + `body`** for anything else — the SEC's own words, verbatim.
+
+The ⚖ panel is honest about the same thing: "Not checked: SEC insider
+filings — EDGAR_USER_AGENT not set" means the search never ran, not that the
+person has no filings.
