@@ -101,18 +101,32 @@ const me=o=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',provid
      stages.join(' → ')==='Source → Enrich → Qualify → Track', stages.join(' → '));
 
   // --- enrich stage only offers what it can actually do ----------------------
-  ck('nothing to enrich without ZoomInfo ids',
-     await p.evaluate(()=>document.getElementById('btnEnrichAll').disabled)===true);
-  ck('  ...and it says why rather than showing a dead button',
-     /no ZoomInfo id|Nothing to enrich/.test(await txt('#sEnrich')), await txt('#sEnrich'));
+  // "There needs to be a way to use ZoomInfo and obtain the contact information
+  // for leads without it. This would be for all leads." A ZoomInfo id is the
+  // exact key; a name at a company is the one every uploaded list already has,
+  // and requiring the id meant such a list could never be enriched at all.
+  const sheetSourced=await p.evaluate(()=>({
+    n:document.getElementById('cEnrich').textContent,
+    off:document.getElementById('btnEnrichAll').disabled,
+    line:document.getElementById('sEnrich').textContent}));
+  ck('a sheet lead with no ZoomInfo id is still enrichable, on name and employer',
+     sheetSourced.off===false&&sheetSourced.n==='1', JSON.stringify(sheetSourced));
+  ck('  ...and the stage says so rather than showing a dead button',
+     /ZoomInfo can fill them/.test(sheetSourced.line), sheetSourced.line);
   const withIds=await p.evaluate(()=>{
     state.leads[0].contactId='555';state.leads[0].mobilePhone='';
     render();
     return {n:document.getElementById('cEnrich').textContent,
             label:document.getElementById('btnEnrichAll').textContent,
             off:document.getElementById('btnEnrichAll').disabled};});
-  ck('a lead with an id and a gap becomes enrichable',
-     withIds.n==='1'&&withIds.label==='Enrich 1'&&withIds.off===false, JSON.stringify(withIds));
+  ck('a lead with an id and a gap is enrichable too',
+     withIds.n==='2'&&withIds.label==='Enrich 2'&&withIds.off===false, JSON.stringify(withIds));
+  ck('  ...and the id is preferred as the lookup key when there is one',
+     await p.evaluate(()=>JSON.stringify(ziKey(state.leads[0])))==='{"personId":"555"}',
+     await p.evaluate(()=>JSON.stringify(ziKey(state.leads[0]))));
+  ck('  ...while a lead without one is looked up by name at the company',
+     await p.evaluate(()=>{const L=state.leads.find(x=>x.lastName==='Bravo');
+       const k=ziKey(L);return k&&k.companyName==='Cordova'&&k.lastName==='Bravo';}));
 
   // --- track stage -----------------------------------------------------------
   const tracked=await p.evaluate(()=>{
@@ -153,12 +167,20 @@ const me=o=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',provid
     return document.getElementById('sEnrich').textContent;});
   ck('parked leads are named as the reason, not "nothing waiting"',
      /waiting on your credit limit/.test(idle), idle);
-  const noId=await p.evaluate(()=>{
+  // A lead with nothing to look up by — no id, no employer, no email — is the
+  // only genuinely idle case left, and it still has to say why.
+  const noKey=await p.evaluate(()=>{
+    state.leads=[{id:'p',firstName:'P',lastName:'Q',status:'New',activity:[]}];
+    state.leads.forEach(scoreLead);render();
+    return {line:document.getElementById('sEnrich').textContent,
+            off:document.getElementById('btnEnrichAll').disabled};});
+  ck('a lead with no id and no employer cannot be looked up, and is told so',
+     /no name-and-employer/.test(noKey.line)&&noKey.off===true, JSON.stringify(noKey));
+  const byEmail=await p.evaluate(()=>{
     state.leads=[{id:'p',firstName:'P',lastName:'Q',email:'e@x.com',status:'New',activity:[]}];
     state.leads.forEach(scoreLead);render();
-    return document.getElementById('sEnrich').textContent;});
-  ck('a file-sourced lead with no id is explained too',
-     /is missing contact details/.test(noId)&&/no ZoomInfo id/.test(noId), noId);
+    return document.getElementById('btnEnrichAll').disabled;});
+  ck('  ...but an email alone is a lookup key ZoomInfo accepts', byEmail===false);
 
   // --- the overflow menu -----------------------------------------------------
   ck('the secondary actions start hidden', await p.evaluate(()=>document.getElementById('moreMenu').hidden));

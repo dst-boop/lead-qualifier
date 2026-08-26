@@ -38,6 +38,7 @@ and `opportunities-test.py` drive FastAPI (or the parsers) directly.
 | `zi-ui-test.js` | the ZoomInfo connect/disconnect states in the auth bar |
 | `zi-oauth-test.py` | the per-user ZoomInfo OAuth flow against a stub that validates PKCE properly |
 | `edgar-test.py` | SEC lookups: the required User-Agent, the rate limit, ambiguous company names, and every way an age can fail to be real |
+| `credits-test.py` | the two monthly allowances: a lookup charged once, the same question answered free, the saving surviving a restart, the allowance refusing before the vendor is called, and a cached answer still served when the pool is empty |
 | `edgar-roster-test.py` | the batch proxy reader: one AI read per employer however many leads work there, the week-long cache, cheap refusals for private employers, and a namesake pair that returns no age rather than a coin flip |
 | `edgar-ui-test.js` | the 🏛 button — score change, the filing evidence shown, and a miss that is recorded rather than retried |
 | `zi-mcp-test.py` | ZoomInfo via the MCP connector — that both halves of the request are sent, the token is per-user, and failures are errors rather than empty lists |

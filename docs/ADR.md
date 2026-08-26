@@ -2073,3 +2073,58 @@ What stays out is the line the button must not cross: **WhitePages spends
 lookup credits from a finite pool**, so it remains a per-lead press with the
 count in front of you. The confirm dialog names the exclusion, because "all
 free sources" is only a useful promise if what it leaves out is stated.
+
+## 33. Two allowances, and the cache that was throwing money away
+
+"Costs MUST be minimized when using paid enrichment. ZoomInfo has 2000 credits
+per month. White pages has 1000 credits per month. Use them strategically.
+Keep in mind the rules of relooking them up."
+
+Two things were quietly wrong. The WhitePages cache — the entire mechanism by
+which re-checking a lead costs nothing — lived in process memory. Cloud Run
+recycles an instance whenever traffic pauses, so the cache emptied overnight,
+every night, and the same lead cost a second credit in the morning. The app
+believed it was saving; the invoice disagreed. And `WP_SPEND` reset with it, so
+the only way to discover the allowance was gone was to be refused by the vendor.
+
+Both are now durable. Cached answers live in Firestore under the same KMS
+envelope as sessions — they hold dates of birth and home addresses — and the
+ledger is one document per calendar month, incremented atomically because a
+lost increment is an undercount, and an undercount is an overspend against the
+number the user set precisely so that could not happen.
+
+The allowance is checked **at the one place a credit is actually spent**, not
+at each of the callers. Every present and future caller is covered by
+construction, and the refusal names the reset date and points at the free
+sources, because "you have run out" without "and here is what still works" is
+half an answer.
+
+Two asymmetries are deliberate. **A cached answer is served even when the
+allowance is gone** — it costs nothing, and refusing it would punish the user
+for the app's own bookkeeping. And **ZoomInfo's spend is self-reported by the
+browser**, because two of the three routes to ZoomInfo run through the user's
+own Claude connector and never touch this server; counting only what passes
+through here would show a budget as untouched while it drained. The report is
+of *billable* enrichments only: ZoomInfo re-enriches a contact free for a year,
+so the app stamps `ziAt` and charges the month for the rest.
+
+### And a ZoomInfo id is no longer required to enrich
+
+"There needs to be a way to use ZoomInfo and obtain the contact information for
+leads without it. This would be for all leads." Enrichment keyed on
+`contactId`, so an uploaded list could never be enriched at all, however
+completely it named the person. ZoomInfo matches on name-plus-company and on
+email; `ziKey()` prefers the id when there is one and falls back to those, and
+the confirm dialog says plainly that a name match is not guaranteed and that an
+unmatched lead is not billed.
+
+### The field that stayed out
+
+While adding fields, `yearsOfExperience` looked like an obvious omission — the
+MCP tool schema advertises it and the app scores on career length. §18 records
+why not: the account rejects it as a disallowed field, and rejects it
+*partially*, eight of ten contacts in a batch hard-failing while two returned
+with a warning, after the credits were spent. An advertised field the
+entitlement refuses is this codebase's oldest trap. `scs-test.js` reads
+`enrichLeads.toString()` and fails if the name appears anywhere inside it —
+including in a comment, which is why the explanation lives above the function.
