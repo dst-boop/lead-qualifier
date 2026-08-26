@@ -771,9 +771,11 @@
 </div></div>
 
 <div class="overlay" id="mAuth"><div class="modal" style="max-width:440px">
-  <h2 id="auTitle">Sign in with email</h2>
-  <p class="hint">Any email address works &mdash; you don&rsquo;t need a Google or Microsoft
-  account to use the app. Link one later only if you want to send from it.</p>
+  <h2 id="auTitle">Sign in or create an account</h2>
+  <p class="hint">Your account is your email address. However you sign in below,
+  the same address lands in the same account.</p>
+  <div id="auProv"></div>
+  <p class="hint" id="auOr" style="text-align:center;margin:10px 0 8px">&mdash; or with any email and a password &mdash;</p>
   <input type="email" id="auEmail" placeholder="you@anywhere.com" autocomplete="username"
          style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:4px;font-size:.95rem;margin-bottom:8px">
   <input type="password" id="auPass" placeholder="Password (10+ characters)" autocomplete="current-password"
@@ -1104,6 +1106,18 @@ function syncCampaignUI(){
 }
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
 window.openAuth=()=>{document.getElementById('auErr').textContent='';
+  // The one door: Google and Microsoft are ways through it, not other doors.
+  // They render inside the modal so nobody has to guess how the bar links
+  // relate to "create an account" — Dan didn't, which is how we know.
+  const pr=(window.ME&&ME.providers)||{};
+  const P='style="display:block;width:100%;margin-bottom:8px;padding:10px 12px;'+
+    'border:1px solid var(--line);border-radius:4px;background:#fff;'+
+    'color:var(--ink);font-weight:500;text-align:center;text-decoration:none"';
+  const prov=[];
+  if(pr.google)prov.push(`<a href="/auth/google/login" ${P}>Continue with Google</a>`);
+  if(pr.microsoft)prov.push(`<a href="/auth/login" ${P}>Continue with Microsoft</a>`);
+  document.getElementById('auProv').innerHTML=prov.join('');
+  document.getElementById('auOr').style.display=prov.length?'':'none';
   document.getElementById('mAuth').classList.add('open');
   setTimeout(()=>document.getElementById('auEmail').focus(),30);};
 window.authGo=async mode=>{
@@ -3666,11 +3680,10 @@ async function loadMe(){
     const tag=ME.provider==='google'?'Google':ME.provider==='microsoft'?'Microsoft':'email account';
     bar.innerHTML=`Signed in as <b>${esc(ME.name||ME.email)}</b> (${tag})<span id="syncNote"></span>${other}${zi} \u00b7 <a href="/auth/logout" ${A}>Sign out</a>`;
   }else{
-    const l=[`<a href="#" onclick="openAuth();return false" ${A}>Sign in / create an account</a>`];
-    const pr=ME.providers||{};
-    if(pr.google)l.push(`<a href="/auth/google/login" ${A}>Sign in with Google</a>`);
-    if(pr.microsoft)l.push(`<a href="/auth/login" ${A}>Sign in with Microsoft</a>`);
-    bar.innerHTML=l.join(' \u00b7 ')+' \u2014 any email works; Google and Microsoft are optional';
+    // One door. Google and Microsoft are offered inside the modal as
+    // "Continue with\u2026" \u2014 three bar links read as three different systems.
+    bar.innerHTML=`<a href="#" onclick="openAuth();return false" ${A}>Sign in / create an account</a>`+
+      ' \u2014 with any email, Google, or Microsoft';
   }
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
   // With server-side storage the JSON backup pair is a localStorage-era

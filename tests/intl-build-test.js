@@ -224,6 +224,42 @@ const LEADS=[
   ck('auth-bar links are ice blue on the dark strip, not accent-on-navy',
      linkColor==='rgb(182, 211, 223)', linkColor);
 
+  // One door. "I didnt realize that sign in/create account and sign in with
+  // google were two different options" — they aren't, and the UI said they
+  // were: three bar links reading as three systems. The bar now offers one
+  // entry and the modal holds every route, with the fact that makes it safe
+  // to pick any of them (same email, same account) said out loud.
+  who={signed_in:false,providers:{google:true,microsoft:true},features:feat()};
+  await p.goto('http://127.0.0.1:8099/',{waitUntil:'domcontentloaded'});
+  await p.waitForFunction(()=>window.ME&&window.ME.signed_in===false);
+  await p.waitForTimeout(200);
+  const barLinks=await p.evaluate(()=>[...document.querySelectorAll('#authbar a')].map(a=>a.textContent.trim()));
+  ck('signed out, the bar has ONE way in',
+     barLinks.length===1&&/Sign in \/ create an account/.test(barLinks[0]), barLinks.join('|'));
+  await p.evaluate(()=>openAuth());
+  const modal=await p.evaluate(()=>({
+    open:document.getElementById('mAuth').classList.contains('open'),
+    title:document.getElementById('auTitle').textContent.trim(),
+    hint:document.querySelector('#mAuth .hint').textContent.replace(/\s+/g,' ').trim(),
+    prov:[...document.querySelectorAll('#auProv a')].map(a=>[a.textContent.trim(),a.getAttribute('href')]),
+    or:getComputedStyle(document.getElementById('auOr')).display!=='none'}));
+  ck('the modal is the door, and its title says both verbs',
+     modal.open&&/Sign in or create an account/.test(modal.title), modal.title);
+  ck('  ...it states the rule that makes any route safe: same address, same account',
+     /same address lands in the same account/.test(modal.hint), modal.hint);
+  ck('  ...Google and Microsoft are routes inside it',
+     modal.prov.length===2&&modal.prov[0][1]==='/auth/google/login'
+     &&modal.prov[1][1]==='/auth/login', JSON.stringify(modal.prov));
+  ck('  ...labelled Continue with, not a second Sign in',
+     modal.prov.every(x=>/^Continue with /.test(x[0])), JSON.stringify(modal.prov));
+  ck('  ...and the divider offers email as the third route', modal.or===true);
+  await p.evaluate(()=>{document.getElementById('mAuth').classList.remove('open');
+    ME.providers={};openAuth();});
+  const bare=await p.evaluate(()=>({prov:document.getElementById('auProv').innerHTML,
+    or:getComputedStyle(document.getElementById('auOr')).display!=='none'}));
+  ck('with no providers configured the divider vanishes with the buttons',
+     bare.prov===''&&bare.or===false, JSON.stringify(bare));
+
   ck('no page errors', errs.length===0, errs.slice(0,2).join(' | '));
   console.log(fail?`\nFAILURES: ${fail} of ${n}`:`\nall ${n} checks passed`);
   await b.close();process.exit(fail?1:0);
