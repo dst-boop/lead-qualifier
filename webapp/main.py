@@ -192,6 +192,16 @@ FS_VAULT = os.environ.get("FIRESTORE_VAULT_COLLECTION", "token_vault")
 # Microsoft login. The account is the identity; providers are attachments.
 FS_ACCOUNTS = os.environ.get("FIRESTORE_ACCOUNTS_COLLECTION", "accounts")
 FS_STATE = os.environ.get("FIRESTORE_STATE_COLLECTION", "lead_state")
+# Paid-lookup answers, shared and durable. The in-process cache saved a credit
+# only until Cloud Run recycled the instance — which it does whenever traffic
+# stops — so the "already asked this" saving evaporated overnight, every night,
+# and the same lead cost a second credit in the morning. Sealed, because these
+# documents hold dates of birth and home addresses.
+FS_CACHE = os.environ.get("FIRESTORE_CACHE_COLLECTION", "lookup_cache")
+# What has been spent this calendar month, against a monthly allowance. One
+# document per month, incremented atomically, because the process-lifetime
+# counter it replaces reported a fraction of the truth after every recycle.
+FS_LEDGER = os.environ.get("FIRESTORE_LEDGER_COLLECTION", "credit_ledger")
 # One document per list rather than one per user. An advisor working four
 # campaigns keeps four independent documents, so a five-thousand-row import
 # cannot push the others towards Firestore's per-document limit, and switching
@@ -334,6 +344,73 @@ async def _fs_set(collection: str, key: str, value: dict) -> bool:
         print(f"[storage] Firestore write failed, using memory: {e}")
         _fs_failed = True
         return False
+
+
+async def _fs_inc(collection: str, key: str, deltas: dict) -> bool:
+    """Add to numeric fields atomically, creating the document if needed.
+
+    Read-modify-write would lose an increment whenever two lookups overlap, and
+    a lost increment means an under-count, which means over-spending against an
+    allowance the user set precisely so that could not happen.
+    """
+    global _fs_failed
+    db = _firestore()
+    if db is None:
+        return False
+    try:
+        from google.cloud import firestore
+        await db.collection(collection).document(key).set(
+            {k: firestore.Increment(v) for k, v in deltas.items()}, merge=True)
+        return True
+    except Exception as e:
+        print(f"[storage] Firestore increment failed, using memory: {e}")
+        _fs_failed = True
+        return False
+
+
+# ------------------------- the credit ledger -------------------------
+#
+# "Costs MUST be minimized when using paid enrichment. ZoomInfo has 2000
+# credits per month. White pages has 1000 credits per month."
+#
+# Two allowances, one rule: nothing bills twice for the same question, and
+# nothing bills at all once the month's allowance is gone. The vendors enforce
+# their own caps eventually — with a 429 and a wasted round trip — but a cap
+# discovered at the vendor is a cap discovered too late to choose differently.
+
+WP_MONTHLY = int(os.environ.get("WHITEPAGES_MONTHLY_CREDITS", "1000"))
+ZI_MONTHLY = int(os.environ.get("ZOOMINFO_MONTHLY_CREDITS", "2000"))
+_MEM_LEDGER: dict = {}
+
+
+def _month() -> str:
+    return time.strftime("%Y-%m", time.gmtime())
+
+
+def _month_resets() -> str:
+    """First day of next month, ISO, so the UI can say when the pool refills."""
+    y, m = (int(x) for x in _month().split("-"))
+    return f"{y + 1:04d}-01-01" if m == 12 else f"{y:04d}-{m + 1:02d}-01"
+
+
+async def _ledger_read(month: str = "") -> dict:
+    month = month or _month()
+    doc = await _fs_get(FS_LEDGER, month) or _MEM_LEDGER.get(month) or {}
+    return {"wp": int(doc.get("wp") or 0), "zi": int(doc.get("zi") or 0)}
+
+
+async def _ledger_add(kind: str, n: int = 1) -> None:
+    if n <= 0:
+        return
+    month = _month()
+    if not await _fs_inc(FS_LEDGER, month, {kind: n}):
+        cur = _MEM_LEDGER.setdefault(month, {})
+        cur[kind] = int(cur.get(kind) or 0) + n
+
+
+async def _budget_left(kind: str) -> int:
+    spent = (await _ledger_read())[kind]
+    return max(0, (WP_MONTHLY if kind == "wp" else ZI_MONTHLY) - spent)
 
 
 async def _fs_del(collection: str, key: str) -> bool:
@@ -1221,6 +1298,7 @@ async def me(request: Request):
     }
     encryption = encryption_backend()
     storage = storage_backend()
+    credits = await _credit_block()
     if session.get("provider") == "password" and session.get("account_email"):
         email = session["account_email"]
         # Linked providers light their features up exactly as a native
@@ -1234,7 +1312,7 @@ async def me(request: Request):
                 "linked_microsoft": bool(session.get("ms_token_cache")),
                 "zi_connected": bool(session.get("zoominfo")),
                 "zi_mcp_connected": bool(_zi_mcp_token(session)),
-                "storage": storage, "encryption": encryption}
+                "storage": storage, "encryption": encryption, "credits": credits}
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -1248,7 +1326,7 @@ async def me(request: Request):
                         "providers": providers, "features": features,
                         "zi_connected": bool(session.get("zoominfo")),
                         "zi_mcp_connected": bool(_zi_mcp_token(session)),
-                        "storage": storage, "encryption": encryption}
+                        "storage": storage, "encryption": encryption, "credits": credits}
     token = _ms_token(session)
     if token:
         async with httpx.AsyncClient(timeout=15) as cx:
@@ -1264,7 +1342,7 @@ async def me(request: Request):
                     "linked_google": bool(session.get("google")),
                     "linked_microsoft": bool(session.get("ms_token_cache")),
                     "zi_connected": bool(session.get("zoominfo")),
-                    "storage": storage, "encryption": encryption}
+                    "storage": storage, "encryption": encryption, "credits": credits}
     return JSONResponse({"signed_in": False, "providers": providers,
                          "features": features, "storage": storage,
                          "encryption": encryption})
@@ -1491,6 +1569,38 @@ def _wp_key(kind: str, params: dict) -> str:
     return kind + "|" + "&".join(f"{k}={params[k]}" for k in sorted(params))
 
 
+async def _wp_cached(key: str):
+    """A previous answer to this exact question, from memory or from Firestore.
+
+    Returns (found, value). `found` is separate from `value` because None is a
+    real answer here — "WhitePages has no record of this person" is worth a
+    credit and worth remembering, and re-asking it is the most wasteful lookup
+    the app can make.
+    """
+    hit = _WP_CACHE.get(key)
+    if hit and time.time() - hit[0] < WP_TTL:
+        return True, hit[1]
+    doc = await _fs_get(FS_CACHE, "wp:" + hashlib.sha256(key.encode()).hexdigest())
+    if not doc or time.time() - float(doc.get("at") or 0) >= WP_TTL:
+        return False, None
+    raw = _unseal(doc)
+    if raw is None:
+        return False, None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return False, None
+    _WP_CACHE[key] = (float(doc["at"]), value)          # warm this instance too
+    return True, value
+
+
+async def _wp_remember(key: str, value) -> None:
+    _WP_CACHE[key] = (time.time(), value)
+    doc = _seal(json.dumps(value))
+    doc["at"] = time.time()
+    await _fs_set(FS_CACHE, "wp:" + hashlib.sha256(key.encode()).hexdigest(), doc)
+
+
 def _wp_path(kind: str) -> str:
     """Endpoint path for a lookup, per API flavour.
 
@@ -1551,19 +1661,33 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False):
         )
 
     key = _wp_key(kind, params)
-    hit = _WP_CACHE.get(key)
-    if hit and not fresh and time.time() - hit[0] < WP_TTL:
-        WP_SPEND["served_from_cache"] += 1
-        return hit[1]
+    if not fresh:
+        found, value = await _wp_cached(key)
+        if found:
+            WP_SPEND["served_from_cache"] += 1
+            return value
+
+    # The allowance is checked here, at the one place a credit is actually
+    # spent, so every caller is covered by construction and none of them has to
+    # remember to ask.
+    if await _budget_left("wp") <= 0:
+        WP_SPEND["refused"] += 1
+        raise HTTPException(
+            status_code=400,
+            detail=(f"This month's WhitePages allowance ({WP_MONTHLY} lookups) is spent. "
+                    f"It resets {_month_resets()}. Nothing was looked up. "
+                    f"Free sources still work — press Enrich all (free)."),
+        )
 
     url = WHITEPAGES_BASE_URL + _wp_path(kind)
     WP_SPEND["calls"] += 1
+    await _ledger_add("wp", 1)
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
     if r.status_code in (401, 403):
         raise HTTPException(status_code=502, detail="WhitePages rejected the API key — check WHITEPAGES_API_KEY.")
     if r.status_code == 404:
-        _WP_CACHE[key] = (time.time(), None)
+        await _wp_remember(key, None)
         return None          # documented as "no matching record"
     if r.status_code == 429:
         # Two very different things share this code. Ordinary throttling clears
@@ -1603,7 +1727,7 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False):
         raise HTTPException(status_code=502, detail=f"WhitePages returned non-JSON from {url}.")
     # A zero-result answer is cached like any other. It was paid for, and the
     # same query will keep returning it.
-    _WP_CACHE[key] = (time.time(), out)
+    await _wp_remember(key, out)
     return out
 
 
@@ -3138,6 +3262,66 @@ async def edgar_debug(request: Request, url: str = ""):
     return {"url": target, "status": r.status_code,
             "content_type": r.headers.get("content-type", ""),
             "body": r.text[:4000]}
+
+
+async def _credit_block() -> dict:
+    """Both allowances, in the shape the browser renders.
+
+    Returned by /api/me (once per page load, no extra request) and by every
+    endpoint that spends a credit, so the number a user is looking at was true
+    as of the last thing they did rather than as of the last time they thought
+    to ask.
+    """
+    if not (WHITEPAGES_API_KEY or ZI_CLIENT_ID or ANTHROPIC_API_KEY):
+        return {}
+    led = await _ledger_read()
+    return {
+        "month": _month(), "resets_on": _month_resets(),
+        "whitepages": {"spent": led["wp"], "budget": WP_MONTHLY,
+                       "left": max(0, WP_MONTHLY - led["wp"])},
+        "zoominfo": {"spent": led["zi"], "budget": ZI_MONTHLY,
+                     "left": max(0, ZI_MONTHLY - led["zi"])},
+        "cache_entries": len(_WP_CACHE),
+        "cache_days": round(WP_TTL / 86400),
+    }
+
+
+class SpendReport(BaseModel):
+    kind: str = ""          # "zi"
+    n: int = 0
+
+
+@app.get("/api/credits")
+async def credits(request: Request):
+    """Both paid allowances: what is spent this month, and what is left.
+
+    Counted at the point of spending and stored per calendar month, so it
+    survives the instance recycles that used to reset the old counter to zero
+    every time traffic paused.
+    """
+    await _active_token(request)
+    return await _credit_block()
+
+
+@app.post("/api/credits")
+async def credits_spend(req: SpendReport, request: Request):
+    """Record credits spent on a route the server did not make itself.
+
+    ZoomInfo enrichment can run through the user's own Claude connector, which
+    never touches this server. Counting only what passes through here would
+    report a budget as untouched while it drained, so the client reports what
+    it spent — and reports only what it believes was billable, since
+    re-enriching the same contact inside a year is free at ZoomInfo.
+    """
+    await _active_token(request)
+    if req.kind not in ("zi", "wp"):
+        raise HTTPException(status_code=400, detail="kind must be zi or wp.")
+    n = max(0, min(int(req.n or 0), 10000))
+    await _ledger_add(req.kind, n)
+    led = await _ledger_read()
+    budget = ZI_MONTHLY if req.kind == "zi" else WP_MONTHLY
+    return {"spent": led[req.kind], "budget": budget,
+            "left": max(0, budget - led[req.kind]), "resets_on": _month_resets()}
 
 
 @app.get("/api/wp-spend")

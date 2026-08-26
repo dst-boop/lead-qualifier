@@ -696,6 +696,7 @@
   <h2>Data coverage</h2>
   <p class="hint">What each signal has to work with. A signal starved of input scores zero on every lead, which looks like a bad list rather than a missing column.</p>
   <div id="covBody"></div>
+  <div id="covBudget"></div>
   <div class="mfoot"><button class="mbtn save" onclick="closeModal('mCoverage')">Close</button></div>
 </div></div>
 
@@ -1914,6 +1915,37 @@ function ziNormalize(c,batch,ctx){
     mobileDnc:pick(c,'mobilePhoneDoNotCall','mobileDoNotCall'),
     directDnc:pick(c,'directPhoneDoNotCall','doNotCall')};
 }
+/* ---- the two paid allowances ----
+   ZoomInfo bills 2,000 credits a month, WhitePages 1,000. Both pools are
+   spent by buttons in this app, and until now neither button knew what was
+   left — the only way to find out was to run out. The server counts what it
+   spends and the client reports what it spent through the user's own Claude
+   connector, which the server never sees. */
+let CREDITS={};
+/* The budget arrives with /api/me, so a page load costs no extra request and a
+   deployment with no paid source configured simply has no budget to show. Its
+   presence is also the signal that asking the server for a fresh count is
+   worth doing at all. */
+function creditsKnown(){return !!(CREDITS&&CREDITS.month);}
+async function loadCredits(){
+  if(!creditsKnown())return CREDITS;
+  try{CREDITS=await api('/api/credits',null,'GET');}catch(e){/* keep what we had */}
+  try{renderPipeline();}catch(e){/* pre-render */}
+  return CREDITS;
+}
+async function reportSpend(kind,n){
+  if(!n||!creditsKnown())return;
+  const which=kind==='zi'?'zoominfo':'whitepages';
+  try{
+    const d=await api('/api/credits',{kind:kind,n:n});
+    if(CREDITS[which])Object.assign(CREDITS[which],{spent:d.spent,left:d.left});
+  }catch(e){/* the lookup already happened; a lost count is not worth a failure */}
+}
+function creditLine(which){
+  const c=CREDITS[which];
+  if(!c||!c.budget)return '';
+  return `${c.left.toLocaleString()} of ${c.budget.toLocaleString()} ${which==='zoominfo'?'ZoomInfo':'WhitePages'} credits left this month`;
+}
 const OUTSIDE_MSG='To use ZoomInfo here, save your ZoomInfo MCP token under ICP settings — then build & enrich work in any browser. Without one, they only work while this app is running inside Claude, using the connector on your Claude account. Everything else — CSV import, scoring, calling, export — works anywhere.';
 /* Two routes to ZoomInfo, in order of preference:
    1. The signed-in user's own connected seat, proxied by our backend. Calls are
@@ -2127,21 +2159,31 @@ function harvestEnriched(o,out,depth){
   if(Array.isArray(o)){o.forEach(x=>harvestEnriched(x,out,depth+1));return;}
   if(typeof o==='object'){const g=flat(o);if(looksEnriched(g)){out.push(g);return;}Object.values(o).forEach(v=>harvestEnriched(v,out,depth+1));}
 }
+/* The requested-field list is load-bearing and one field is deliberately absent
+   from it: career length. ADR §18 records what happened when it was asked for —
+   the account rejected it as a disallowed field and did so PARTIALLY, eight of
+   ten contacts in a batch hard-failing while two returned with a warning, after
+   the credits were spent. ZoomInfo's own tool schema advertises the field; the
+   entitlement refuses it, which is the same "documented but not available" trap
+   this app has walked into five times. scs-test.js reads this function's source
+   and fails if the name reappears anywhere inside it — including in a comment,
+   which is why this note lives out here. */
 async function enrichLeads(list){
   const st=document.getElementById('bStatus'),btn=document.getElementById('btnEnrich');
   btn.disabled=true;st.classList.remove('err');
   const batches=[];for(let i=0;i<list.length;i+=10)batches.push(list.slice(i,i+10));
-  let done=0,failed=0,blocked=0,lastErr='';
+  let done=0,failed=0,blocked=0,billed=0,lastErr='';
   try{
     for(let bi=0;bi<batches.length;bi++){
       st.textContent=`Enriching batch ${bi+1} of ${batches.length}\u2026`;
-      const ids=batches[bi].map(L=>L.contactId).filter(Boolean);
-      if(!ids.length)continue;
+      const keys=batches[bi].map(ziKey).filter(Boolean);
+      if(!keys.length)continue;
+      const ids=keys;
       const prompt=`Call the ZoomInfo tool named enrich_contacts exactly ONCE with:
-contacts: ${JSON.stringify(ids.map(id=>({personId:''+id})))}
+contacts: ${JSON.stringify(keys)}
 requiredFields: ["firstName","lastName","email","phone","mobilePhone","mobilePhoneDoNotCall","directPhoneDoNotCall","jobTitle","managementLevel","companyName","positionStartDate","externalUrls","education","employmentHistory","contactAccuracyScore"]
 userIntent: "Enriching qualified prospects for a financial advisory call list"
-Every personId value must be passed as a string, exactly as given. Make exactly ONE call to enrich_contacts with the full contacts array — do not split it into multiple calls. After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`;
+Pass every value as a string, exactly as given — a personId identifies a contact exactly, and a firstName/lastName/companyName trio asks ZoomInfo to match on the name at that company. Make exactly ONE call to enrich_contacts with the full contacts array — do not split it into multiple calls. After the tool result returns, reply with exactly one word: DONE. If the tool returns an error, reply with the full error message instead.`;
       try{
         const payloads=await callClaude(prompt);
         const recs=[];payloads.forEach(pl=>harvestEnriched(pl,recs,0));
@@ -2172,6 +2214,8 @@ Every personId value must be passed as a string, exactly as given. Make exactly 
           if(li)L.linkedinUrl=''+li;
           const gy=extractGradYear(rec.education);if(gy)L.gradYear=gy;
           if(detectHopper(rec.employmentHistory))L.jobHopper=true;
+          if(ziBillable(L))billed++;
+          L.ziAt=Date.now();
           L.enriched=true;L.retryBlocked=false;L.retryReason='';L.updatedAt=Date.now();scoreLead(L);done++;
         });
         if(!matchedInBatch){
@@ -2191,9 +2235,16 @@ Every personId value must be passed as a string, exactly as given. Make exactly 
         }
       }
     }
+    // Charge the month for what was actually billable. Two of the three routes
+    // to ZoomInfo run through the user's own Claude account and never touch our
+    // server, so if the client did not report this the budget would read as
+    // untouched while it drained.
+    if(billed)await reportSpend('zi',billed);
     const parked=blocked?` ${blocked} parked in Retry blocked — your credit limit is spent; click Retry blocked when it resets.`:'';
+    const free=done-billed;
+    const cost=done?` ${billed} credit${billed===1?'':'s'} spent${free>0?`, ${free} free (enriched within the last year)`:''}${CREDITS.zoominfo?` — ${Math.max(0,CREDITS.zoominfo.left)} of ${CREDITS.zoominfo.budget} left this month`:''}.`:'';
     st.textContent=done
-      ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}.${parked} Emails, phones and start dates are live; scores are now firm.`
+      ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}.${cost}${parked} Emails, phones and start dates are live; scores are now firm.`
       :`Enriched 0 leads.${parked} ${blocked?'':(lastErr||'ZoomInfo returned nothing usable.')}`;
     if(!done&&!blocked)st.classList.add('err');
     renderBlocked();
@@ -2291,11 +2342,29 @@ function filtered(){
   return out;
 }
 /* A lead is "waiting to be enriched" when the app can still do something about
-   it: it has a ZoomInfo id and is missing the number you would call. Anything
-   else in the gap is a job for a person, not a button. */
-function needsEnrich(L){
-  return !L.retryBlocked&&!!L.contactId&&(!L.mobilePhone||!L.email);
+   it: it is missing the number you would call, and there is enough of an
+   identity to ask ZoomInfo about.
+
+   A ZoomInfo id is the best key and the only exact one, but ZoomInfo also
+   matches on name-plus-company — which is the whole point for a list that came
+   from anywhere else. Requiring the id meant an uploaded list could never be
+   enriched at all, no matter how completely it named the person. */
+function ziKey(L){
+  if(L.contactId)return {personId:''+L.contactId};
+  if(L.firstName&&L.lastName&&L.employer)
+    return {firstName:''+L.firstName,lastName:''+L.lastName,companyName:''+L.employer};
+  if(L.email)return {email:''+L.email};
+  return null;
 }
+function needsEnrich(L){
+  return !L.retryBlocked&&(!L.mobilePhone||!L.email)&&!!ziKey(L);
+}
+/* ZoomInfo bills the first enrichment of a contact and then re-enriches it free
+   for a year. The app stamps the date so it can tell the user how many of a
+   batch are actually billable — and so the month's budget is charged for those
+   and not for the rest. */
+const ZI_FREE_MS=365*24*3600*1000;
+function ziBillable(L){return !L.ziAt||(Date.now()-L.ziAt)>ZI_FREE_MS;}
 function renderPipeline(){
   const leads=state.leads;
   const counts={A:0,B:0,C:0,X:0};leads.forEach(L=>counts[L.tier]=(counts[L.tier]||0)+1);
@@ -2315,11 +2384,17 @@ function renderPipeline(){
 
   // 2 — Enrich
   $('cEnrich').textContent=enrichable;
-  const gapNoId=leads.filter(L=>!L.contactId&&(!L.mobilePhone||!L.email)).length;
+  // Not "no ZoomInfo id" any more — a name and an employer are a lookup key
+  // too. This counts only the leads nothing can be asked about.
+  const gapNoId=leads.filter(L=>!ziKey(L)&&(!L.mobilePhone||!L.email)).length;
+  const ziLeft=creditLine('zoominfo');
+  const billable=leads.filter(L=>needsEnrich(L)&&ziBillable(L)).length;
   $('sEnrich').textContent=enrichable
     ? `${enrichable} lead${enrichable===1?'':'s'} missing an email or a mobile, and ZoomInfo can fill them`
+       +(billable<enrichable?` · ${enrichable-billable} of them free (enriched within the last year)`:'')
+       +(ziLeft?` · ${ziLeft}`:'')
     : blocked ? `${blocked} lead${blocked===1?'':'s'} waiting on your credit limit — nothing else to fill.`
-    : gapNoId ? `${gapNoId} lead${gapNoId===1?' is':'s are'} missing contact details, but came from a file with no ZoomInfo id — try 🏠 or 📞? on the row.`
+    : gapNoId ? `${gapNoId} lead${gapNoId===1?' is':'s are'} missing contact details, but ${gapNoId===1?'has':'have'} no ZoomInfo id and no name-and-employer to look ${gapNoId===1?'it':'them'} up by — try 🏠 or 📞? on the row.`
     : (leads.length?'Every lead has an email and a mobile.':'Nothing to enrich yet.');
   const ea=$('btnEnrichAll');
   ea.disabled=!enrichable;
@@ -3534,7 +3609,26 @@ document.getElementById('btnBuildOpen').addEventListener('click',()=>{
 document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
   const targets=state.leads.filter(needsEnrich);
   if(!targets.length){toast('Nothing waiting to be enriched.');return;}
-  if(!await appConfirm(`Enrich ${targets.length} lead${targets.length>1?'s':''}? Uses up to ${targets.length} ZoomInfo credit${targets.length>1?'s':''}. Re-enriching the same contact within a year is free.`,'Enrich leads'))return;
+  await loadCredits();
+  const bill=targets.filter(ziBillable).length;
+  const free=targets.length-bill;
+  const left=(CREDITS.zoominfo&&CREDITS.zoominfo.left);
+  if(left!==undefined&&bill>left){
+    if(!await appConfirm(
+      `Enriching ${targets.length} lead${targets.length>1?'s':''} would cost about ${bill} credits, `+
+      `and only ${left} of this month's ${CREDITS.zoominfo.budget} are left `+
+      `(they reset ${CREDITS.zoominfo.resets_on||CREDITS.resets_on}). ZoomInfo will stop billing when the pool runs out and the rest will park in Retry blocked. `+
+      `Sort by tier and enrich the A-list first if you would rather choose where the credits go.`,
+      'More than the budget left'))return;
+  }else{
+    const noId=targets.filter(L=>!L.contactId).length;
+    if(!await appConfirm(
+      `Enrich ${targets.length} lead${targets.length>1?'s':''}? `+
+      `About ${bill} ZoomInfo credit${bill===1?'':'s'}${free?`, and ${free} free — re-enriching the same contact within a year costs nothing`:''}. `+
+      (left!==undefined?`That leaves ${Math.max(0,left-bill)} of ${CREDITS.zoominfo.budget} this month. `:'')+
+      (noId?`${noId} of them have no ZoomInfo id, so they are matched on name and employer — a match is not guaranteed, and an unmatched lead is not billed.`:''),
+      'Enrich leads'))return;
+  }
   enrichLeads(targets);
 });
 /* The overflow menu. Everything that is not one of the four stages lives here,
@@ -3651,6 +3745,7 @@ async function api(url,payload,method){
 }
 async function loadMe(){
   try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
+  CREDITS=(window.ME&&ME.credits)||{};
   try{applyZiMcpAvailability();ziMcpStateLine();}catch(e){/* pre-render, harmless */}
   try{
     const b=document.getElementById('btnOpps');
@@ -3750,7 +3845,7 @@ window.verifyLead=async(id,recheck)=>{
     // only when this one found nothing. Not applied to a wrong number: that
     // record belongs to someone else.
     if(d.record&&!wrong)applyRecord(L,d.record,'phone');
-    L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();
+    L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();loadCredits();
   }catch(e){toast('Verify failed: '+e.message);}
 };
 /* ---- Data coverage: why the scores look the way they do ----
@@ -3798,7 +3893,34 @@ function renderCoverage(){
         <span><strong>${r.k}</strong> &nbsp;${esc(r.label)}${r.v<70?`<br><span class="hint">${esc(r.fix)}</span>`:''}</span>
         <span class="pts">${bar(r.v)} ${r.v}%</span></div>`).join('');
 }
-document.getElementById('btnCoverage').addEventListener('click',()=>{renderCoverage();openModal('mCoverage');});
+/* The paid pools live here rather than in a badge somewhere: coverage is the
+   panel you open when deciding what this list still needs, which is exactly
+   the moment the answer "and here is what you can afford" is useful. */
+function renderBudgets(){
+  const box=document.getElementById('covBudget');
+  if(!box)return;
+  const bits=[];
+  ['zoominfo','whitepages'].forEach(k=>{
+    const c=CREDITS[k];
+    if(!c||!c.budget)return;
+    const pct=Math.round(100*c.left/c.budget);
+    const col=pct>=40?'var(--tierA)':pct>=10?'var(--tierB)':'var(--tierX)';
+    bits.push(`<div class="sigrow"><span><strong>${k==='zoominfo'?'ZoomInfo':'WhitePages'}</strong>
+      &nbsp;${c.left.toLocaleString()} of ${c.budget.toLocaleString()} credits left`
+      +(c.spent?` &mdash; <span class="hint">${c.spent.toLocaleString()} spent since ${CREDITS.month}-01</span>`:'')
+      +`</span><span class="pts" style="color:${col}">${pct}%</span></div>`);
+  });
+  box.innerHTML=bits.length
+    ? `<p class="hint" style="margin-top:14px">Paid allowances, resetting ${esc(CREDITS.resets_on||'')}. `
+      +`The free sources cost nothing and are not counted here.`
+      +(CREDITS.cache_entries?` ${CREDITS.cache_entries.toLocaleString()} WhitePages answer${CREDITS.cache_entries===1?' is':'s are'} remembered for ${CREDITS.cache_days} days, so re-checking one of them spends nothing.`:'')
+      +`</p>`+bits.join('')
+    : '';
+}
+document.getElementById('btnCoverage').addEventListener('click',async()=>{
+  renderCoverage();openModal('mCoverage');
+  await loadCredits();renderBudgets();
+});
 /* After an import, say so when a signal has almost nothing to work with. */
 function coverageWarn(){
   const c=coverage();if(!c)return;
@@ -4257,6 +4379,7 @@ window.enrichHome=async id=>{
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||'nothing under this name at the address on the list'};save();render();return;}
     applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
+    loadCredits();
     logAct(id,'enrichHome',(dobLabel(L)?'born '+dobLabel(L):(d.age?'age '+d.age:'age unknown'))+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score+lookupCost(d));
     save();render();
   }catch(e){toast('Enrich failed: '+e.message);}
