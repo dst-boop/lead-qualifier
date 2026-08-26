@@ -74,6 +74,32 @@ c = TestClient(main.app, base_url="http://127.0.0.1:8750", follow_redirects=Fals
 main._MEM_SESSIONS["sid"] = {}
 c.cookies.set(main.SESSION_COOKIE, "sid")
 
+# The attachment vault, backed by a dict so this suite can watch what a real
+# Firestore would hold — the same shim the consent-vault test uses.
+VAULT = {}
+_orig = (main._fs_get, main._fs_set, main._fs_del)
+
+
+async def _vget(col, key):
+    return VAULT.get((col, key)) if col == main.FS_VAULT else await _orig[0](col, key)
+
+
+async def _vset(col, key, doc):
+    if col == main.FS_VAULT:
+        VAULT[(col, key)] = doc
+        return True
+    return await _orig[1](col, key, doc)
+
+
+async def _vdel(col, key):
+    if col == main.FS_VAULT:
+        VAULT.pop((col, key), None)
+        return True
+    return await _orig[2](col, key)
+
+
+main._fs_get, main._fs_set, main._fs_del = _vget, _vset, _vdel
+
 # --- creating an account -----------------------------------------------------
 r = c.post("/auth/signup", json={"email": "Pat@AnyWhere.com", "password": "correct horse battery"})
 ck("any email creates an account", r.status_code == 200, (r.status_code, r.text[:80]))
@@ -138,6 +164,73 @@ ck("the list created before linking is still there — the key never moved",
 r = c.get("/api/senders").json()
 ck("the linked gmail is now a sender", any("pat.gmail@gmail.com" in x["address"]
    for x in r["senders"]), [x["address"] for x in r["senders"]])
+
+# --- connections stick to the person, not the browser tab --------------------
+# "Once a user creates an account, they should NOT have to resign in to all
+# their accounts they have connected (claude, zoominfo, etc)."
+import asyncio  # noqa: E402
+
+ck("a session cookie lasts a month, not a workday",
+   main.SESSION_TTL >= 30 * 24 * 3600, main.SESSION_TTL)
+ck("linking google vaulted the connection under the account",
+   any(k[1] == "att-google:pat@anywhere.com" for k in VAULT),
+   [k[1] for k in VAULT])
+r = c.post("/api/zi/mcp-token", json={"token": "zi-mcp-tok-1"})
+ck("saving a ZoomInfo MCP token vaults it too",
+   r.status_code == 200 and any(k[1] == "att-zimcp:pat@anywhere.com" for k in VAULT),
+   [k[1] for k in VAULT])
+# Microsoft and ZoomInfo OAuth need their own stubs to link for real; seed
+# their vault entries directly in the exact shape _save_all_attachments writes.
+asyncio.run(main._save_attachment("pat@anywhere.com", "msal",
+                                  {"cache": "CACHE-BLOB", "mode": "calendar"}))
+asyncio.run(main._save_attachment("pat@anywhere.com", "zoominfo",
+                                  {"refresh_token": "zi-rt", "connected_at": 1}))
+
+main._MEM_SESSIONS["sid3"] = {}
+c.cookies.set(main.SESSION_COOKIE, "sid3")
+r = c.post("/auth/password-login", json={"email": "pat@anywhere.com", "password": "correct horse battery"})
+ck("password sign-in on a brand-new browser works", r.status_code == 200)
+me = c.get("/api/me").json()
+ck("google comes back linked with NO oauth round-trip", me["linked_google"] is True, me)
+ck("  ...microsoft comes back linked", me["linked_microsoft"] is True)
+ck("  ...zoominfo comes back connected", me["zi_connected"] is True)
+ck("  ...the MCP token comes back", me["zi_mcp_connected"] is True)
+sess3 = main._MEM_SESSIONS["sid3"]
+ck("the restored google connection already refreshed itself into a live token",
+   sess3["google"]["refresh_token"] == "rt-1"
+   and sess3["google"]["access_token"] == "at-refreshed",
+   sess3.get("google"))
+ck("the msal cache and calendar-only mode round-tripped",
+   sess3["ms_token_cache"] == "CACHE-BLOB" and sess3["ms_mode"] == "calendar",
+   (sess3.get("ms_token_cache"), sess3.get("ms_mode")))
+ck("the zoominfo shape forces a refresh too",
+   sess3["zoominfo"]["refresh_token"] == "zi-rt" and sess3["zoominfo"]["expires_at"] == 0,
+   sess3.get("zoominfo"))
+
+# --- a live connection is newer than anything vaulted ------------------------
+sess3["google"] = {"access_token": "live-at", "refresh_token": "rt-live",
+                   "expires_at": time.time() + 3000, "email": "pat.gmail@gmail.com"}
+asyncio.run(main._restore_attachments(sess3, "pat@anywhere.com"))
+ck("a live session connection is not clobbered by the vault",
+   sess3["google"]["refresh_token"] == "rt-live", sess3["google"])
+
+# --- disconnect means disconnect ---------------------------------------------
+c.post("/api/zi/mcp-token", json={"token": ""})
+ck("clearing the MCP token clears the vault too",
+   not any(k[1] == "att-zimcp:pat@anywhere.com" for k in VAULT), [k[1] for k in VAULT])
+c.get("/auth/zoominfo/disconnect")
+ck("zoominfo disconnect clears the vault too",
+   not any(k[1] == "att-zoominfo:pat@anywhere.com" for k in VAULT), [k[1] for k in VAULT])
+main._MEM_SESSIONS["sid4"] = {}
+c.cookies.set(main.SESSION_COOKIE, "sid4")
+c.post("/auth/password-login", json={"email": "pat@anywhere.com", "password": "correct horse battery"})
+me = c.get("/api/me").json()
+ck("the next sign-in does not resurrect what was disconnected",
+   me["zi_connected"] is False and me["zi_mcp_connected"] is False,
+   (me.get("zi_connected"), me.get("zi_mcp_connected")))
+ck("  ...while google and microsoft still restore",
+   me["linked_google"] is True and me["linked_microsoft"] is True,
+   (me.get("linked_google"), me.get("linked_microsoft")))
 
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")

@@ -47,3 +47,23 @@ review process, worth starting early. This is the trade against the earlier
 advice in SETUP-google.md: Internal fixes the 7-day token expiry *for a
 firm-internal app*; a public app takes the External + published route
 instead, which fixes the expiry too once published.
+
+## Connections survive sign-out, new browsers, and new devices
+
+Linking Google, Microsoft, or ZoomInfo (either the OAuth connection or the
+MCP token) stores that connection in the server-side vault under your
+account, sealed with the same KMS encryption as sessions. Signing in from
+any browser brings all of them back — you sign in once per device, not once
+per service per device. Sessions themselves last 30 days
+(`SESSION_TTL_SECONDS` to tune).
+
+Two behaviours to know about:
+
+- **Disconnecting is permanent** until you reconnect: it removes the vaulted
+  copy too, so the connection does not reappear at your next sign-in.
+- **A dead token cleans itself up.** If a provider revokes a refresh token,
+  the vault entry is deleted the moment the failure is seen, and the app
+  asks you to reconnect rather than failing silently forever.
+
+Without Firestore (`USE_FIRESTORE=0`, local dev) the vault is a no-op and
+connections last only as long as the session cookie, as before.
