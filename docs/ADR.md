@@ -1982,3 +1982,29 @@ accounts carry is impersonation in shares, so it must close before strangers
 share lists. And the Google OAuth app must go External + published for
 "anyone" to include Google-linking — §SETUP-accounts has the trade against
 the Internal advice that fixed the consent nag for a firm-internal app.
+
+## 30. WealthFeed: integrate the export, refuse the taxonomy
+
+"Integrate wealthfeed." WealthFeed has no public API and no Zapier app —
+checked, not assumed — so the integration is its CSV export landing here as
+a first-class citizen: recognised columns, an event chip, and the events
+flowing into §22's signals panel alongside the app's own detectors.
+
+The design decision is a refusal. Every prior external schema this app
+parsed without seeing (five of them, §12–§27) hid a wrong assumption, and a
+mapping table from WealthFeed's event names to internal kinds would be
+written the same blind way. So the event text passes through **verbatim**:
+headline is the vendor's words, detail names the provenance and says "verify
+on the call", and an event named something no taxonomy anticipated surfaces
+as itself. The cost is that imported events cannot be reasoned about by
+kind; the benefit is that none can vanish. For a signals queue, silence is
+the expensive failure (§26), so the trade goes one way.
+
+Second decision: the derived-column embargo (§13's descendant) gets its one
+door. WealthFeed exports "Estimated Net Worth" — exactly the header shape
+the embargo was built to stop, because estimates must not land in fact
+fields. But these land in fields *named* "as reported", displayed as
+estimates, feeding no score and no arithmetic. A column that declares itself
+an estimate may land in a field that declares the same — and only there; the
+test asserts "Estimated Age" stays embargoed from every fact field in the
+same breath.

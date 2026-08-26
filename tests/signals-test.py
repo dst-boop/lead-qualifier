@@ -162,6 +162,33 @@ ck("company normalisation agrees with the prospecting module",
     if S.norm_company(c) != P.norm_company(c)])
 ck("  ...and still strips suffixes", S.norm_company("The Boeing Company, Inc.") == "boeing")
 
+# --- imported money-in-motion events (WealthFeed and its kind) ---------------
+# Verbatim passthrough is the contract: a vendor's event name we never
+# anticipated must surface as itself, not vanish in a taxonomy mapping.
+s = S.imported_signal(lead(moneyEvent="Sold business to PE firm",
+                           moneyEventDate="2026-08-01"), NOW)
+ck("an imported event fires", s is not None and s["kind"] == "imported", s)
+ck("  ...with the vendor's words as the headline",
+   s["headline"] == "Sold business to PE firm")
+ck("  ...dated, recent, urgent", s["urgency"] == 1 and s["days"] is not None)
+ck("  ...and telling the caller to verify", "verify on the call" in s["detail"].lower(), s["detail"])
+s = S.imported_signal(lead(moneyEvent="IPO Lockup Expiry Window Alpha-7"), NOW)
+ck("an event from no known taxonomy survives untouched",
+   s["headline"] == "IPO Lockup Expiry Window Alpha-7")
+ck("  ...undated ranks below dated", s["urgency"] == 2 and s["days"] is None)
+ck("  ...and says it is undated", "undated" in s["detail"], s["detail"])
+ck("US-style dates read too",
+   S.imported_signal(lead(moneyEvent="x", moneyEventDate="08/01/2026"), NOW)["days"] is not None)
+ck("a year-old event is not in motion any more",
+   S.imported_signal(lead(moneyEvent="Old news", moneyEventDate="2020-01-01"), NOW) is None)
+ck("no event, no signal", S.imported_signal(lead(), NOW) is None)
+ck("  ...whitespace is no event", S.imported_signal(lead(moneyEvent="   "), NOW) is None)
+sigs = S.build_signals([lead(moneyEvent="Inheritance", status="Not Interested")], now=NOW)
+ck("someone who said no is skipped even with an event", sigs == [], sigs)
+sigs = S.build_signals([lead(moneyEvent="Inheritance", moneyEventDate="2026-08-10")], now=NOW)
+ck("build_signals carries it with the lead's name attached",
+   any(x["kind"] == "imported" and x["name"] == "Ada Alpha" for x in sigs), sigs[:1])
+
 print()
 print(f"FAILURES {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)
