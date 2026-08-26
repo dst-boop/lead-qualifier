@@ -19,29 +19,51 @@ employer stock, which is its own planning conversation.
 Every block in the panel ends with a link to the same search on the
 government's own site, so each number can be checked by hand.
 
-## The whole list at once
+## The whole list at once — one button
 
-**More → Sweep public records (free)** runs the ⚖ search across every lead
-that has a surname and hasn't been swept yet. It asks first, states the count,
-and skips anything already swept (press ⚖ on a lead to re-check just it).
-Leads with findings get row badges — **SEC** for insider filings,
-**RETIRED·FEC** for a self-reported retirement — and the closing summary
-counts what was found, including which leads the 🏛 proxy-age lookup is now
-worth pressing on.
+**Enrich all (free)**, in the top bar, is the only button you need to press.
+It runs every free source over the list in one pass:
 
-What the sweep will never do is spend money: WhitePages lookups and the
-proxy-age reader are excluded by design. It aims the paid buttons; it does
-not press them.
+1. **The public record**, per lead — political donations (FEC) and SEC insider
+   filings, the same search the ⚖ button runs on one lead.
+2. **Proxy-statement ages**, per *employer* — for anyone at a public company,
+   the age their employer's latest proxy statement prints, the same answer the
+   🏛 button gives.
+
+It asks first and states both counts. Leads with findings get row badges —
+**SEC** for insider filings, **RETIRED·FEC** for a self-reported retirement —
+and ages land on the lead exactly as the 🏛 button would leave them, with the
+filing they came from.
+
+The second half used to be manual, one lead at a time, because reading a proxy
+statement to answer about one person is expensive and a list of ten people at
+one company meant reading the same document ten times. It is now read **once
+per employer** and matched against everyone who works there, so the work scales
+with employers rather than leads, is cached for a week (a proxy is filed
+annually), and costs nothing at all for the many employers that are private
+companies and file no proxy.
+
+### What it will never do
+
+**WhitePages is not included.** It spends lookup credits from a pool you paid
+for, and anything that spends money stays a button you press per lead, with the
+count in front of you. The confirm dialog says so — "all free sources" is only
+a useful promise if what it leaves out is named.
+
+### When a source is down
 
 On the demo FEC key a large list will out-run the shared 40-lookups-an-hour
 limit partway through. Each lead records which sources actually ran, the
-summary counts the gaps ("N donation lookups did not run"), and sweeping
-again later re-checks exactly the leads with gaps — a rate limit is never
+summary counts the gaps ("N donation lookups did not run"), and pressing the
+button again re-checks exactly the leads with gaps — a rate limit is never
 allowed to read as "no donations", and a gap is never permanent.
 
 The SEC's search occasionally answers a one-off "Internal server error"; the
-app retries once before recording a gap, and a gap it does record is filled
-by the next sweep like any other.
+app retries once before recording a gap, and a gap it does record is filled by
+the next press like any other.
+
+A lead who is simply not in their employer's proxy statement records that fact,
+so the next press doesn't read the same filing looking for them again.
 
 ## The restriction that matters
 

@@ -342,3 +342,67 @@ def match_filings(hits: list, last_name: str, first_name: str = "") -> list:
         out.append({"form": h["form"], "date": h["date"], "person": person,
                     "company": company, "url": url})
     return out
+
+
+def roster_match(people: list, last_name: str, first_name: str = "") -> Optional[dict]:
+    """The one person in a proxy roster who is this lead, or None.
+
+    A proxy statement names a dozen or two directors and officers, so matching
+    is a search among namesakes rather than a yes/no on a single record. Two
+    rules, both learned the expensive way:
+
+    The surname must appear and the first name must match by its first three
+    letters (or by initial, for a roster that prints "J. Smith") — the same
+    guard the FEC and EDGAR matchers use.
+
+    And an ambiguous match is refused outright. Where two people on one board
+    both pass the guard, there is no way to tell which is the lead, and a wrong
+    age does not look wrong: it silently mis-scores the lead and no one ever
+    checks. None is the honest answer; the per-lead reader can still be aimed
+    by hand.
+    """
+    ln = (last_name or "").strip().lower()
+    fn = (first_name or "").strip().lower()
+    if not ln:
+        return None
+    hits = []
+    for p in people:
+        nm = str(p.get("name") or "").lower()
+        if ln not in nm:
+            continue
+        if fn:
+            # \b on both sides, not [\b.]: inside a character class \b is a
+            # backspace, so the first spelling matched almost nothing and let
+            # namesakes through as unique. "A. Nguyen" and "A Nguyen" both
+            # match; "Bao" does not.
+            initial = re.search(r"\b" + re.escape(fn[0]) + r"\b", nm)
+            if fn[:3] not in nm and not initial:
+                continue
+        hits.append(p)
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
+def roster_people(payload) -> list:
+    """The {name, age, title} rows of a roster reply, kept only when usable.
+
+    An age outside a working life is a misread of a table — a page number, a
+    share count, a year — and one that reads as a fact. Dropped rather than
+    shown.
+    """
+    rows = []
+    if not isinstance(payload, dict):
+        return rows
+    for p in payload.get("people") or []:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "").strip()
+        age = p.get("age")
+        if not name or not isinstance(age, int) or isinstance(age, bool):
+            continue
+        if not (18 <= age <= 100):
+            continue
+        rows.append({"name": name, "age": age,
+                     "title": str(p.get("title") or "").strip()[:120]})
+    return rows

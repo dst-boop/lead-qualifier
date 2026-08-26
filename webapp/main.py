@@ -2989,6 +2989,135 @@ async def edgar(req: EdgarRequest, request: Request):
     }
 
 
+PROXY_TTL = int(os.environ.get("PROXY_CACHE_SECONDS", str(7 * 86400)))
+
+
+class RosterName(BaseModel):
+    i: int = 0
+    first_name: str = ""
+    last_name: str = ""
+
+
+class RosterRequest(BaseModel):
+    employer: str = ""
+    people: list[RosterName] = []
+
+
+async def _proxy_roster(employer: str) -> dict:
+    """Every person a company's latest proxy states an age for, read once.
+
+    /api/edgar asks a 45,000-token document one question per lead, which is why
+    proxy ages were kept out of any list-scale action: ten leads at one employer
+    meant ten reads of one file. But the document answers for the whole board at
+    once — it is a table of directors and officers with their ages — so reading
+    it per *employer* costs one AI call however many leads work there, and the
+    result is cached for a week because a proxy is filed annually.
+
+    Only structural answers are cached (a roster, no such company, no DEF 14A on
+    file). A transient failure is raised, never stored: a cached outage would
+    outlive the outage.
+    """
+    company = await _edgar_company_cik(employer)
+    if not company:
+        return {"found": False, "people": [],
+                "reason": f"No public company on file matching \u201c{employer}\u201d. "
+                          f"Private employers do not file proxy statements."}
+    key = "proxy:" + company["cik"]
+    hit = _cache_get(key, PROXY_TTL)
+    if hit is not None:
+        return hit
+
+    proxy = await _edgar_latest_proxy(company["cik"])
+    if not proxy:
+        return _cache_put(key, {"found": False, "people": [], "company": company,
+                                "reason": f"{company['name']} has no DEF 14A on file."})
+
+    text = await _edgar_get(proxy["url"], as_json=False)
+    flat = _strip_html(text)[:180_000]
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = (
+        "You are reading a US proxy statement (SEC form DEF 14A). List every "
+        "person whose age the document states — directors, director nominees "
+        "and named executive officers.\n\n"
+        f"Company: {company['name']}\n\n"
+        "Reply with one JSON object and nothing else:\n"
+        '{"people": [{"name": "<as printed>", "age": <integer>, "title": "<as printed, or empty>"}]}\n\n'
+        "Rules: include a person only when the document prints an age for them "
+        "(commonly a table column, or \u201cAge: 57\u201d beside a biography). Never "
+        "estimate an age, infer one from career length, or carry one across from "
+        "a similarly named person. Return {\"people\": []} when the document "
+        "states no ages. A wrong age here silently mis-scores a lead, so omit "
+        "anyone you are unsure of.\n\nDOCUMENT:\n" + flat
+    )
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:200]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:200]}")
+
+    body = "".join(b.text for b in msg.content if b.type == "text")
+    a, z = body.find("{"), body.rfind("}")
+    if a == -1 or z == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON object.")
+    try:
+        got = json.loads(body[a:z + 1])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+
+    people = freesources.roster_people(got)
+    return _cache_put(key, {
+        "found": bool(people), "people": people, "company": company, "filing": proxy,
+        "reason": "" if people
+                  else f"{company['name']}\u2019s latest proxy statement states no ages.",
+    })
+
+
+@app.post("/api/edgar-roster")
+async def edgar_roster(req: RosterRequest, request: Request):
+    """Proxy-statement ages for everyone on a list who works at one employer.
+
+    The batch shape is the whole point: this is what lets the one free-enrichment
+    button include proxy ages at list scale, where the per-lead reader could not
+    be afforded. Matching stays here rather than in the browser so the namesake
+    guard is the same tested one the FEC and insider searches use — and so an
+    ambiguous roster returns nothing rather than a plausible wrong age.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=500,
+                            detail="Reading a proxy statement needs ANTHROPIC_API_KEY "
+                                   "(the same key the AI QC button uses).")
+    if not req.employer.strip():
+        raise HTTPException(status_code=400,
+                            detail="An employer is required — it is how the filing is found.")
+
+    roster = await _proxy_roster(req.employer)
+    matches = {}
+    for who in req.people:
+        if not who.last_name.strip():
+            continue
+        hit = freesources.roster_match(roster.get("people") or [],
+                                       who.last_name, who.first_name)
+        if hit:
+            matches[str(who.i)] = {
+                "age": hit["age"], "title": hit["title"],
+                "as_of": (roster.get("filing") or {}).get("filed", "")[:4],
+                "name": hit["name"],
+            }
+    return {
+        "found": roster.get("found", False),
+        "company": roster.get("company") or {},
+        "filing": roster.get("filing") or {},
+        "roster_size": len(roster.get("people") or []),
+        "matches": matches,
+        "reason": roster.get("reason", ""),
+    }
+
+
 @app.get("/api/edgar-debug")
 async def edgar_debug(request: Request, url: str = ""):
     """Raw EDGAR round-trip — the URL called, the status, the first of the body.

@@ -2036,3 +2036,40 @@ sign-in, which is worse than not offering the button. The same deletion
 fires when a refresh token is found dead, for the same reason the consent
 vault does it: a corpse in the vault fails every future sign-in the same
 way instead of showing the one screen that fixes it.
+
+## 32. One button for every free source, which cost one endpoint to earn
+
+"There should be 1 button the user needs to press to enrich leads with All
+Free enrichment sources."
+
+There were two, and the second one was worse than hidden — the first one's
+summary *told you to go and press it*: "N SEC insiders — the 🏛 age lookup
+will work on these." The app knew which leads had a free answer waiting and
+made the user fetch it by hand, one lead at a time.
+
+That wasn't an oversight, it was a cost. `/api/edgar` reads a 45,000-token
+proxy statement to answer about one person, so ten leads at one employer meant
+ten readings of one document, and §29's sweep excluded it deliberately.
+
+The way out is that the question was mis-shaped, not the cost. A proxy
+statement is a *table of the whole board with ages*: it answers for everyone
+at that company at once. `/api/edgar-roster` reads it per employer, matches
+every lead who works there against the roster, and caches the result for a
+week because proxies are filed annually. The work now scales with employers
+rather than leads, and the many private employers cost nothing — the company
+lookup fails before any AI call.
+
+Two rules keep it honest at scale. **An ambiguous roster reports nothing**:
+where two people pass the surname-and-first-name guard, there is no way to
+tell which is the lead, and a wrong age doesn't look wrong — it silently
+mis-scores them and nobody re-checks. (Writing that guard is also how the
+`[\b.]` bug surfaced: inside a character class `\b` is a backspace, not a word
+boundary, so the first version let namesakes through as unique. The test that
+found it was the one asserting the refusal.) And **a miss is recorded**, so
+the next press doesn't re-read the same filing hunting for someone who isn't
+in it.
+
+What stays out is the line the button must not cross: **WhitePages spends
+lookup credits from a finite pool**, so it remains a per-lead press with the
+count in front of you. The confirm dialog names the exclusion, because "all
+free sources" is only a useful promise if what it leaves out is stated.
