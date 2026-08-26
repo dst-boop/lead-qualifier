@@ -2008,3 +2008,31 @@ estimates, feeding no score and no arithmetic. A column that declares itself
 an estimate may land in a field that declares the same — and only there; the
 test asserts "Estimated Age" stays embargoed from every fact field in the
 same breath.
+
+## 31. Connections attach to the person, not the browser tab
+
+"Once a user creates an account, they should NOT have to resign in to all
+their accounts they have connected." The audit behind that sentence found
+three separate ways connections were dying: sessions expired after eight
+hours (so every morning started signed out), only the Google refresh token
+had a vault (keyed by *gmail* address — unreachable from a password
+sign-in), and the Microsoft cache, ZoomInfo tokens, and ZoomInfo MCP token
+lived in the session document alone, gone with the cookie.
+
+The fix is one idea applied uniformly: an **attachment vault**. Every
+connection (Google, Microsoft, ZoomInfo OAuth, ZoomInfo MCP) is sealed with
+the same KMS envelope as sessions and stored under `att-<kind>:<identity>`,
+where identity is the account email for password users and the sign-in email
+otherwise. Signing in — any browser, any day — rehydrates all of them, and
+restored tokens come back with an empty access token and a zero expiry so
+the first use forces a refresh instead of trusting a stale bearer. Sessions
+now last 30 days (`SESSION_TTL_SECONDS` to change it).
+
+Two rules keep the vault honest. A connection already live in the session is
+newer than anything vaulted and is never overwritten by a restore. And
+disconnecting deletes the vault entry in the same breath as the session
+key — without that, "disconnect" would quietly undo itself at the next
+sign-in, which is worse than not offering the button. The same deletion
+fires when a refresh token is found dead, for the same reason the consent
+vault does it: a corpse in the vault fails every future sign-in the same
+way instead of showing the one screen that fixes it.

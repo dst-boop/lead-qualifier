@@ -169,7 +169,10 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 STATIC_DIR = Path(__file__).parent / "static"
 SESSION_COOKIE = "lq_session"
-SESSION_TTL = 8 * 3600
+# A month, not a workday: with sessions KMS-sealed server-side and every
+# attachment vaulted by identity, the only thing an 8-hour cookie bought was
+# a daily sign-in ritual. Override with SESSION_TTL_SECONDS.
+SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", str(30 * 24 * 3600)))
 
 # ------------------------- Storage -------------------------
 # Sessions and saved lead lists live in Firestore so they survive the container.
@@ -522,6 +525,14 @@ async def ms_callback(request: Request):
         raise HTTPException(status_code=400, detail=result.get("error_description", "Sign-in failed"))
     if session.get("provider") != "password":
         session["provider"] = "microsoft"
+        claims = result.get("id_token_claims") or {}
+        email = (claims.get("preferred_username") or claims.get("email") or "").lower()
+        if email:
+            session["identity"] = email
+    # Same deal as the Google callback: vault everything under the person so
+    # a fresh browser next month starts with this connection already made.
+    await _save_all_attachments(session)
+    await _restore_attachments(session, _identity(session))
     return RedirectResponse("/")
 
 
@@ -550,6 +561,101 @@ async def _vault_del(provider: str, email: str) -> None:
         await _fs_del(FS_VAULT, f"{provider}:{email.lower()}")
 
 
+# ---------------------- attachments follow the person ----------------------
+# Connecting an account is a fact about the user, not about the browser tab
+# they happened to do it in. Every attachment (Google, Microsoft, ZoomInfo,
+# the ZoomInfo MCP token) is sealed into the vault under the user's identity,
+# and signing in — any browser, any day — rehydrates all of them. Without
+# this, only Google survived a new cookie, and only for Google-primary users.
+
+def _identity(session: dict) -> str:
+    """The email a person's data is keyed under, if this session knows it."""
+    if session.get("provider") == "password":
+        return (session.get("account_email") or "").lower()
+    return (session.get("identity") or "").lower()
+
+
+async def _save_attachment(identity: str, kind: str, data) -> None:
+    if not identity:
+        return
+    doc = _seal(json.dumps(data))
+    doc["updated_at"] = time.time()
+    await _fs_set(FS_VAULT, f"att-{kind}:{identity.lower()}", doc)
+
+
+async def _load_attachment(identity: str, kind: str):
+    if not identity:
+        return None
+    doc = await _fs_get(FS_VAULT, f"att-{kind}:{identity.lower()}")
+    if not doc:
+        return None
+    raw = _unseal(doc)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+async def _del_attachment(identity: str, kind: str) -> None:
+    # Disconnect means disconnect: without this the vault would quietly
+    # resurrect the connection at the next sign-in.
+    if identity:
+        await _fs_del(FS_VAULT, f"att-{kind}:{identity.lower()}")
+
+
+async def _restore_attachments(session: dict, identity: str) -> None:
+    """Rehydrate every vaulted connection into a fresh session.
+
+    Only fills gaps: a connection already live in this session is newer than
+    anything the vault holds, and must not be replaced by it.
+    """
+    if not identity:
+        return
+    session["identity"] = identity.lower()
+    if not (session.get("google") or {}).get("refresh_token"):
+        g = await _load_attachment(identity, "google")
+        if g and g.get("refresh_token"):
+            session["google"] = {"access_token": "", "refresh_token": g["refresh_token"],
+                                 "expires_at": 0, "email": g.get("email", "")}
+    if not session.get("ms_token_cache"):
+        m = await _load_attachment(identity, "msal")
+        if m and m.get("cache"):
+            session["ms_token_cache"] = m["cache"]
+            session["ms_mode"] = m.get("mode", "full")
+    if not session.get("zoominfo"):
+        z = await _load_attachment(identity, "zoominfo")
+        if z and z.get("refresh_token"):
+            session["zoominfo"] = dict(z, access_token="", expires_at=0)
+    if not session.get("zi_mcp"):
+        t = await _load_attachment(identity, "zimcp")
+        if t and t.get("token"):
+            session["zi_mcp"] = t
+
+
+async def _save_all_attachments(session: dict) -> None:
+    """Push this session's live connections into the vault, best-effort."""
+    identity = _identity(session)
+    if not identity:
+        return
+    g = session.get("google") or {}
+    if g.get("refresh_token"):
+        await _save_attachment(identity, "google",
+                               {"refresh_token": g["refresh_token"],
+                                "email": g.get("email", "")})
+    if session.get("ms_token_cache"):
+        await _save_attachment(identity, "msal",
+                               {"cache": session["ms_token_cache"],
+                                "mode": session.get("ms_mode", "full")})
+    z = session.get("zoominfo") or {}
+    if z.get("refresh_token"):
+        await _save_attachment(identity, "zoominfo",
+                               {k: v for k, v in z.items() if k != "access_token"})
+    if session.get("zi_mcp"):
+        await _save_attachment(identity, "zimcp", session["zi_mcp"])
+
+
 async def _google_token(session: dict) -> Optional[str]:
     g = session.get("google")
     if not g:
@@ -571,6 +677,7 @@ async def _google_token(session: dict) -> Optional[str]:
         # would be handed to the next sign-in, which would fail the same way
         # instead of showing the one consent screen that fixes it.
         await _vault_del("google", (g or {}).get("email") or "")
+        await _del_attachment(_identity(session), "google")
         session.pop("google", None)
         return None
     tok = r.json()
@@ -677,6 +784,12 @@ async def google_callback(request: Request):
     }
     if session.get("provider") != "password":
         session["provider"] = "google"
+        session["identity"] = email
+    # Vault the link under the person, and pull back whatever else they have
+    # connected before — signing in with Google on a fresh browser must bring
+    # the Microsoft and ZoomInfo attachments with it.
+    await _save_all_attachments(session)
+    await _restore_attachments(session, _identity(session))
     # No refresh token anywhere — grant, session, vault. This person has
     # genuinely never granted offline access, so ask for consent exactly
     # once, here, where we finally know it is needed.
@@ -704,6 +817,7 @@ async def _zi_token(session: dict) -> Optional[str]:
         return z["access_token"]
     if not z.get("refresh_token"):
         session.pop("zoominfo", None)     # expired and unrenewable: reconnect
+        await _del_attachment(_identity(session), "zoominfo")
         return None
     async with httpx.AsyncClient(timeout=20) as cx:
         r = await cx.post(ZI_TOKEN_URL, data={
@@ -714,6 +828,7 @@ async def _zi_token(session: dict) -> Optional[str]:
         })
     if r.status_code != 200:
         session.pop("zoominfo", None)
+        await _del_attachment(_identity(session), "zoominfo")
         return None
     tok = r.json()
     z["access_token"] = tok["access_token"]
@@ -721,6 +836,9 @@ async def _zi_token(session: dict) -> Optional[str]:
     if tok.get("refresh_token"):
         z["refresh_token"] = tok["refresh_token"]
     session["zoominfo"] = z
+    # The refresh may have rotated the refresh token; re-vault so the next
+    # fresh sign-in gets the live one, not a revoked ancestor.
+    await _save_all_attachments(session)
     return z["access_token"]
 
 
@@ -795,12 +913,14 @@ async def zi_callback(request: Request):
         "expires_at": time.time() + tok.get("expires_in", 3600) - 60,
         "connected_at": int(time.time()),
     }
+    await _save_all_attachments(session)
     return RedirectResponse("/?zi=ok")
 
 
 @app.get("/auth/zoominfo/disconnect")
 async def zi_disconnect(request: Request):
     request.state.session.pop("zoominfo", None)
+    await _del_attachment(_identity(request.state.session), "zoominfo")
     return RedirectResponse("/")
 
 
@@ -874,6 +994,7 @@ async def signup(req: AccountRequest, request: Request):
     session = request.state.session
     session["provider"] = "password"
     session["account_email"] = email
+    session["identity"] = email
     return {"ok": True, "email": email}
 
 
@@ -888,6 +1009,8 @@ async def password_login(req: AccountRequest, request: Request):
     session = request.state.session
     session["provider"] = "password"
     session["account_email"] = email
+    # The whole point of an account: everything they connected comes back.
+    await _restore_attachments(session, email)
     return {"ok": True, "email": email}
 
 
@@ -2466,8 +2589,10 @@ async def zi_mcp_token_set(req: ZIMcpToken, request: Request):
     tok = (req.token or "").strip()
     if tok:
         request.state.session["zi_mcp"] = {"token": tok, "saved_at": int(time.time())}
+        await _save_all_attachments(request.state.session)
     else:
         request.state.session.pop("zi_mcp", None)
+        await _del_attachment(_identity(request.state.session), "zimcp")
     return {"connected": bool(tok)}
 
 
