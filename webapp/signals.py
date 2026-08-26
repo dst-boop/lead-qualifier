@@ -347,6 +347,59 @@ def filing_signal(lead: dict, by_employer: dict) -> Optional[dict]:
     }
 
 
+def _event_days(date_str: str, now: float) -> Optional[int]:
+    """Days from now to a written date; negative is the past. None if unreadable."""
+    s = str(date_str or "").strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if not m:
+        m2 = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})", s)
+        if not m2:
+            return None
+        y, mo, d = int(m2.group(3)), int(m2.group(1)), int(m2.group(2))
+    else:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        ts = time.mktime((y, mo, d, 0, 0, 0, 0, 1, -1))
+    except (ValueError, OverflowError):
+        return None
+    return int(round((ts - now) / DAY))
+
+
+def imported_signal(lead: dict, now: float = None) -> Optional[dict]:
+    """A money-in-motion event reported by a platform the list was imported
+    from — WealthFeed and its kind.
+
+    The event text passes through verbatim. This app has been wrong five
+    times by writing parsers for schemas it had not seen, and a taxonomy
+    mapping for a vendor's event names would be the sixth: an event we did
+    not anticipate must surface as itself, not vanish because it failed to
+    match a list written before it existed.
+    """
+    now = now or time.time()
+    ev = str(lead.get("moneyEvent") or "").strip()
+    if not ev:
+        return None
+    date = str(lead.get("moneyEventDate") or "").strip()
+    days = _event_days(date, now)
+    # A year-old event is not in motion any more; an undated one is worth
+    # showing, ranked below anything with a date.
+    if days is not None and days < -365:
+        return None
+    return {
+        "id": _sig_id(lead.get("id") or "", "imported", f"{ev}|{date}"),
+        "lead_id": lead.get("id"),
+        "kind": "imported",
+        "urgency": 1 if days is not None and days >= -90 else 2,
+        "days": days,
+        "confirmed": True,
+        "headline": ev,
+        "detail": ("Reported by the platform this lead was imported from"
+                   + (f" \u00b7 {date}" if date else " \u00b7 undated")
+                   + " \u2014 verify on the call"),
+        "source": "imported list",
+    }
+
+
 def build_signals(leads: list, warn_by_employer: dict = None,
                   filings_by_employer: dict = None, min_tenure: float = 18.0,
                   now: float = None, seen: set = None) -> list:
@@ -367,7 +420,8 @@ def build_signals(leads: list, warn_by_employer: dict = None,
         for s in (age_signal(L, now),
                   warn_signal(L, warn_by_employer, now),
                   filing_signal(L, filings_by_employer),
-                  tenure_signal(L, min_tenure, now)):
+                  tenure_signal(L, min_tenure, now),
+                  imported_signal(L, now)):
             if not s:
                 continue
             s["name"] = f"{L.get('firstName') or ''} {L.get('lastName') or ''}".strip()

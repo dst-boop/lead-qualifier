@@ -165,6 +165,7 @@
   .badge.intl{background:#efe7f5;color:#5a3a75;cursor:help}
   .badge.sec{background:#e8f0e9;color:#2c5d3f;cursor:help}
   .badge.fecret{background:var(--tierA-bg);color:var(--tierA);cursor:help}
+  .badge.mim{background:var(--brass-soft);color:var(--brass);cursor:help;text-transform:none;letter-spacing:0}
   .badge.planchip{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
@@ -1509,6 +1510,15 @@ const FIELDS=[
   ['hasMobile','ZI: mobile available',['has mobile phone','has mobile','hasmobilephone']],
   ['mobileDnc','Mobile DNC flag',['mobile phone do not call','mobilephonedonotcall','mobile dnc']],
   ['directDnc','Direct DNC flag',['direct phone do not call','directphonedonotcall','direct dnc']],
+  /* WealthFeed and its kind: platforms that sell money-in-motion events.
+     The event text is carried verbatim into the signals panel — no taxonomy
+     mapping for a vendor's event names, so an event we did not anticipate
+     surfaces as itself instead of vanishing. Date before event, so "Event
+     Date" is claimed before the event field's looser aliases reach it. */
+  ['moneyEventDate','Money-in-Motion Date',['event date','money in motion date','trigger date','signal date','date of event','event occurred']],
+  ['moneyEvent','Money-in-Motion Event',['money in motion event','money in motion','trigger event','life event','wealth event','event type','wealth trigger','event name','event']],
+  ['netWorthEst','Est. Net Worth (as reported)',['estimated net worth','est net worth','net worth','household net worth','estimated investable assets','investable assets']],
+  ['incomeEst','Est. Income (as reported)',['estimated income','est income','household income','annual income','income']],
   /* Last on purpose. Every specific field claims its column first, so this only
      ever picks up a list that has one name column instead of two. */
   ['fullName','Full Name (split on import)',['full name','fullname','contact name','person name','lead name','name']]
@@ -1516,6 +1526,9 @@ const FIELDS=[
 /* Aliases too generic to fuzzy-match. "name" inside "Company Name" or
    "Account Name" would hand the employer column to Full Name. */
 const EXACT_ONLY=new Set(['fullName']);
+/* The two fields allowed past the derived-column embargo, because they are
+   estimates by declaration and display as such. */
+const DERIVED_OK=new Set(['netWorthEst','incomeEst']);
 /* Without these the import produces rows nothing can address, so the mapper
    says so before the import rather than the coverage warning after. */
 const REQUIRED=['firstName','lastName'];
@@ -1573,6 +1586,18 @@ function guessColumns(headers){
   const low=headers.map(normHeader);
   const squashed=low.map(h=>h.replace(/ /g,''));
   const used=new Set(),map={};
+  // Fields that DECLARE they hold a source's estimate may claim a column the
+  // derived guard would otherwise embargo — exact aliases only. The guard
+  // exists to stop estimates landing in fact fields (an "Est. Age Range" can
+  // never become an age); it was never meant to stop an estimate landing in
+  // a field labelled "as reported".
+  FIELDS.forEach(([key,,syn])=>{
+    if(!DERIVED_OK.has(key))return;
+    for(const raw of syn){
+      const a=normHeader(raw), i=low.indexOf(a);
+      if(i>-1&&!used.has(i)){map[key]=i;used.add(i);return;}
+    }
+  });
   // Claimed before any pass runs, so no field can reach them.
   low.forEach((h,i)=>{if(DERIVED_RE.test(h))used.add(i);});
   FIELDS.forEach(([key,,syn])=>{
@@ -2362,7 +2387,7 @@ function render(){
         L.tier==='X'&&L.wouldBeTier?`<div style="margin-top:3px"><span class="tierchip ${L.wouldBeTier}" title="Scores ${L.wouldBeScore} and lands in tier ${L.wouldBeTier} once a mobile number is on file">→${L.wouldBeTier} · ${L.wouldBeScore}</span></div>`:''
       }${L.qc?`<div style="margin-top:3px"><span class="tierchip ${['A','B','C'].includes(L.qc.grade)?L.qc.grade:'X'}" title="AI QC grade — see More for gates & checklist">AI·${L.qc.grade}</span></div>`:''}</td>
       <td><span class="tape">${tape}</span></td>
-      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${intlBadge(L)}${secBadge(L)}${fecRetBadge(L)}${
+      <td><span class="name">${esc(L.firstName)} ${esc(L.lastName)}</span>${dnc}${sellBadge(L)}${campChip(L)}${planChip(L)}${intlBadge(L)}${secBadge(L)}${fecRetBadge(L)}${mimChip(L)}${
       cbDue?`<div class="cbline ${cbDue}" title="${esc(L.callbackNote||'')}">&#9200; ${esc(cbLabel(L))}${L.callbackNote?' · '+esc(L.callbackNote):''}</div>`:''}</td>
       <td><div class="title-emp" title="${esc(L.title)} · ${esc(L.employer)}">${esc(L.title)}<div class="subline">${esc(L.employer)}</div></div></td>
       <td>${esc(L.state)}</td>
@@ -2880,7 +2905,7 @@ document.getElementById('btnExport').addEventListener('click',()=>{
       `Campaign: ${leadCampaign(L)==='scs'?'SCS':'Rollover'}`,
       `59.5: ${sell.k==='yes'?'sellable now':sell.k==='soon'?sell.label.replace('59½','turns 59.5'):'age unverified'}`,
       ab.kind==='none'?'':`Age basis: ${ab.label}`,
-      L.retryBlocked?'Enrichment blocked — credit limit':'',nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',(L.pub&&L.pub.donations&&L.pub.donations.count)?['Public record:',L.pub.donations.count+' donations $'+(L.pub.donations.total||0),(L.pub.donations.places&&L.pub.donations.places[0])?'from '+L.pub.donations.places[0].value:'',L.pub.donations.says_retired?'told the FEC they are retired':''].filter(Boolean).join(' '):'',(L.pub&&L.pub.filings&&L.pub.filings.length)?L.pub.filings.length+' SEC insider filings — equity comp':'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
+      L.retryBlocked?'Enrichment blocked — credit limit':'',nc?`Calls: ${nc}`:'',ne?`Emails: ${ne}`:'',sigs?`Signals: ${sigs}`:'',L.pv?`Phone check: ${L.pv.label}`:'',L.hd?['Household:',L.hd.age?'age '+L.hd.age:'',L.hd.city?L.hd.city+', '+L.hd.state:'',L.hd.ownsHome===true?('owns home'+(L.hd.ownerType?' ('+L.hd.ownerType+')':'')):(L.hd.ownsHome===false?'home not in their name':''),L.hd.props?L.hd.props+' properties':'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile on file':''].filter(Boolean).join(' '):'',L.moneyEvent?('Money in motion ('+((L.batch||'').toLowerCase().includes('wealthfeed')?'WealthFeed':'imported')+'): '+L.moneyEvent+(L.moneyEventDate?' ('+L.moneyEventDate+')':'')):'',(L.pub&&L.pub.donations&&L.pub.donations.count)?['Public record:',L.pub.donations.count+' donations $'+(L.pub.donations.total||0),(L.pub.donations.places&&L.pub.donations.places[0])?'from '+L.pub.donations.places[0].value:'',L.pub.donations.says_retired?'told the FEC they are retired':''].filter(Boolean).join(' '):'',(L.pub&&L.pub.filings&&L.pub.filings.length)?L.pub.filings.length+' SEC insider filings — equity comp':'',L.qc?`AI grade ${L.qc.grade}${(L.qc.checklist&&L.qc.checklist.length)?' — verify: '+L.qc.checklist.join('; '):''}`:'',L.assignedTo?`Assigned: ${L.assignedTo}`:'',truthy(L.mobileDnc)?'Mobile DNC — email first':'',L.notes].filter(Boolean).join(' | ');
     const a=exportAddress(L), em=exportEmails(L), nm=exportName(L);
     return [nm.first,nm.last,em.primary,em.secondary,L.directPhone,L.mobilePhone,a.street,a.city,a.state,a.zip,a.type,comments,L.employer,`Tier ${L.tier} (${L.score}/100)`,`${state.settings.source} — ${L.batch}`,L.contactId,L.linkedinUrl||''].map(q).join(',');
   }));
@@ -3994,6 +4019,13 @@ function secBadge(L){
   const detail=ins?`${ins.count} filing${ins.count>1?'s':''} on record as ${ins.name}`
                   :`Latest: Form ${f[0].form} ${f[0].date}${f[0].company?' \u00b7 '+f[0].company:''}`;
   return ` <span class="badge sec" title="SEC insider on record \u2014 an officer, director or 10% owner. ${esc(detail)}. Equity compensation is its own planning conversation.">SEC</span>`;
+}
+/* The imported money-in-motion event, verbatim. The tooltip is the whole
+   text; the chip stays short so a long vendor sentence cannot eat the row. */
+function mimChip(L){
+  if(!L.moneyEvent)return '';
+  const ev=(''+L.moneyEvent).trim();
+  return ` <span class="badge mim" title="${esc(ev)}${L.moneyEventDate?' \u00b7 '+esc(L.moneyEventDate):''} \u2014 reported by the platform this lead was imported from. Verify on the call.">\u26a1${esc(ev.length>14?ev.slice(0,13)+'\u2026':ev)}</span>`;
 }
 function fecRetBadge(L){
   const d=L.pub&&L.pub.donations;
