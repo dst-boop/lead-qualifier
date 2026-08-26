@@ -376,13 +376,13 @@
         <button id="btnDeleteList" class="danger">Delete this list</button>
       </div>
     </div>
+    <button class="tbtn" id="btnFreeAll" onclick="enrichAllFree()" title="Every free source, in one pass: political donations and SEC insider filings from the public record, and proxy-statement ages for officers of public companies. No credits, no lookups spent. WhitePages is not included &mdash; it spends credits, so it stays a per-lead button.">Enrich all (free)</button>
     <button class="tbtn" id="btnTeam" title="Leaderboard and contests across your firm">Team</button>
     <button class="tbtn" id="btnExport">Export call list</button>
     <div class="menuwrap">
       <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
       <div class="menu" id="moreMenu" hidden>
         <button id="btnCoverage">Data coverage</button>
-        <button id="btnSweep" onclick="sweepFree()">Sweep public records (free)</button>
         <button id="btnSettings">ICP settings</button>
         <button id="btnTemplate">CSV template &amp; research prompt</button>
         <button id="btnShareList">Share this list&hellip;</button>
@@ -4087,19 +4087,28 @@ window.freeLookup=async id=>{
     toast(parts.length?('Found: '+parts.join(' \u00b7 ')):'Nothing on the public record under that name.');
   }catch(e){toast('Public-records search failed: '+e.message);}
 };
-/* The whole list, gated on being free.
+/* One button, every free source.
 
-   The FEC and SEC searches cost nothing, so scale changes nothing about the
-   money — what it changes is honesty about pace and coverage. The shared
-   demo FEC key allows 40 lookups an hour across everyone using it, so on a
-   big list the donations half will start reporting rate limits mid-sweep;
-   each lead records which sources actually ran, and the summary counts the
-   gaps instead of letting a rate limit read as "no donations".
+   It used to be two: a sweep for the public record, and then the proxy-age
+   button pressed by hand on every officer the sweep had just identified —
+   the summary literally told you to go and do that. Both are free, so making
+   the user aim the second one was work the app was pushing back onto them.
 
-   Deliberately NOT swept: WhitePages (spends credits) and the proxy-age
-   reader (spends Anthropic tokens). The sweep's summary says which leads the
-   proxy-age button is now worth pressing on, which is the free way to aim a
-   paid lookup. */
+   The proxy reader was excluded from list scale for a real reason: it read a
+   45,000-token filing per lead. /api/edgar-roster removes that reason by
+   reading each employer's filing once and answering for everyone who works
+   there, so the cost now scales with employers, not leads — and most
+   employers are private and cost nothing at all.
+
+   Still deliberately excluded: WhitePages. It spends lookup credits from a
+   finite pool, and a button that spends money must be pressed per lead, with
+   the count in front of you. The confirm dialog says so, because "all free
+   sources" is only a useful promise if what it leaves out is named.
+
+   Honesty about pace survives from the sweep: the shared demo FEC key allows
+   40 lookups an hour, so on a big list the donations half starts reporting
+   rate limits; each lead records which sources actually ran, and the summary
+   counts the gaps instead of letting a rate limit read as "no donations". */
 let SWEEP=null;
 /* A lead swept while a source was down holds a verdict with a hole in it —
    "fec: ran false" — and the hole is recorded, not silent. Incomplete leads
@@ -4110,30 +4119,48 @@ function pubIncomplete(L){
   const s=(L.pub&&L.pub.sources)||{};
   return !!L.pub&&((s.fec&&s.fec.ran===false)||(s.edgar&&s.edgar.ran===false));
 }
-window.sweepFree=async()=>{
+window.enrichAllFree=async()=>{
   if(SWEEP){SWEEP.stop=true;return;}
   if(!(window.ME&&ME.signed_in)){toast('Sign in first.');return;}
-  const todo=state.leads.filter(L=>L.lastName&&(!L.pub||pubIncomplete(L)));
-  const gaps=todo.filter(pubIncomplete).length;
-  const done=state.leads.filter(L=>L.lastName&&L.pub&&!pubIncomplete(L)).length;
-  if(!todo.length){toast(done?'Every lead has already been swept \u2014 press \u2696 on one to re-check it.':'No leads with names to sweep.');return;}
+  const btn=document.getElementById('btnFreeAll');
+  // Phase 1: the public record, per lead. Phase 2: proxy ages, per employer.
+  const pubTodo=state.leads.filter(L=>L.lastName&&(!L.pub||pubIncomplete(L)));
+  const gaps=pubTodo.filter(pubIncomplete).length;
+  const pubDone=state.leads.filter(L=>L.lastName&&L.pub&&!pubIncomplete(L)).length;
+  const canAge=!!(ME.features&&ME.features.edgar);
+  const ageTodo=canAge?state.leads.filter(L=>L.lastName&&L.employer&&!L.edgar):[];
+  const firms=[];const byFirm={};
+  ageTodo.forEach(L=>{const k=L.employer.trim().toLowerCase();
+    if(!byFirm[k]){byFirm[k]=[];firms.push(k);}byFirm[k].push(L);});
+  if(!pubTodo.length&&!ageTodo.length){
+    toast((pubDone||state.leads.some(L=>L.edgar))
+      ?'Everything free has already been read for this list \u2014 press \u2696 on a lead to re-check it.'
+      :'No leads with names to enrich.');return;}
   const demo=!(ME.features&&ME.features.fec_personal_key);
-  if(!await appConfirm(
-    `Search the public record for ${todo.length} lead${todo.length>1?'s':''}?`+
-    (gaps?` (${gaps} of them to fill gaps a rate limit or outage left last time.)`:'')+
-    ` Free \u2014 no credits, no lookups spent.`+
-    (done?` ${done} already swept are skipped; press \u2696 on one to re-check it.`:'')+
-    (demo&&todo.length>40?` Note: the shared demo FEC key allows about 40 donation lookups an hour, so most of the donations half will come back rate-limited \u2014 the SEC half is unaffected. A free personal FEC_API_KEY (api.open.fec.gov/developers) lifts that to 1,000.`:''),
-    'Sweep the list'))return;
-  SWEEP={stop:false,done:0,total:todo.length};
-  const btn=document.getElementById('btnSweep');
-  const found={sec:0,donors:0,retired:0,fecMissed:0,errors:0};
-  const CONC=3;let idx=0;
-  const label=()=>{if(btn)btn.textContent=`Sweeping ${SWEEP.done}/${SWEEP.total} \u2014 click to stop`;};
+  const bits=[];
+  if(pubTodo.length)bits.push(`Public record for ${pubTodo.length} lead${pubTodo.length>1?'s':''}`+
+    (gaps?` (${gaps} to fill gaps a rate limit or outage left last time)`:'')+
+    `: political donations and SEC insider filings. Free \u2014 no credits, no lookups spent.`);
+  if(ageTodo.length)bits.push(`Proxy-statement ages for ${ageTodo.length} lead${ageTodo.length>1?'s':''} across `+
+    `${firms.length} employer${firms.length>1?'s':''}: one read per employer, not per lead, and only public `+
+    `companies file at all. No credits.`);
+  if(pubDone)bits.push(`${pubDone} already read ${pubDone>1?'are':'is'} skipped.`);
+  bits.push(`WhitePages is not included \u2014 it spends lookup credits, so it stays a button you press per lead.`);
+  if(demo&&pubTodo.length>40)bits.push(`Note: the shared demo FEC key allows about 40 donation lookups an hour, `+
+    `so most of the donations half will come back rate-limited \u2014 the SEC half is unaffected. A free personal `+
+    `FEC_API_KEY (api.open.fec.gov/developers) lifts that to 1,000.`);
+  if(!await appConfirm(bits.join(' '),'Enrich from every free source'))return;
+
+  SWEEP={stop:false,done:0,total:pubTodo.length+ageTodo.length};
+  const found={sec:0,donors:0,retired:0,fecMissed:0,ages:0,firmsRead:0,errors:0};
+  const label=()=>{if(btn)btn.textContent=`Enriching ${SWEEP.done}/${SWEEP.total} \u2014 click to stop`;};
   label();
-  const worker=async()=>{
-    while(!SWEEP.stop&&idx<todo.length){
-      const L=todo[idx++];
+
+  // --- the public record ------------------------------------------------------
+  let idx=0;
+  const pubWorker=async()=>{
+    while(!SWEEP.stop&&idx<pubTodo.length){
+      const L=pubTodo[idx++];
       try{
         const d=await api('/api/free-enrich',{first_name:L.firstName||'',last_name:L.lastName||'',employer:L.employer||''});
         storePub(L,d,true);
@@ -4146,17 +4173,50 @@ window.sweepFree=async()=>{
       if(SWEEP.done%25===0){save();render();}
     }
   };
-  await Promise.all(Array.from({length:Math.min(CONC,todo.length)},worker));
+  await Promise.all(Array.from({length:Math.min(3,pubTodo.length)},pubWorker));
+  if(pubTodo.length){save();render();}
+
+  // --- proxy ages, one read per employer --------------------------------------
+  // The batch endpoint is what makes this affordable at list scale: ten leads at
+  // one company are ten answers out of one reading, and a miss is recorded so
+  // the same fruitless employer is not read again on the next press.
+  let fi=0;
+  const ageWorker=async()=>{
+    while(!SWEEP.stop&&fi<firms.length){
+      const group=byFirm[firms[fi++]];
+      try{
+        const d=await api('/api/edgar-roster',{employer:group[0].employer,
+          people:group.map((L,j)=>({i:j,first_name:L.firstName||'',last_name:L.lastName||''}))});
+        if(d.roster_size)found.firmsRead++;
+        group.forEach((L,j)=>{
+          const m=(d.matches||{})[j];
+          L.edgar={age:m?m.age:null,title:(m&&m.title)||'',asOf:(m&&m.as_of)||'',quote:'',
+                   url:(d.filing&&d.filing.url)||'',filed:(d.filing&&d.filing.filed)||'',
+                   company:(d.company&&d.company.name)||'',
+                   reason:m?'':(d.reason||'not listed in that proxy statement')};
+          L.updatedAt=Date.now();scoreLead(L);
+          if(m){found.ages++;
+            logAct(L.id,'edgar','age '+m.age+' ('+((d.company&&d.company.name)||'')+' proxy, filed '+
+              ((d.filing&&d.filing.filed)||'')+') \u2014 now '+L.tier+'\u00b7'+L.score);}
+        });
+      }catch(e){found.errors++;}
+      SWEEP.done+=group.length;label();
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(2,firms.length)},ageWorker));
+
   const stopped=SWEEP.stop;SWEEP=null;
-  if(btn)btn.textContent='Sweep public records (free)';
+  if(btn)btn.textContent='Enrich all (free)';
   save();render();
-  const bits=[];
-  if(found.sec)bits.push(found.sec+' SEC insider'+(found.sec>1?'s':'')+' \u2014 the \ud83c\udfdb age lookup will work on these');
-  if(found.retired)bits.push(found.retired+' told the FEC they are retired');
-  if(found.donors)bits.push(found.donors+' donor'+(found.donors>1?'s':'')+' with home city on record');
-  if(found.fecMissed)bits.push(found.fecMissed+' donation lookups did not run (rate limit) \u2014 sweep again later to fill them');
-  if(found.errors)bits.push(found.errors+' failed');
-  toast((stopped?'Sweep stopped. ':'Sweep done. ')+(bits.join(' \u00b7 ')||'Nothing on the public record for this list.'));
+  const out=[];
+  if(found.sec)out.push(found.sec+' SEC insider'+(found.sec>1?'s':''));
+  if(found.ages)out.push(found.ages+' age'+(found.ages>1?'s':'')+' from proxy statements'+
+    (found.firmsRead?' ('+found.firmsRead+' employer'+(found.firmsRead>1?'s':'')+' read)':''));
+  if(found.retired)out.push(found.retired+' told the FEC they are retired');
+  if(found.donors)out.push(found.donors+' donor'+(found.donors>1?'s':'')+' with home city on record');
+  if(found.fecMissed)out.push(found.fecMissed+' donation lookup'+(found.fecMissed>1?'s':'')+' did not run (rate limit) \u2014 press it again later to fill '+(found.fecMissed>1?'them':'it'));
+  if(found.errors)out.push(found.errors+' failed');
+  toast((stopped?'Stopped. ':'Done. ')+(out.join(' \u00b7 ')||'Nothing on the free record for this list.'));
 };
 /* The Knoxville problem: the user KNOWS where a lead lives — the lead row
    just holds the employer's city, so the lookup searched the wrong place and
