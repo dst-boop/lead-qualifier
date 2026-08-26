@@ -306,13 +306,19 @@
   th{font-weight:500;letter-spacing:.08em}
 
   /* One strong brand block: the EA Blue bar, with the shield's arcs drawn
-     once, quietly, as concentric forms fading off the right edge. */
-  .topbar{position:relative;overflow:hidden;padding:16px 24px}
-  .topbar::before{content:"";position:absolute;right:-140px;top:-190px;width:420px;height:420px;
-    border:1.5px solid rgba(182,211,223,.35);border-radius:50%;pointer-events:none}
-  .topbar::after{content:"";position:absolute;right:-90px;top:-140px;width:320px;height:320px;
-    border:1px solid rgba(182,211,223,.22);border-radius:50%;pointer-events:none}
-  .topbar>*{position:relative;z-index:1}
+     once, quietly, as concentric forms fading off the right edge.
+
+     Drawn as background rings, not pseudo-elements: the first version used
+     overflow:hidden to trim the circles, which also trimmed the dropdown
+     menus that open inside this bar — a decoration silently eating the More
+     menu. A background clips to its own box and can clip nothing else. */
+  .topbar{position:relative;padding:16px 24px;
+    background:
+      radial-gradient(circle 210px at calc(100% - 60px) -40px,
+        transparent 207px, rgba(182,211,223,.35) 208px, rgba(182,211,223,.35) 210px, transparent 211px),
+      radial-gradient(circle 160px at calc(100% - 60px) -40px,
+        transparent 157px, rgba(182,211,223,.22) 158px, rgba(182,211,223,.22) 159.5px, transparent 160.5px),
+      var(--ink)}
   .brand h1{font-weight:200;font-size:1.45rem;letter-spacing:.015em}
   .brand h1 .amp{color:var(--ice)}
   .brand .sub{color:var(--ice);opacity:.85}
