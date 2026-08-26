@@ -181,3 +181,26 @@ the same probe finally showed what the API actually returned.
 - Credits are the user's own. That is the point, but it also means a search run
   from this app spends the seat's monthly allowance the same as one run in
   ZoomInfo's own UI.
+
+
+## The route for everyone: no API key, no server token
+
+Every teammate can build lists with nothing but their own Claude account and
+their own ZoomInfo seat:
+
+1. **One-time**: in claude.ai → Settings → Connectors → **ZoomInfo** →
+   Connect, signing in with your own ZoomInfo credentials.
+2. In the app's **Build a list from ZoomInfo** panel, set the filters and
+   press **Open in Claude** (or Copy this search and paste it yourself).
+3. Claude runs the search through your connector and answers with a **CSV
+   code block** whose header row this app recognises on sight.
+4. Back here: **Paste a list**. The columns map themselves.
+
+The pasted prompt tells Claude exactly which tool to call, with which
+parameters, to never call an enrich tool (search is free; enrichment spends
+credits), to return only the CSV, and to leave cells empty rather than guess
+at fields the search did not return.
+
+The in-app Build button still exists for deployments with an Anthropic API
+key and a saved ZoomInfo token — same search, no copy-paste. The connector
+route is the one that needs neither.

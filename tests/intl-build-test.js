@@ -112,12 +112,46 @@ const LEADS=[
   ck('  ...and the line says it is connected',
      /Connected to ZoomInfo/.test(await txt('#bStatus')), await txt('#bStatus'));
 
-  // a deployment with no Anthropic key is a different sentence
+  // A deployment with no Anthropic key is not an error any more: the route
+  // that works for EVERY user is their own Claude account with the ZoomInfo
+  // connector, and the panel teaches it as steps.
   who=me({features:feat({zi_mcp:false})});
   await load();
-  ck('no API key on the deployment says so specifically',
-     /no Anthropic API key/.test(await txt('#bStatus')), await txt('#bStatus'));
-  ck('  ...and still offers the copy route', /Copy this search/.test(await txt('#bStatus')));
+  const nokey=await txt('#bStatus');
+  ck('no API key reads as the everyone-route, not an error',
+     /No API needed/.test(nokey)&&!(await p.evaluate(()=>document.getElementById('bStatus').classList.contains('err'))), nokey.slice(0,60));
+  ck('  ...naming the one-time connector setup', /Settings . Connectors . ZoomInfo/.test(nokey.replace(/\s+/g,' ')), nokey);
+  ck('  ...and the way back in', /Paste a list/.test(nokey));
+  ck('  ...with Open in Claude on offer', await p.evaluate(()=>{
+    const b=document.getElementById('btnOpenClaude');
+    return !!b&&b.getBoundingClientRect().width>0;}));
+
+  // The portable prompt: same search, an ending a human can use. In-app the
+  // harness reads the tool result, so Claude says DONE; pasted into
+  // claude.ai, the PERSON is the harness and needs a CSV back.
+  const portable=await p.evaluate(()=>portablePrompt());
+  ck('the portable prompt never says DONE', !/\bDONE\b/.test(portable), portable.slice(-90));
+  ck('  ...it demands a CSV code block with the exact header row',
+     /output ONLY a CSV code block/.test(portable)&&portable.includes('First Name,Last Name,Job Title'), portable.slice(-200));
+  ck('  ...and forbids invented values', /never guess or fill a value/.test(portable));
+  ck('  ...while the in-app prompt still says DONE, because the harness reads the result',
+     await p.evaluate(()=>/DONE/.test(rolloverPrompt())));
+  // The round trip is guaranteed, not hoped for: every header in the demanded
+  // row is an exact alias the mapper recognises.
+  const trip=await p.evaluate(()=>{
+    const heads=PORTABLE_HEADERS.split(',');
+    const g=guessColumns(heads);
+    return {mapped:Object.keys(g).length,total:heads.length,
+            missing:heads.filter((h,i)=>!Object.values(g).includes(i))};
+  });
+  ck('every demanded header round-trips through the mapper',
+     trip.mapped===trip.total&&trip.missing.length===0, JSON.stringify(trip));
+  const opened=await p.evaluate(()=>{
+    let url=null;const orig=window.open;window.open=u=>{url=u;return null;};
+    document.getElementById('btnOpenClaude').click();window.open=orig;return url;});
+  ck('Open in Claude opens claude.ai with the search pre-filled',
+     opened&&opened.startsWith('https://claude.ai/new?q=')
+       &&decodeURIComponent(opened.slice(24)).includes('search_contacts'), (opened||'').slice(0,50));
 
   // --- international numbers --------------------------------------------------
   who=me();
@@ -180,6 +214,15 @@ const LEADS=[
   ck('by default they are simply out of the call order',
      await p.evaluate(()=>filtered().filter(L=>L.tier!=='X').map(L=>L.lastName).join())==='Alpha,Echo',
      await p.evaluate(()=>filtered().filter(L=>L.tier!=='X').map(L=>L.lastName).join()));
+
+  // The invisible sign-in: accent-blue links on the EA-blue strip were
+  // blue-on-blue. The strip's links must be the palette's ice, not the
+  // page's accent.
+  const linkColor=await p.evaluate(()=>{
+    const a=document.querySelector('#authbar a');
+    return a?getComputedStyle(a).color:'no links';});
+  ck('auth-bar links are ice blue on the dark strip, not accent-on-navy',
+     linkColor==='rgb(182, 211, 223)', linkColor);
 
   ck('no page errors', errs.length===0, errs.slice(0,2).join(' | '));
   console.log(fail?`\nFAILURES: ${fail} of ${n}`:`\nall ${n} checks passed`);

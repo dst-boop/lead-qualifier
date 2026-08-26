@@ -166,6 +166,11 @@
   .badge.sec{background:#e8f0e9;color:#2c5d3f;cursor:help}
   .badge.fecret{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .badge.mim{background:var(--brass-soft);color:var(--brass);cursor:help;text-transform:none;letter-spacing:0}
+  /* Links in the dark auth strip: accent blue vanishes on EA blue, and the
+     sign-in link is the one control a signed-out user must be able to see. */
+  #authbar a{color:var(--ice);font-weight:500;text-decoration-color:rgba(182,211,223,.5)}
+  #authbar a:hover{color:#fff}
+  #authbar b{color:#fff}
   .badge.planchip{background:var(--tierA-bg);color:var(--tierA);cursor:help}
   .sellbadge{display:inline-block;font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;border:1px solid;cursor:help}
   .sellbadge.yes{background:var(--tierA-bg);color:var(--tierA);border-color:#bcd9c8}
@@ -484,6 +489,7 @@
   <div class="bp-inner">
     <div class="bp-actions">
       <button class="tbtn primary btnBuild" id="btnBuild">1 &middot; Build list (free)</button>
+      <button class="tbtn" id="btnOpenClaude" title="Opens claude.ai with this search pre-filled. Needs the ZoomInfo connector on your Claude account (Settings &rarr; Connectors &rarr; ZoomInfo) — a one-time setup with your own ZoomInfo login. Claude replies with a CSV; bring it back through Paste a list.">Open in Claude</button>
       <button class="tbtn" id="btnCopySearch" title="Put this search on the clipboard to run in Claude with the ZoomInfo connector, then paste or import the results">Copy this search</button>
       <button class="tbtn" id="btnPaste">Paste a list</button>
       <button class="tbtn btnBuild" id="btnEnrich" style="border-color:var(--brass);color:var(--brass)">2 &middot; Enrich leads (uses credits)</button>
@@ -3536,11 +3542,24 @@ document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
 function currentSearchPrompt(){
   return currentCampaign()==='scs' ? scsPrompt().prompt : rolloverPrompt();
 }
+/* Every header below is an exact alias in FIELDS, so the paste round-trips
+   through the mapper with zero clicks. A test holds the two lists together. */
+const PORTABLE_HEADERS='First Name,Last Name,Job Title,Management Level,Company,State,Mobile Phone,Business Phone,Email,Position Start Date,LinkedIn URL,ZoomInfo Contact ID,Mobile Phone Do Not Call,Direct Phone Do Not Call';
+function portablePrompt(){
+  return currentSearchPrompt().replace(
+    /After the tool result returns, reply with exactly one word: DONE\./,
+    'After the tool result returns, output ONLY a CSV code block \u2014 no commentary before or after \u2014 with EXACTLY this header row:\n'
+    +PORTABLE_HEADERS
+    +'\nOne row per contact in the search result. Leave a cell empty when the search did not return that field \u2014 never guess or fill a value the tool did not return.');
+}
 document.getElementById('btnCopySearch').addEventListener('click',()=>{
-  const txt=currentSearchPrompt();
-  const done=()=>toast('Search copied — paste it into Claude with the ZoomInfo connector, then import the CSV it gives you.');
+  const txt=portablePrompt();
+  const done=()=>toast('Search copied — paste it into Claude (with the ZoomInfo connector on), then bring the CSV back through Paste a list.');
   try{navigator.clipboard.writeText(txt).then(done,()=>prompt('Copy this:',txt));}
   catch(e){prompt('Copy this:',txt);}
+});
+document.getElementById('btnOpenClaude').addEventListener('click',()=>{
+  window.open('https://claude.ai/new?q='+encodeURIComponent(portablePrompt()),'_blank','noopener');
 });
 /* Says which of the two routes is available, and if neither, what to do about
    it. Silence here was the actual bug report. */
@@ -3556,12 +3575,22 @@ function buildRouteLine(){
     st.textContent='Running inside Claude, so the ZoomInfo connector on your Claude account is used. Search is free; enriching costs 1 credit per lead.';
     return;
   }
+  // The route that works for EVERY user, no API key anywhere: their own
+  // Claude account with the ZoomInfo connector. Said as steps, because "use
+  // the connector" is not an instruction anyone can follow.
+  const steps='No API needed \u2014 anyone on the team can run this with their own Claude account: '
+    +'<b>1)</b> one-time, in claude.ai: Settings \u2192 Connectors \u2192 <b>ZoomInfo</b> \u2192 Connect, signing in with your own ZoomInfo seat \u00b7 '
+    +'<b>2)</b> press <b>Open in Claude</b> (or Copy this search and paste it) \u00b7 '
+    +'<b>3)</b> Claude answers with a CSV \u2014 bring it back here through <b>Paste a list</b>. The columns map themselves.';
+  if(!feat.zi_mcp){
+    st.classList.remove('err');
+    st.innerHTML=steps;
+    return;
+  }
   st.classList.add('err');
-  st.innerHTML=!feat.zi_mcp
-    ? 'This deployment has no Anthropic API key, so the app cannot reach ZoomInfo itself. '
-      +'<b>Copy this search</b> and run it in Claude with the ZoomInfo connector, then import the CSV.'
-    : 'No ZoomInfo token saved, so the app cannot run the search for you. '
-      +'Add one under <b>More \u2192 ICP settings</b>, or use <b>Copy this search</b> and run it in Claude, then import the CSV.';
+  st.innerHTML='No ZoomInfo token saved, so the app cannot run the search for you. '
+      +'Add one under <b>More \u2192 ICP settings</b> \u2014 or skip the token entirely: '+steps
+      +' (<b>Copy this search</b> works the same way.)';
 }
 if(!HAS_WS){
   document.getElementById('btnBuild').style.display='none';
@@ -3614,7 +3643,9 @@ async function loadMe(){
     if(b&&ME.signed_in&&ME.features&&ME.features.opportunities)b.style.display='';
   }catch(e){}
   const bar=document.getElementById('authbar');bar.style.display='block';
-  const A='style="color:var(--brass);font-weight:600;text-decoration:none"';
+  // Ice, not accent: these links sit on the EA-blue strip, where the page's
+  // accent blue is blue-on-blue — which is how the sign-in link disappeared.
+  const A='style="color:var(--ice);font-weight:600;text-decoration:none"';
   if(ME.signed_in){
     const zi=(ME.features&&ME.features.zoominfo)
       ? (ME.zi_connected
