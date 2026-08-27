@@ -1,0 +1,91 @@
+# The regression suite, enforced.
+#
+# Sixty suites existed and passed for months while nothing ran them, and Cloud
+# Run deploys from main — so a merge that broke the app shipped it. This is the
+# gate that was missing.
+#
+# The suites are hermetic by construction: every API key in them is a stub
+# string, every outbound call goes to a localhost stub server the suite starts
+# itself, and NO_PROXY is set so nothing escapes to the network. That is why
+# this workflow needs no secrets and can safely run on any pull request.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A second push to the same branch makes the first run irrelevant. Cancelling
+# it keeps the queue honest about what is actually being tested.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    # The full suite is about five minutes. This ceiling is for a hung browser,
+    # not for a slow run.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.13 because that is what the Dockerfile ships to Cloud Run. Testing on
+      # a different interpreter than production runs would let a version
+      # incompatibility through the one gate meant to catch it.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # Twenty seconds, and it fails the run before the browser install if
+      # someone has pushed a syntax error.
+      - name: Byte-compile the app
+        run: python -m compileall -q webapp
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: npm ci
+
+      # Keyed on the resolved Playwright version: a browser build is tied to
+      # the library that drives it, so the cache has to miss when that moves.
+      - name: Resolve Playwright version
+        id: pw
+        working-directory: tests
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      # The suites ask for /opt/pw-browsers/chromium first (where this project's
+      # dev container keeps it) and fall back to Playwright's own copy, which is
+      # what gets installed here. Chromium only: nothing drives Firefox or WebKit.
+      - name: Install Chromium
+        working-directory: tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the suite
+        run: bash tests/run.sh
+
+      # run.sh tails twenty lines of the server log on failure; when the server
+      # itself is the problem, twenty lines is rarely the interesting part.
+      - name: Server log
+        if: failure()
+        run: cat /tmp/lq-test-server.log || echo "no server log"

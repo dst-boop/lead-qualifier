@@ -1,5 +1,7 @@
 # Lead Qualifier
 
+[![tests](https://github.com/dst-boop/lead-qualifier/actions/workflows/tests.yml/badge.svg)](https://github.com/dst-boop/lead-qualifier/actions/workflows/tests.yml)
+
 A lead qualification tool for Financial Planners of America. Import a contact
 list, score it against the firm's ideal-prospect rule, verify the phone numbers,
 enrich from public records, and work the call list — calling, emailing and

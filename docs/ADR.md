@@ -2128,3 +2128,44 @@ with a warning, after the credits were spent. An advertised field the
 entitlement refuses is this codebase's oldest trap. `scs-test.js` reads
 `enrichLeads.toString()` and fails if the name appears anywhere inside it —
 including in a comment, which is why the explanation lives above the function.
+
+## 34. The suite becomes a gate
+
+Sixty suites, several thousand assertions, five minutes to run — and nothing
+ran them. Cloud Run deploys from `main`, so a merge that broke the app shipped
+it, and the only thing standing between a bad change and production was
+whoever remembered to type `bash tests/run.sh`. The most valuable thing in the
+repository was advisory.
+
+`.github/workflows/tests.yml` runs the whole script on every pull request and
+every push to `main`.
+
+Three decisions inside it are worth recording.
+
+**No secrets, by construction.** The suites are hermetic: every API key in them
+is a stub string, every outbound call goes to a localhost stub the suite starts
+itself, and `NO_PROXY` is set so nothing escapes. That was already true — it is
+why they can run in an environment whose egress proxy blocks sec.gov and
+fec.gov — and it means the gate needs no credentials and can safely run on any
+pull request.
+
+**Python 3.13, because that is what the Dockerfile ships.** Testing on a
+different interpreter than production runs would let a version incompatibility
+through the one gate meant to catch it. The full suite was run on 3.13 before
+this workflow was written, rather than pinning a version and discovering in CI
+whether it worked.
+
+**A lockfile.** `tests/package-lock.json` is now committed and CI uses `npm ci`,
+so the browser driver in CI is the one that was tested rather than whatever
+resolves that morning. The Playwright browser cache is keyed on the resolved
+library version, because a browser build is tied to the library that drives it.
+
+The suites already tried `/opt/pw-browsers/chromium` first and fell back to
+Playwright's own copy, so the same files run unchanged in the dev container and
+on a runner. That fallback was written for a different reason and paid for
+itself here.
+
+What this does not do is deploy. Cloud Run still builds from `main` on its own,
+which means a red run on `main` is a statement about what is already live, not
+a block on it becoming live. Gating the deploy on the check is the obvious next
+step and is deliberately not in this change.

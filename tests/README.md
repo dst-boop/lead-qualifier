@@ -80,3 +80,22 @@ counter to `process.exit`, then break it on purpose once to prove it fails.
 These walk a flow and print what they find for a human to read. They are useful
 when something looks wrong and useless as a gate, so `run.sh` leaves them out.
 Run them by hand: `node audit.js`.
+
+## In CI
+
+`.github/workflows/tests.yml` runs this whole script on every pull request and
+every push to `main`. It needs no secrets: every API key in these suites is a
+stub string and every outbound call goes to a localhost stub the suite starts
+itself, so there is nothing for a fork to steal and nothing to leak.
+
+Python is pinned to **3.13** because that is what the Dockerfile ships to Cloud
+Run. Testing on a different interpreter than production runs would let a version
+incompatibility through the one gate meant to catch it.
+
+Chromium comes from Playwright's own install rather than the `/opt/pw-browsers`
+path this project's dev container uses; the suites try that path first and fall
+back, so the same file runs in both places. `tests/package-lock.json` is
+committed so CI installs the exact versions that were tested.
+
+Cloud Run deploys from `main`, so a red run on `main` means what is deployed is
+broken. Treat it that way.
