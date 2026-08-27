@@ -40,7 +40,7 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   await p.route('**/api/drive/rows*', r => r.fulfill({ json: { name: 'x', rows: [] } }));
   await p.route('**/api/lists/*', r => r.request().method() === 'GET'
     ? r.fulfill({ json: { list: { id: 'default', name: 'My leads' }, settings: {}, leads: [] } })
-    : r.fulfill({ json: { ok: true, lists: [] } }));
+    : r.fulfill({ json: { ok: true, lists: [{ id: 'default', name: 'My leads', count: 1, role: 'owner', owner: '' }] } }));
 
   let fail = 0, n = 0;
   const ck = (name, c, d) => { n++; console.log((c ? 'ok   ' : 'FAIL ') + name + (d !== undefined ? '  ' + d : '')); if (!c) fail++; };
@@ -110,7 +110,7 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
     ? r.fulfill({ json: { list: { id: 'default', name: 'My leads' }, settings: {}, leads: [
         { id: 'x1', firstName: 'Ada', lastName: 'Alpha', title: 'CFO', employer: 'Meridian',
           mobilePhone: '(973) 555-0142', email: 'a@m.com', status: 'New', activity: [] }] } })
-    : r.fulfill({ json: { ok: true, lists: [] } }));
+    : r.fulfill({ json: { ok: true, lists: [{ id: 'default', name: 'My leads', count: 1, role: 'owner', owner: '' }] } }));
   await load();
   const src = await p.evaluate(() => [...document.querySelectorAll('#stSource .stacts > *')]
     .filter(e => e.offsetParent !== null).length);
@@ -162,6 +162,29 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   const firm = await p.evaluate(() => document.getElementById('research-x1').textContent);
   ck('when the firm is the tighter ceiling it says so, not your own number',
      /firm's pool/.test(firm) && /lower than your own 98/.test(firm), firm.slice(-180));
+
+  // --- a menu that opens off the edge of the screen ---------------------------
+  // Reported as "Cant see Other Ways menu". It is anchored to its trigger's
+  // right edge, which is right for a button near the right of the window and
+  // wrong for one near the left — and "Other ways" moves to the card's left
+  // edge as soon as the button row wraps, which it does below about 1300px.
+  // Measured at -98px, entirely off screen.
+  for (const w of [1280, 980]) {
+    await p.setViewportSize({ width: w, height: 900 });
+    await p.waitForTimeout(200);
+    for (const [btn, menu] of [['btnAdd', 'addMenu'], ['btnMore', 'moreMenu'], ['btnLists', 'listMenu']]) {
+      await p.click('#' + btn); await p.waitForTimeout(150);
+      const box = await p.evaluate(id => {
+        const m = document.getElementById(id), r = m.getBoundingClientRect();
+        return { left: Math.round(r.left), right: Math.round(r.right), vw: innerWidth };
+      }, menu);
+      ck(`at ${w}px the ${menu} opens on screen`,
+         box.left >= 0 && box.right <= box.vw, JSON.stringify(box));
+      await p.keyboard.press('Escape'); await p.waitForTimeout(100);
+    }
+  }
+  await p.setViewportSize({ width: 1500, height: 1000 });
+  await p.waitForTimeout(200);
 
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);

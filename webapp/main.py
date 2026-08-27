@@ -2490,13 +2490,35 @@ def _source_counties() -> set:
 
 
 def _warn_feeds() -> list:
+    return _warn_feeds_checked()[0]
+
+
+def _warn_feeds_checked() -> tuple:
+    """(feeds, complaint). A complaint means the setting is wrong, not empty.
+
+    Three silences used to look identical: nothing set, JSON that will not
+    parse, and entries with no url in them. Only the first is "you have not
+    configured this yet"; the other two are a variable that was typed and is
+    not doing anything, which is the worst of the three to leave unnamed —
+    it looks configured from the outside and reports no layoffs from the
+    inside.
+    """
     if not WARN_FEEDS.strip():
-        return []
+        return [], ""
     try:
         feeds = json.loads(WARN_FEEDS)
-    except ValueError:
-        return []
-    return [f for f in feeds if isinstance(f, dict) and f.get("url")]
+    except ValueError as e:
+        return [], (f"WARN_FEEDS is set but is not valid JSON ({e}). It must be a list "
+                    f'like [{{"id":"nj","state":"NJ","format":"csv","url":"https://..."}}].')
+    if not isinstance(feeds, list):
+        return [], ("WARN_FEEDS parsed as "
+                    f"{type(feeds).__name__}, but it must be a list of feed objects.")
+    good = [f for f in feeds if isinstance(f, dict) and f.get("url")]
+    if feeds and not good:
+        return [], (f"WARN_FEEDS has {len(feeds)} entr"
+                    f"{'y' if len(feeds) == 1 else 'ies'} but none of them carries a "
+                    f'"url", so there is nothing to fetch.')
+    return good, ""
 
 
 # A source can live in the advisor's own Drive rather than on a government
@@ -2735,7 +2757,8 @@ async def sources_refresh(request: Request):
     warn = await _load_warn(tok, fresh=True)
     if not warn["events"]:
         return {"stored": 0, "feeds": warn["feeds"],
-                "note": "No WARN events. Set WARN_FEEDS, then check /api/sources/probe."}
+                "note": (_warn_feeds_checked()[1]
+                         or "No WARN events. Set WARN_FEEDS, then check /api/sources/probe.")}
     try:
         plans = await _load_plans(tok, fresh=True)
     except Exception as e:
@@ -2768,7 +2791,13 @@ async def opportunities(request: Request, refresh: bool = False):
         # nothing is configured yet, or feeds ran and found nothing. Pointing
         # a user at a markdown file answers neither, and it was the first
         # thing a new account saw here.
-        if not WARN_FEEDS.strip():
+        _feeds, complaint = _warn_feeds_checked()
+        if complaint:
+            # Configured, and configured wrongly. Naming that is the difference
+            # between a five-minute fix and a week of believing there are no
+            # layoffs anywhere.
+            note = complaint + " Nothing else in the app depends on this."
+        elif not WARN_FEEDS.strip():
             note = ("This needs at least one state's layoff-notice feed, which an admin "
                     "sets once for the whole firm (WARN_FEEDS). Nothing else in the app "
                     "depends on it — sourcing, enrichment and scoring all work without it.")

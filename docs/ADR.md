@@ -2254,3 +2254,32 @@ firm's is the one you will actually hit.
 
 Also removed: a comment describing the ZoomInfo credit pool that §35 had
 already established does not exist.
+
+## 37. A menu off the screen, and a configured setting doing nothing
+
+Two reports from the same session of real use.
+
+**"Cant see Other Ways menu."** `.menu` anchors to its trigger's right edge —
+correct for the top-bar buttons it was written for, wrong for a trigger near
+the window's left. "Other ways" sits mid-card at full width, but the moment
+the button row wraps (below about 1300px) it moves to the card's left edge and
+the menu opens at left: −98px. The fix measures on open and flips the anchor
+(`.menu.flip`), in `wireMenu` where every dropdown shares it — which is also
+how the audit found the lists switcher had the same latent bug at narrow
+widths, fixed for free by deleting its byte-identical private copy of the
+menu closure and pointing it at wireMenu.
+
+**Money in Motion said "0 feeds ran and reported no notices."** /api/me said
+`opportunities: true`. Both were technically accurate: WARN_FEEDS was set and
+parsed to nothing usable, and `_warn_feeds()` returned [] for a malformed
+setting exactly as it did for an absent one. Three silences looked identical —
+not set, invalid JSON, entries with no url — and only the first means "not
+configured yet". The other two are a variable that was typed and is doing
+nothing, which is the worst state to leave unnamed: configured from the
+outside, "no layoffs anywhere" from the inside. `_warn_feeds_checked()` now
+returns the complaint alongside the feeds, and the panel prints it with the
+exact required shape.
+
+Also from the same screenshots: the AI-QC menu line implied the user needs a
+Claude account (it runs on the app's own key — a real question from a real
+user reading it), and Search ZoomInfo now says it needs your own subscription.
