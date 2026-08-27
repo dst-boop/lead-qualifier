@@ -1,8 +1,16 @@
-"""Two allowances, and the promise that nothing pays twice for one question.
+"""One allowance per person, and the promise that nothing pays twice.
 
-"Costs MUST be minimized when using paid enrichment. ZoomInfo has 2000 credits
-per month. White pages has 1000 credits per month. Use them strategically. Keep
-in mind the rules of relooking them up."
+"For now, each user gets 100 credits from whitepages per month."
+"Each user MUST have a own ZoomInfo subscription."
+
+So there are two ceilings on WhitePages and they answer different questions:
+your own hundred, which resets on the first, and the firm's pool, which needs
+an admin to raise. Telling a user "the allowance is spent" without saying whose
+sends half of them to the wrong place.
+
+ZoomInfo has no ceiling here at all. Every user brings their own subscription,
+so the app counts usage — for reconciling against their own dashboard — and
+never pretends to hold a pool it does not have.
 
 Two things were wrong before this. The WhitePages cache — the whole mechanism
 by which re-checking a lead costs nothing — lived in process memory, so Cloud
@@ -24,7 +32,7 @@ for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
 
 STUB = "http://127.0.0.1:8725"
 os.environ.update(WHITEPAGES_API_KEY="wp-key", WHITEPAGES_BASE_URL=STUB,
-                  WHITEPAGES_MONTHLY_CREDITS="5", ZOOMINFO_MONTHLY_CREDITS="20",
+                  WHITEPAGES_MONTHLY_CREDITS="5", WHITEPAGES_USER_CREDITS="3",
                   USE_FIRESTORE="0", APP_BASE_URL="http://127.0.0.1:8724")
 
 import uvicorn
@@ -97,10 +105,22 @@ def ck(name, cond, d=""):
         bad += 1
 
 
-c = TestClient(main.app, base_url="http://127.0.0.1:8724", follow_redirects=False)
-main._MEM_SESSIONS["sid"] = {"provider": "google",
-                             "google": {"access_token": "t", "expires_at": time.time() + 9999}}
-c.cookies.set(main.SESSION_COOKIE, "sid")
+def client(email):
+    """A signed-in browser for one advisor.
+
+    The session carries the address, which is how a paid lookup names its
+    spender without a round trip to the identity provider for every credit.
+    """
+    tc = TestClient(main.app, base_url="http://127.0.0.1:8724", follow_redirects=False)
+    sid = "sid-" + email
+    main._MEM_SESSIONS[sid] = {"provider": "google", "identity": email,
+                               "google": {"access_token": "t",
+                                          "expires_at": time.time() + 9999}}
+    tc.cookies.set(main.SESSION_COOKIE, sid)
+    return tc
+
+
+c = client("dan@fpa.com")
 
 MONTH = main._month()
 
@@ -108,9 +128,13 @@ MONTH = main._month()
 r = c.get("/api/credits")
 d = r.json()
 ck("the allowances are readable", r.status_code == 200, r.text[:120])
-ck("  ...WhitePages knows its budget", d["whitepages"]["budget"] == 5, d["whitepages"])
-ck("  ...ZoomInfo knows its own", d["zoominfo"]["budget"] == 20, d["zoominfo"])
-ck("  ...nothing spent yet", d["whitepages"]["left"] == 5 and d["zoominfo"]["left"] == 20)
+ck("  ...the budget shown is the USER's, not the firm's",
+   d["whitepages"]["budget"] == 3, d["whitepages"])
+ck("  ...with the firm's pool alongside it",
+   d["whitepages"]["firm_budget"] == 5, d["whitepages"])
+ck("  ...ZoomInfo is their own subscription, not an allowance of ours",
+   d["zoominfo"] == {"used": 0, "own_subscription": True}, d["zoominfo"])
+ck("  ...nothing spent yet", d["whitepages"]["left"] == 3)
 ck("  ...and it says when the pool refills",
    d["resets_on"] > MONTH and d["resets_on"].endswith("-01"), d["resets_on"])
 ck("signed out cannot read the budget",
@@ -120,7 +144,7 @@ ck("signed out cannot read the budget",
 r = c.post("/api/verify-phone", json={"phone": "2065550142"})
 ck("a phone check answers", r.status_code == 200, r.text[:120])
 ck("  ...having called the vendor once", HITS["n"] == 1, HITS["n"])
-ck("  ...and charged exactly one credit",
+ck("  ...and charged exactly one credit, to the person who spent it",
    c.get("/api/credits").json()["whitepages"]["spent"] == 1)
 
 # --- the same question again is free, and does not reach the vendor -----------
@@ -153,51 +177,106 @@ r = c.post("/api/verify-phone", json={"phone": "2065550142"})
 ck("an answer older than the cache window is asked again", HITS["n"] == 2, HITS["n"])
 ck("  ...and charged for", c.get("/api/credits").json()["whitepages"]["spent"] == 2)
 
-# --- the allowance stops the spending, before the vendor has to --------------
-STORE[(main.FS_LEDGER, MONTH)] = {"wp": 5, "zi": 0}
+# --- your own hundred stops you, and says it was yours ------------------------
+STORE[(main.FS_LEDGER, MONTH + "|dan@fpa.com")] = {"wp": 3}
+STORE[(main.FS_LEDGER, MONTH)] = {"wp": 3}
 main._WP_CACHE.clear()
 before = HITS["n"]
 r = c.post("/api/verify-phone", json={"phone": "2125550001"})
-ck("with the month's allowance spent, a new lookup is refused",
-   r.status_code == 400, r.status_code)
+ck("with YOUR allowance spent, a new lookup is refused", r.status_code == 400, r.status_code)
 ck("  ...before anything reaches the vendor", HITS["n"] == before, HITS["n"])
 msg = r.json()["detail"]
-ck("  ...naming the allowance, the reset date, and that nothing was spent",
-   "1000" not in msg and "5 lookups" in msg and "resets" in msg
-   and "Nothing was looked up" in msg, msg)
+ck("  ...saying the exhausted allowance was yours, so you know to wait",
+   "your WhitePages lookups" in msg and "3" in msg, msg)
+ck("  ...with the date it comes back",
+   "reset" in msg and "Nothing was looked up" in msg, msg)
 ck("  ...and pointing at the sources that are still free",
    "Enrich all (free)" in msg, msg)
 
-# --- but an answer already paid for is still served when the pool is empty ----
-r = c.post("/api/verify-phone", json={"phone": "2065550142"})
-ck("a cached answer still works with the allowance spent — it costs nothing",
-   r.status_code == 200 and HITS["n"] == before, r.status_code)
+# --- the firm's pool stops you differently, and says so ----------------------
+# You have room; the firm does not. Waiting for the first of the month is the
+# wrong advice here — an admin has to raise it.
+STORE[(main.FS_LEDGER, MONTH + "|dan@fpa.com")] = {"wp": 0}
+STORE[(main.FS_LEDGER, MONTH)] = {"wp": 5}
+main._WP_CACHE.clear()
+r = c.post("/api/verify-phone", json={"phone": "2125550002"})
+ck("the firm's pool refuses even when you have your own left",
+   r.status_code == 400, r.status_code)
+fmsg = r.json()["detail"]
+ck("  ...and says it was the FIRM's, not yours",
+   "firm" in fmsg and "you have 3 of your own left" in fmsg, fmsg)
+ck("  ...naming the fix that actually works: an admin", "admin can raise it" in fmsg, fmsg)
 
-# --- ZoomInfo: reported by the client, because two routes bypass this server --
-STORE[(main.FS_LEDGER, MONTH)] = {"wp": 0, "zi": 0}
+# --- one user's spending does not touch another's ----------------------------
+STORE.clear()
+main._WP_CACHE.clear()
+dan, ada = client("dan@fpa.com"), client("ada@fpa.com")
+dan.post("/api/verify-phone", json={"phone": "2065551111"})
+dan.post("/api/verify-phone", json={"phone": "2065552222"})
+ck("one advisor's lookups are charged to them",
+   dan.get("/api/credits").json()["whitepages"]["spent"] == 2,
+   dan.get("/api/credits").json()["whitepages"])
+ck("  ...and leave a colleague's allowance untouched",
+   ada.get("/api/credits").json()["whitepages"]["spent"] == 0
+   and ada.get("/api/credits").json()["whitepages"]["left"] == 3,
+   ada.get("/api/credits").json()["whitepages"])
+ck("  ...while both count against the firm's pool",
+   (firm := STORE.get((main.FS_LEDGER, MONTH), {})).get("wp") == 2, firm)
+dan.post("/api/verify-phone", json={"phone": "2065553333"})
+r = dan.post("/api/verify-phone", json={"phone": "2065554444"})
+ck("the fourth lookup exhausts that advisor at their own limit",
+   r.status_code == 400 and "your WhitePages lookups" in r.json()["detail"],
+   r.json().get("detail"))
+r = ada.post("/api/verify-phone", json={"phone": "2065555555"})
+ck("  ...and the colleague can still work, from their own hundred",
+   r.status_code == 200, r.status_code)
+
+# --- but an answer already paid for is still served when the allowance is gone
+# Dan is exhausted at this point. One of the numbers he already paid for must
+# still answer: it costs nothing, and refusing it would punish him for the
+# app's own bookkeeping.
+before2 = HITS["n"]
+r = dan.post("/api/verify-phone", json={"phone": "2065551111"})
+ck("a cached answer still works with the allowance spent — it costs nothing",
+   r.status_code == 200 and HITS["n"] == before2, (r.status_code, HITS["n"] - before2))
+
+# --- ZoomInfo: their subscription, so usage is counted and nothing is capped --
+STORE.clear()
 r = c.post("/api/credits", json={"kind": "zi", "n": 8})
-ck("the app can report what it spent through the user's own connector",
-   r.status_code == 200 and r.json()["spent"] == 8, r.text[:120])
-ck("  ...and is told what is left", r.json()["left"] == 12, r.json())
+ck("the app records what it ran on the user's own subscription",
+   r.status_code == 200 and r.json()["used"] == 8, r.text[:120])
+ck("  ...and says whose subscription it was", r.json()["own_subscription"] is True, r.json())
+ck("  ...with no allowance of ours attached to it", "left" not in r.json(), r.json())
 r = c.post("/api/credits", json={"kind": "zi", "n": 4})
-ck("  ...reports accumulate rather than replace", r.json()["spent"] == 12, r.json())
+ck("  ...usage accumulates rather than replaces", r.json()["used"] == 12, r.json())
+ck("a huge ZoomInfo month is NOT refused — the ceiling is theirs, not ours",
+   c.post("/api/credits", json={"kind": "zi", "n": 5000}).status_code == 200)
+ck("WhitePages cannot be self-reported: the server counts what it spends",
+   c.post("/api/credits", json={"kind": "wp", "n": 50}).status_code == 400)
+ck("  ...and says why", "counted where it is spent" in
+   c.post("/api/credits", json={"kind": "wp", "n": 50}).json()["detail"])
 ck("a nonsense kind is refused",
    c.post("/api/credits", json={"kind": "bitcoin", "n": 5}).status_code == 400)
-ck("a negative report cannot give credits back",
-   c.post("/api/credits", json={"kind": "zi", "n": -100}).json()["spent"] == 12)
-ck("an absurd report is clamped rather than trusted",
-   c.post("/api/credits", json={"kind": "zi", "n": 10 ** 9}).json()["spent"] <= 10012)
+ck("a negative report cannot invent usage",
+   c.post("/api/credits", json={"kind": "zi", "n": -100}).json()["used"] == 5012)
 
 # --- the budget rides on /api/me, so a page load costs no extra request -------
 me = c.get("/api/me").json()
 ck("/api/me carries the budget", bool(me.get("credits")), list(me.keys()))
-ck("  ...with both pools", me["credits"]["whitepages"]["budget"] == 5
-   and me["credits"]["zoominfo"]["budget"] == 20, me.get("credits"))
+ck("  ...as the signed-in person's own, not the firm's",
+   me["credits"]["whitepages"]["budget"] == 3, me.get("credits"))
+ck("  ...and ZoomInfo as a subscription rather than an allowance",
+   me["credits"]["zoominfo"]["own_subscription"] is True
+   and "budget" not in me["credits"]["zoominfo"], me["credits"].get("zoominfo"))
 ck("  ...and how long an answer is remembered for",
    me["credits"]["cache_days"] == round(main.WP_TTL / 86400), me["credits"].get("cache_days"))
 
 # --- the month is a boundary, not a running total ----------------------------
-ck("the ledger is keyed by calendar month", (main.FS_LEDGER, MONTH) in STORE,
+ck("the ledger is keyed by calendar month", any(
+   k[1] == MONTH for k in STORE if k[0] == main.FS_LEDGER),
+   [k[1] for k in STORE if k[0] == main.FS_LEDGER])
+ck("  ...and by month-and-person for the per-user half", any(
+   k[1].startswith(MONTH + "|") for k in STORE if k[0] == main.FS_LEDGER),
    [k[1] for k in STORE if k[0] == main.FS_LEDGER])
 y, m = (int(x) for x in MONTH.split("-"))
 ck("  ...and the reset date is the first of the next one",

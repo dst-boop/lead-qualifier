@@ -2169,3 +2169,44 @@ What this does not do is deploy. Cloud Run still builds from `main` on its own,
 which means a red run on `main` is a statement about what is already live, not
 a block on it becoming live. Gating the deploy on the check is the obvious next
 step and is deliberately not in this change.
+
+## 35. One allowance each, and a subscription you bring yourself
+
+"For now, each user gets 100 credits from whitepages per month."
+"Each user MUST have a own ZoomInfo subscription."
+
+§33 built a ledger with two shared pools. That was right for one user and
+wrong the moment there were two: the first advisor awake on the first of the
+month could spend the firm's whole WhitePages allowance before anyone else
+signed in, and the ZoomInfo pool was worse than unfair — it was fictional. The
+app has never held a ZoomInfo seat. Enrichment has always run through the
+user's own saved token or their own Claude connector, so a "2,000 credits
+remaining" line was reporting a balance in an account that did not exist.
+
+**WhitePages keeps an allowance because the app holds the key and pays the
+bill**, and it is now per person: 100 each per calendar month, inside the
+account-wide pool. Both ceilings are enforced and the refusal says which one
+was hit, because they are different problems with different fixes — your own
+hundred comes back on the first, and the firm's needs an admin. Saying "the
+allowance is spent" without saying whose sends half the users to the wrong
+place. Ten advisors at a hundred exactly fills a thousand; the eleventh hits
+the firm's ceiling with personal allowance to spare and is told exactly that.
+
+**ZoomInfo stops pretending to be an allowance at all.** What is kept is
+usage — how many credits this app spent on their subscription this month —
+because that is the number they reconcile against their own dashboard, and it
+carries no ceiling of ours. The self-report endpoint now accepts only ZoomInfo:
+WhitePages is spent by the server at a single choke point, and a
+client-reported number for it would be a worse version of something the server
+already counts correctly.
+
+Naming the spender needed an identity at the moment of spending, and the
+obvious way — asking the identity provider — would have added a network round
+trip to every paid lookup. §31's attachment vault had already stamped the
+address on the session for its own reasons, so `_who()` reads it for free and
+falls back to the network only for sessions older than that work. A second
+thing built for another purpose paying for itself, like §34's browser fallback.
+
+The per-user ledger is a document per person per month rather than one map of
+everybody: a single document incremented by every lookup from every advisor is
+a hot key, and this way the writes spread out.
