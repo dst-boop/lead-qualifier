@@ -1,0 +1,107 @@
+// What a brand-new account actually meets.
+//
+// Three things reported from a real first session, all the same complaint: the
+// app assumes you already know what it knows.
+//
+//   "Money in Motion did not work"   -> a panel whose empty state said
+//                                       "see SETUP-prospecting.md"
+//   "Google message doesnt go away"  -> a password account told to "sign in
+//                                       with Google", under a primary button
+//                                       that could only ever fail for them
+//   "I dont know what each of these are" -> a menu of six nouns
+//
+// A first-run experience is not a nice-to-have here: every user after Dan
+// arrives with no Google link, no WARN feeds and no idea what a search recipe
+// is, and each of these was a dead end with no way out of it.
+const { chromium } = require('playwright');
+
+const feat = o => ({ whitepages: false, ai_qc: true, server_state: true, drive: false,
+                     zoominfo: false, edgar: false, zi_mcp: false, opportunities: false,
+                     free_sources: true, ...o });
+const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
+                   email: 'newuser@anywhere.com', providers: { google: true, microsoft: true },
+                   features: feat(), storage: 'firestore', linked_google: false,
+                   linked_microsoft: false, ...o });
+
+(async () => {
+  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+    .catch(() => chromium.launch());
+  const ctx = await b.newContext({ viewport: { width: 1500, height: 1000 } });
+  const p = await ctx.newPage();
+  const errs = []; p.on('pageerror', e => errs.push(e.message));
+  p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
+
+  let who = me();
+  await p.route('**/api/me', r => r.fulfill({ json: who }));
+  await p.route('**/api/settings', r => r.fulfill({ json: { ok: true } }));
+  await p.route('**/api/lists', r => r.fulfill({ json: { lists: [{ id: 'default', name: 'My leads', count: 0, role: 'owner', owner: '' }], settings: {} } }));
+  // The second act links Google, and the sheet is checked on arrival.
+  await p.route('**/api/drive/find*', r => r.fulfill({ json: { files: [], searched: 'x' } }));
+  await p.route('**/api/drive/rows*', r => r.fulfill({ json: { name: 'x', rows: [] } }));
+  await p.route('**/api/lists/*', r => r.request().method() === 'GET'
+    ? r.fulfill({ json: { list: { id: 'default', name: 'My leads' }, settings: {}, leads: [] } })
+    : r.fulfill({ json: { ok: true, lists: [] } }));
+
+  let fail = 0, n = 0;
+  const ck = (name, c, d) => { n++; console.log((c ? 'ok   ' : 'FAIL ') + name + (d !== undefined ? '  ' + d : '')); if (!c) fail++; };
+  const load = async () => {
+    await p.goto('http://127.0.0.1:8099/', { waitUntil: 'domcontentloaded' });
+    await p.evaluate(() => localStorage.clear());
+    await p.goto('http://127.0.0.1:8099/', { waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => window.ME && typeof syncFromSheet === 'function', null, { timeout: 15000 });
+    await p.waitForTimeout(500);
+  };
+  await load();
+
+  // --- the primary button must be one they can press --------------------------
+  const buttons = await p.evaluate(() => ({
+    sync: document.getElementById('btnSync').classList.contains('primary'),
+    csv: document.getElementById('btnCsv').classList.contains('primary') }));
+  ck('with no Google linked, the sheet button is not the primary one',
+     buttons.sync === false, JSON.stringify(buttons));
+  ck('  ...and Import a file takes the primary slot — it actually works',
+     buttons.csv === true, JSON.stringify(buttons));
+
+  // --- and the message it gives must be actionable ----------------------------
+  await p.evaluate(() => syncFromSheet(true));
+  await p.waitForTimeout(400);
+  const line = await p.evaluate(() => document.getElementById('srcNote').textContent.replace(/\s+/g, ' '));
+  ck('pressing it explains what the feature needs', /needs a Google account linked/.test(line), line);
+  ck('  ...names the control that fixes it', /Add a Google address/.test(line), line);
+  ck('  ...and does NOT tell a password account to go and sign in with Google',
+     !/sign in with Google/.test(line), line);
+  ck('  ...saying the app works without it, and how', /Import a file or Paste a list/.test(line), line);
+
+  // --- with Google linked, the sheet is the primary action again --------------
+  who = me({ features: feat({ drive: true }), linked_google: true });
+  await load();
+  const linked = await p.evaluate(() => ({
+    sync: document.getElementById('btnSync').classList.contains('primary'),
+    csv: document.getElementById('btnCsv').classList.contains('primary') }));
+  ck('once Google is linked the sheet button leads again',
+     linked.sync === true && linked.csv === false, JSON.stringify(linked));
+
+  // --- every menu item says what it does --------------------------------------
+  await p.click('#btnMore');
+  await p.waitForTimeout(250);
+  const items = await p.evaluate(() => [...document.querySelectorAll('#moreMenu button')]
+    .filter(b => b.offsetParent !== null)
+    .map(b => ({ label: (b.childNodes[0].textContent || '').trim(),
+                 says: (b.querySelector('small') || {}).textContent || '' })));
+  ck('the menu has items', items.length >= 6, items.length);
+  const bare = items.filter(i => !i.says.trim());
+  ck('every visible item explains itself — none is a bare noun',
+     bare.length === 0, JSON.stringify(bare.map(i => i.label)));
+  const cov = items.find(i => /Data coverage/.test(i.label));
+  ck('  ...and the explanation is a sentence, not a restatement of the label',
+     cov && cov.says.length > 30 && !/^Data coverage/.test(cov.says), cov && cov.says);
+  const recipe = items.find(i => /Search recipe/.test(i.label));
+  ck('  ...including the ones only their author understood',
+     recipe && /ZoomInfo filters/.test(recipe.says), recipe && recipe.says);
+  ck('the labels themselves are unchanged — messages elsewhere point at them by name',
+     items.some(i => /ICP settings/.test(i.label)), items.map(i => i.label).join(' | '));
+
+  ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
+  console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);
+  await b.close(); process.exit(fail ? 1 : 0);
+})();

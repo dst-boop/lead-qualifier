@@ -64,6 +64,12 @@
         font-size:.85rem;color:var(--ink);border-radius:4px}
   .menu button:hover{background:var(--brass-soft)}
   .menu button.danger{color:var(--tierX)}
+  /* A menu of six nouns told the user nothing: "Search recipe" and "Data
+     coverage" mean something only to whoever named them. Each item now carries
+     one line saying what pressing it does. */
+  .menu button small{display:block;font-weight:300;font-size:.72rem;line-height:1.35;
+                     color:var(--ink-faint);margin-top:2px;white-space:normal}
+  .menu button:hover small{color:var(--ink-soft)}
   .fromrow{display:flex;flex-direction:column;gap:3px;font-size:.72rem;text-transform:uppercase;
            letter-spacing:.05em;color:var(--ink-faint);margin-top:10px}
   .fromrow select{padding:7px 9px;border:1px solid var(--line);border-radius:4px;font-size:.85rem;
@@ -382,16 +388,16 @@
     <div class="menuwrap">
       <button class="tbtn" id="btnMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
       <div class="menu" id="moreMenu" hidden>
-        <button id="btnCoverage">Data coverage</button>
-        <button id="btnSettings">ICP settings</button>
-        <button id="btnTemplate">CSV template &amp; research prompt</button>
-        <button id="btnShareList">Share this list&hellip;</button>
-        <button id="btnRecipe">Search recipe</button>
-        <button id="btnDrive" style="display:none">Pick a different sheet&hellip;</button>
-        <button id="btnQC" style="display:none">AI quality control</button>
-        <button id="btnAssign" style="display:none">Auto-assign to advisors</button>
-        <button id="btnBackup">Back up list</button>
-        <button id="btnRestore" onclick="document.getElementById('jsonFile').click()">Restore a backup</button>
+        <button id="btnCoverage">Data coverage<small>Which scoring signals have data to work with, and what each paid pool has left this month</small></button>
+        <button id="btnSettings">ICP settings<small>Who counts as a good lead: minimum age, job titles, company size, states you are licensed in</small></button>
+        <button id="btnTemplate">CSV template &amp; research prompt<small>Download a blank CSV with the column names the importer recognises, plus a prompt for a research tool</small></button>
+        <button id="btnShareList">Share this list&hellip;<small>Give a colleague view or edit access to the leads you are looking at now</small></button>
+        <button id="btnRecipe">Search recipe<small>The ZoomInfo filters behind this list, ready to copy or run again</small></button>
+        <button id="btnDrive" style="display:none">Pick a different sheet&hellip;<small>Point &ldquo;Check my sheet&rdquo; at another Google Sheet in your Drive</small></button>
+        <button id="btnQC" style="display:none">AI quality control<small>Have Claude grade each lead and flag the ones the score got wrong</small></button>
+        <button id="btnAssign" style="display:none">Auto-assign to advisors<small>Split this list evenly between the advisors named in scoring rules</small></button>
+        <button id="btnBackup">Back up list<small>Save every lead to a JSON file on this computer</small></button>
+        <button id="btnRestore" onclick="document.getElementById('jsonFile').click()">Restore a backup<small>Load leads back in from a JSON file you saved earlier</small></button>
       </div>
     </div>
     <input type="file" id="jsonFile" accept=".json" hidden>
@@ -407,11 +413,11 @@
     <div class="sthead"><span class="stnum">1</span><h2>Source</h2><span class="stcount" id="cSource">&mdash;</span></div>
     <p class="stsub" id="sSource">Where new prospects come from.</p>
     <div class="stacts">
-      <button class="pbtn primary" id="btnSync">Check my sheet</button>
+      <button class="pbtn primary" id="btnSync" title="Reads a Google Sheet named &ldquo;Wealth Management Lead Prospecting&rdquo; from your Drive and adds any new rows">Check my sheet</button>
       <button class="pbtn" id="btnOpps" style="display:none" title="Employers with a dated mass layoff, ranked by the size of the retirement plan they are leaving">Find employers</button>
       <button class="pbtn" id="btnBuildOpen">Search ZoomInfo</button>
       <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="pbtn" id="btnCsv" data-t="Import a spreadsheet" onclick="document.getElementById('csvFile').click()">Import a file</button></label>
-      <button class="pbtn" id="btnPaste">Paste a list</button>
+      <button class="pbtn" id="btnPaste" title="Paste rows copied from a spreadsheet, or a CSV block from Claude">Paste a list</button>
     </div>
     <p class="srcnote" id="srcNote"></p>
   </div>
@@ -1815,7 +1821,14 @@ function sourceLine(msg,kind){
 async function syncFromSheet(manual){
   if(sourcing)return;
   if(!(window.ME&&ME.signed_in&&ME.features&&ME.features.drive)){
-    if(manual)sourceLine('Google Drive is not connected — sign in with Google to read the sheet.','warn');
+    // The old line told a password-account user to "sign in with Google",
+    // which reads as "abandon the account you just made". Linking is the
+    // actual fix, it is one click away in the bar at the top, and the whole
+    // feature is optional — three facts the message now carries.
+    if(manual)sourceLine(
+      'This reads a Google Sheet, so it needs a Google account linked \u2014 use '
+      +'\u201cAdd a Google address\u201d in the bar at the top. You do not need one to use the app: '
+      +'Import a file or Paste a list work without it.','warn');
     return;
   }
   sourcing=true;
@@ -3780,6 +3793,14 @@ async function loadMe(){
     bar.innerHTML=`<a href="#" onclick="openAuth();return false" ${A}>Sign in / create an account</a>`+
       ' \u2014 with any email, Google, or Microsoft';
   }
+  // Without Drive, "Check my sheet" can only fail — so it stops being the
+  // biggest button on the page and "Import a file" takes the primary slot.
+  try{
+    const sync=document.getElementById('btnSync'),csv=document.getElementById('btnCsv');
+    const drive=!!(ME.features&&ME.features.drive);
+    sync.classList.toggle('primary',drive);
+    if(csv)csv.classList.toggle('primary',!drive);
+  }catch(e){}
   if(ME.features&&ME.features.ai_qc)document.getElementById('btnQC').style.display='';
   // With server-side storage the JSON backup pair is a localStorage-era
   // vestige — the server is the backup. Kept for local mode only.
