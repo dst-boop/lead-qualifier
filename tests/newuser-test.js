@@ -101,6 +101,37 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   ck('the labels themselves are unchanged — messages elsewhere point at them by name',
      items.some(i => /ICP settings/.test(i.label)), items.map(i => i.label).join(' | '));
 
+  // --- "There needs to be less buttons" ---------------------------------------
+  // Counted, not eyeballed, because this is the kind of thing that creeps back
+  // one well-meaning button at a time.
+  who = me({ features: feat({ drive: true, whitepages: true, edgar: true, opportunities: true }),
+             linked_google: true });
+  await p.route('**/api/lists/*', r => r.request().method() === 'GET'
+    ? r.fulfill({ json: { list: { id: 'default', name: 'My leads' }, settings: {}, leads: [
+        { id: 'x1', firstName: 'Ada', lastName: 'Alpha', title: 'CFO', employer: 'Meridian',
+          mobilePhone: '(973) 555-0142', email: 'a@m.com', status: 'New', activity: [] }] } })
+    : r.fulfill({ json: { ok: true, lists: [] } }));
+  await load();
+  const src = await p.evaluate(() => [...document.querySelectorAll('#stSource .stacts > *')]
+    .filter(e => e.offsetParent !== null).length);
+  ck('the Source stage offers three things, not five', src === 3, src);
+  // The actions cell only — the phone number is also a button, but it is the
+  // number itself, not chrome.
+  const row = await p.evaluate(() => {
+    const tr = document.querySelector('#rows tr.lead');
+    return [...tr.querySelectorAll('.act button')].filter(b => b.offsetParent !== null)
+      .map(b => b.textContent.trim());
+  });
+  ck('a lead row carries five actions at most, not eleven', row.length <= 5, JSON.stringify(row));
+  ck('  ...and Research is one of them, standing for six lookups',
+     row.some(t => /Research/.test(t)), JSON.stringify(row));
+  ck('  ...with the lookups themselves one press away, costs stated',
+     await p.evaluate(() => {
+       toggleDetail('x1', 'research');
+       const t = document.getElementById('research-x1').textContent;
+       return /WhitePages lookup/.test(t) && /free/.test(t);
+     }));
+
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);
   await b.close(); process.exit(fail ? 1 : 0);

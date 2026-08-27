@@ -413,12 +413,20 @@
   <div class="stage" id="stSource">
     <div class="sthead"><span class="stnum">1</span><h2>Source</h2><span class="stcount" id="cSource">&mdash;</span></div>
     <p class="stsub" id="sSource">Where new prospects come from.</p>
+    <!-- Five buttons for one job — "get leads in" — put five decisions in front
+         of someone who has not made the first one yet. Two ways stay in the
+         open, and the rest sit behind one menu that says what each is for. -->
     <div class="stacts">
       <button class="pbtn primary" id="btnSync" title="Reads a Google Sheet named &ldquo;Wealth Management Lead Prospecting&rdquo; from your Drive and adds any new rows">Check my sheet</button>
-      <button class="pbtn" id="btnOpps" style="display:none" title="Employers with a dated mass layoff, ranked by the size of the retirement plan they are leaving">Find employers</button>
-      <button class="pbtn" id="btnBuildOpen">Search ZoomInfo</button>
       <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="pbtn" id="btnCsv" data-t="Import a spreadsheet" onclick="document.getElementById('csvFile').click()">Import a file</button></label>
-      <button class="pbtn" id="btnPaste" title="Paste rows copied from a spreadsheet, or a CSV block from Claude">Paste a list</button>
+      <div class="menuwrap">
+        <button class="pbtn" id="btnAdd" aria-haspopup="true" aria-expanded="false">Other ways &#9662;</button>
+        <div class="menu" id="addMenu" hidden>
+          <button id="btnPaste">Paste a list<small>Rows copied from a spreadsheet, or a CSV block Claude gave you</small></button>
+          <button id="btnBuildOpen">Search ZoomInfo<small>Build a fresh list from ZoomInfo&rsquo;s database using your own filters</small></button>
+          <button id="btnOpps" style="display:none">Find employers<small>Companies with a dated mass layoff, ranked by the size of the retirement plan people are leaving</small></button>
+        </div>
+      </div>
     </div>
     <p class="srcnote" id="srcNote"></p>
   </div>
@@ -2496,7 +2504,7 @@ function render(){
       : 'Your list is tied to your account, so nothing is shown until you sign in.<br>Use the sign-in link above.';
   }
   // Importing while signed out would build a list with no owner.
-  ['btnCsv','btnPaste','btnBuild','btnQC','btnAssign','btnSync','btnBuildOpen'].forEach(id=>{
+  ['btnCsv','btnPaste','btnBuild','btnQC','btnAssign','btnSync','btnBuildOpen','btnAdd'].forEach(id=>{
     const el=document.getElementById(id);
     if(el){el.disabled=!inAcct;el.title=inAcct?(el.dataset.t||el.title):'Sign in first — lists are tied to your account';
            if(inAcct&&el.dataset.t)el.title=el.dataset.t;}
@@ -2525,10 +2533,7 @@ function render(){
       <td><select class="status s${L.status.replace(/\s/g,'')}" onchange="setStatus('${L.id}',this.value)">
         ${['New','Called','Call Back','Not Interested','Has Advisor','Set'].map(s=>`<option ${s===L.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td><div class="act">
-        ${L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady())?`<button class="abtn" style="color:var(--brass);border-color:#e0d2b0;font-weight:600" onclick="enrichOne('${L.id}')" title="Reveal email, phones, start date, LinkedIn — 1 credit">Enrich</button>`:''}
-        ${(canVerify(L)&&!L.pv)?`<button class="abtn" onclick="verifyLead('${L.id}')" title="WhitePages check: valid? mobile? owner match? (1 lookup)">&#128222;?</button>`:''}
-        ${(canVerify(L)&&L.pv&&!fullyRead(L))?`<button class="abtn" onclick="verifyLead('${L.id}',true)" title="Checked before the app read the whole record. Re-checking pulls their date of birth, other names, every line and every email &mdash; the same lookup, read properly. (1 lookup)">&#128222;&#43;</button>`:''}
-        ${(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)?`<button class="abtn" onclick="enrichHome('${L.id}')" title="WhitePages: confirmed age, home address, mobile numbers, properties owned (1-2 lookups)">&#127968;</button>`:''}${(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)?`<button class="abtn" onclick="edgarAge('${L.id}')" title="SEC proxy statement: exact age for an officer or director of a public company — free, no credits">&#127963;</button>`:''}${(!L.pub&&L.lastName&&window.ME&&ME.signed_in)?`<button class="abtn" onclick="freeLookup('${L.id}')" title="Public records — free, no credits: political donations (home city, employer and occupation as they reported them, dated) and SEC insider filings (equity compensation)">&#9878;</button>`:''}<button class="abtn li" onclick="openLI('${L.id}')" title="Connect on LinkedIn — copies your note, opens their profile">in</button>
+        ${researchCount(L)?`<button class="abtn" onclick="toggleDetail('${L.id}','research')" title="Look this person up: ${researchCount(L)} source${researchCount(L)===1?'':'s'} available">Research</button>`:''}
         <button class="abtn em" ${L.email?'':'disabled title="No email on file"'} onclick="emailLead('${L.id}')" title="Send marketing email via Outlook">@</button>
         <button class="abtn inv" ${inv} onclick="openInvite('${L.id}')">Invite</button>
         <button class="abtn cb ${cbDue||''}" onclick="setCallback('${L.id}')" title="${L.callbackAt?esc('Call back '+cbLabel(L)+(L.callbackNote?' — '+L.callbackNote:'')):'Set a callback reminder'}">${L.callbackAt?'&#9200;':'&#9200;+'}</button>
@@ -2545,9 +2550,50 @@ function render(){
   renderBlocked();
   renderStats();
 }
+/* ---- research actions ----
+   These six lived on every row, so a list of 461 leads drew up to 3,000
+   buttons and the eye had nowhere to rest. They are the same six actions, in
+   the panel that already opens under the row: you open a person, you see what
+   is known about them, and the ways to learn more are next to it.
+
+   The panel is also the honest home for them, because their costs differ and a
+   cost belongs next to an explanation rather than under a glyph. */
+function researchActions(L){
+  const out=[];
+  const zi=L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady());
+  if(zi)out.push(['enrichOne','ZoomInfo','Reveal email, phones, start date and LinkedIn','1 ZoomInfo credit']);
+  if(canVerify(L)&&!L.pv)
+    out.push(['verifyLead','Check the number','Is it valid, is it a mobile, and does the owner match the name','1 WhitePages lookup']);
+  if(canVerify(L)&&L.pv&&!fullyRead(L))
+    out.push(['recheck','Re-read the record','The same lookup, read properly: date of birth, other names, every line and every email','1 WhitePages lookup']);
+  if(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)
+    out.push(['enrichHome','Household','Confirmed age, home address, mobile numbers, properties owned','1-2 WhitePages lookups']);
+  if(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)
+    out.push(['edgarAge','Age from the SEC','Their employer\u2019s proxy statement prints ages for officers and directors','free']);
+  if(!L.pub&&L.lastName&&window.ME&&ME.signed_in)
+    out.push(['freeLookup','Public record','Political donations \u2014 home city, employer and occupation as they reported them \u2014 and SEC insider filings','free']);
+  return out;
+}
+function researchCount(L){return researchActions(L).length;}
+function researchPanel(L){
+  const acts=researchActions(L);
+  if(!acts.length)return '<p class="hint">Every source this app can reach has already been asked about this lead.</p>';
+  return acts.map(([fn,label,what,cost])=>{
+    const call=fn==='recheck'?`verifyLead('${L.id}',true)`:`${fn}('${L.id}')`;
+    const free=cost==='free';
+    return `<div class="sigrow ${free?'hit':''}" style="align-items:flex-start">
+      <span><strong>${esc(label)}</strong><br><span class="hint">${what}</span></span>
+      <span class="pts" style="white-space:nowrap">
+        <span class="hint" style="margin-right:6px">${esc(cost)}</span>
+        <button class="abtn" onclick="${call}">Look up</button></span></div>`;
+  }).join('');
+}
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
   return `<tr class="detail"><td colspan="10"><div class="detail-grid">
+    <div class="dsec" id="research-${L.id}"><h4>Look this person up</h4>${researchPanel(L)}
+      <div style="margin-top:8px"><button class="abtn li" onclick="openLI('${L.id}')" title="Copies your note, then opens their profile">Connect on LinkedIn</button></div>
+    </div>
     <div class="dsec"><h4>Why this score</h4>${sigs}
       ${L.qc?`<h4 style="margin-top:12px">AI quality control &mdash; grade ${L.qc.grade}</h4>
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
@@ -2630,7 +2676,15 @@ function detailRow(L){
   </div></td></tr>`;
 }
 window.setTier=t=>{filterTier=(filterTier===t?'':t);render();};
-window.toggleDetail=id=>{expanded=(expanded===id?null:id);render();};
+window.toggleDetail=(id,focus)=>{
+  expanded=(expanded===id?null:id);render();
+  // Pressing Research opens the panel AT the research section rather than at
+  // the top of a long one — otherwise the button looks like it did nothing.
+  if(expanded===id&&focus==='research')setTimeout(()=>{
+    const el=document.getElementById('research-'+id);
+    if(el)el.scrollIntoView({block:'nearest',behavior:'smooth'});
+  },40);
+};
 window.setStatus=(id,v)=>{const L=byId(id);const was=L.status;L.status=v;L.updatedAt=Date.now();
   if(v==='Set'&&was!=='Set')L.activity.push({t:Date.now(),k:'set',d:'Meeting set'});
   save();render();if(v==='Set'&&was!=='Set'&&L.email)openInvite(id);};
@@ -3727,15 +3781,18 @@ document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
 });
 /* The overflow menu. Everything that is not one of the four stages lives here,
    because a row of eleven equal-weight buttons is a menu with extra steps. */
-(function(){
-  const b=document.getElementById('btnMore'), m=document.getElementById('moreMenu');
+function wireMenu(btnId,menuId){
+  const b=document.getElementById(btnId), m=document.getElementById(menuId);
+  if(!b||!m)return;
   const close=()=>{m.hidden=true;b.setAttribute('aria-expanded','false');};
   b.addEventListener('click',e=>{e.stopPropagation();
     m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));});
   m.addEventListener('click',()=>setTimeout(close,0));
   document.addEventListener('click',close);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
-})();
+}
+wireMenu('btnMore','moreMenu');
+wireMenu('btnAdd','addMenu');
 
 /* The composed search, whether or not there is a way to run it from here. The
    panel used to hide its own buttons when neither route was available, leaving

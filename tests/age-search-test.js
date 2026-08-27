@@ -136,21 +136,17 @@ const LEADS = [
   await p.fill('#q', ''); await p.waitForTimeout(300);
   ck('a lead with an old-style household record is not counted as fully read',
      await p.evaluate(() => !fullyRead(state.leads.find(L => L.id === 'f'))));
-  ck('  ...so the row offers the re-check', await p.evaluate(() => {
-    const tr = [...document.querySelectorAll('#rows tr.lead')].find(t => t.textContent.includes('Fay'));
-    return !!tr && [...tr.querySelectorAll('button')].some(x => /📞\+/.test(x.textContent));
-  }));
+  // The phone glyphs moved into the row's research panel; the question is the
+  // same one, asked of the function that decides what is still worth buying.
+  ck('  ...so the re-check is still offered', await p.evaluate(() =>
+    researchActions(state.leads.find(L => L.id === 'f')).some(a => a[0] === 'recheck')));
   ck('a record written by the current reader IS fully read',
      await p.evaluate(() => fullyRead(state.leads.find(L => L.id === 'a'))));
-  ck('  ...so no re-check is offered on it', await p.evaluate(() => {
-    const tr = [...document.querySelectorAll('#rows tr.lead')].find(t => t.textContent.includes('Ada'));
-    return !!tr && ![...tr.querySelectorAll('button')].some(x => /📞\+/.test(x.textContent));
-  }));
+  ck('  ...so no re-check is offered on it', await p.evaluate(() =>
+    !researchActions(state.leads.find(L => L.id === 'a')).some(a => a[0] === 'recheck')));
   // She has never been phone-checked at all, so the first-time check is right.
-  ck('  ...though a first check still is, since she has never had one', await p.evaluate(() => {
-    const tr = [...document.querySelectorAll('#rows tr.lead')].find(t => t.textContent.includes('Ada'));
-    return !!tr && [...tr.querySelectorAll('button')].some(x => /📞\?/.test(x.textContent));
-  }));
+  ck('  ...though a first check still is, since she has never had one', await p.evaluate(() =>
+    researchActions(state.leads.find(L => L.id === 'a')).some(a => a[0] === 'verifyLead')));
   ck('a lead never checked is unaffected either way',
      await p.evaluate(() => !fullyRead(state.leads.find(L => L.id === 'd'))));
 
