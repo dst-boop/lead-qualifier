@@ -1956,12 +1956,12 @@ function ziNormalize(c,batch,ctx){
     mobileDnc:pick(c,'mobilePhoneDoNotCall','mobileDoNotCall'),
     directDnc:pick(c,'directPhoneDoNotCall','doNotCall')};
 }
-/* ---- the two paid allowances ----
-   ZoomInfo bills 2,000 credits a month, WhitePages 1,000. Both pools are
-   spent by buttons in this app, and until now neither button knew what was
-   left — the only way to find out was to run out. The server counts what it
-   spends and the client reports what it spent through the user's own Claude
-   connector, which the server never sees. */
+/* ---- what a paid lookup costs, and who pays ----
+   WhitePages is an allowance: the app holds the key, so each user gets a set
+   number of lookups a month and the server counts them where they are spent.
+   ZoomInfo is not ours at all — every user brings their own subscription, so
+   what is kept there is usage, for reconciling against their own dashboard,
+   with no ceiling of ours to report. */
 let CREDITS={};
 /* The budget arrives with /api/me, so a page load costs no extra request and a
    deployment with no paid source configured simply has no budget to show. Its
@@ -1984,11 +1984,18 @@ async function reportSpend(kind,n){
     if(CREDITS.zoominfo)Object.assign(CREDITS.zoominfo,{used:d.used});
   }catch(e){/* the enrichment already happened; a lost count is not worth a failure */}
 }
-function creditLine(which){
-  const c=CREDITS[which];
-  if(which==='zoominfo')return '';   // their subscription, not our allowance
+/* The allowance, said where it is spent. It was only in the coverage panel,
+   which is not where anyone is standing when they decide whether this one lead
+   is worth a lookup. */
+function wpLeftLine(){
+  const c=CREDITS.whitepages;
   if(!c||!c.budget)return '';
-  return `${c.left.toLocaleString()} of your ${c.budget.toLocaleString()} WhitePages lookups left this month`;
+  const left=Math.min(c.yours_left,c.firm_left);
+  const low=left<=Math.max(5,Math.round(c.budget*0.1));
+  const whose=(c.capped_by==='firm')
+    ? `${left.toLocaleString()} left in the firm's pool \u2014 lower than your own ${c.yours_left.toLocaleString()}, so it is what you will hit first`
+    : `${left.toLocaleString()} of your ${c.budget.toLocaleString()} lookups left this month`;
+  return `<p class="hint" style="margin-top:6px${low?';color:var(--tierX)':''}">WhitePages: ${whose}.</p>`;
 }
 const OUTSIDE_MSG='To use ZoomInfo here, save your ZoomInfo MCP token under ICP settings — then build & enrich work in any browser. Without one, they only work while this app is running inside Claude, using the connector on your Claude account. Everything else — CSV import, scoring, calling, export — works anywhere.';
 /* Two routes to ZoomInfo, in order of preference:
@@ -2581,7 +2588,7 @@ function researchCount(L){return researchActions(L).length;}
 function researchPanel(L){
   const acts=researchActions(L);
   if(!acts.length)return '<p class="hint">Every source this app can reach has already been asked about this lead.</p>';
-  return acts.map(([fn,label,what,cost])=>{
+  const rows=acts.map(([fn,label,what,cost])=>{
     const call=fn==='recheck'?`verifyLead('${L.id}',true)`:`${fn}('${L.id}')`;
     const free=cost==='free';
     return `<div class="sigrow ${free?'hit':''}" style="align-items:flex-start">
@@ -2590,6 +2597,9 @@ function researchPanel(L){
         <span class="hint" style="margin-right:6px">${esc(cost)}</span>
         <button class="abtn" onclick="${call}">Look up</button></span></div>`;
   }).join('');
+  // Only when one of these would actually spend it.
+  const spends=acts.some(a=>/WhitePages/.test(a[3]));
+  return rows+(spends?wpLeftLine():'');
 }
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');

@@ -98,6 +98,22 @@ ck("  ...leaving the original array in place to fall back on",
 ck("  ...and migrating only once",
    c.get("/api/lists").json()["lists"][0]["id"]=="default")
 
+# --- routes that call other routes ------------------------------------------
+# save_list, delete_list and the admin transfer return a fresh list index by
+# calling get_lists directly. A route called as a plain function never resolves
+# its dependencies, so when the signed-in address moved into the signature the
+# Depends sentinel arrived where an email belonged and was used as a storage
+# key. The saved list came back with the index missing, which is what this
+# pins: the nested call must return real data, not a shape.
+nested = c.post("/api/lists", json={"name": "Nested call"}).json()["list"]["id"]
+r = c.put(f"/api/lists/{nested}", json={"leads": [{"id": "n1", "lastName": "Nested"}]})
+ck("saving a list returns the index the nested call built",
+   r.status_code == 200 and isinstance(r.json().get("lists"), list)
+   and any(x.get("id") == nested for x in r.json()["lists"]), r.text[:140])
+ck("  ...with the new count on it, so the switcher is not stale",
+   any(x.get("id") == nested and x.get("count") == 1 for x in r.json()["lists"]),
+   r.json().get("lists"))
+
 # --- signed out ---------------------------------------------------------------
 async def nobody(request): return ""
 M._signed_in_email = nobody

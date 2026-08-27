@@ -39,7 +39,7 @@ from urllib.parse import urlencode
 import anthropic
 import httpx
 import msal
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from webapp import freesources, harvest, prospecting, signals
@@ -437,7 +437,7 @@ async def _ledger_read(who: str = "") -> dict:
 async def _ledger_add(kind: str, n: int = 1, who: str = "") -> None:
     if n <= 0:
         return
-    keys = [_ledger_key()] + ([_ledger_key(who)] if who else [])
+    keys = [_ledger_key(), _ledger_key(who or "unattributed")]
     for key in keys:
         if not await _fs_inc(FS_LEDGER, key, {kind: n}):
             cur = _MEM_LEDGER.setdefault(key, {})
@@ -452,8 +452,14 @@ async def _wp_left(who: str = "") -> dict:
     the firm's needs the admin to buy more.
     """
     firm = max(0, WP_MONTHLY - (await _ledger_read())["wp"])
-    mine = max(0, WP_PER_USER - (await _ledger_read(who))["wp"]) if who else firm
+    # An unnameable spender is still one spender. Falling back to the firm's
+    # pool here handed them all thousand — the per-user cap applied to everyone
+    # except the sessions too old to carry a name, which is precisely backwards.
+    # They share one unattributed hundred instead, so the guarantee holds:
+    # nobody spends more than WP_PER_USER without being named.
+    mine = max(0, WP_PER_USER - (await _ledger_read(who or "unattributed"))["wp"])
     return {"mine": mine, "firm": firm, "left": min(mine, firm),
+            "named": bool(who),
             "capped_by": "you" if mine <= firm else "firm"}
 
 
@@ -690,10 +696,20 @@ async def _vault_del(provider: str, email: str) -> None:
 # this, only Google survived a new cookie, and only for Google-primary users.
 
 def _identity(session: dict) -> str:
-    """The email a person's data is keyed under, if this session knows it."""
+    """The email a person's data is keyed under, if this session knows it.
+
+    The stamped identity is the answer for anything created since §31. Older
+    sessions predate it and last thirty days, so the Google link's own recorded
+    address is asked for second — it is already on the session, and without it
+    a signed-in user of a month-old cookie reads as nobody, which is how the
+    per-user allowance came to be skippable by simply not signing in again.
+    """
     if session.get("provider") == "password":
         return (session.get("account_email") or "").lower()
-    return (session.get("identity") or "").lower()
+    stamped = (session.get("identity") or "").lower()
+    if stamped:
+        return stamped
+    return ((session.get("google") or {}).get("email") or "").lower()
 
 
 async def _save_attachment(identity: str, kind: str, data) -> None:
@@ -1666,6 +1682,19 @@ def _wp_path(kind: str) -> str:
     if kind == "property":
         return "/v2/property/"     # documented with the trailing slash
     return "/v2/person"            # both person search and reverse phone
+
+
+async def signed_in(request: Request) -> str:
+    """The signed-in address, or a 401. Declared, rather than re-checked.
+
+    Twenty routes opened with the same three lines. As a dependency the
+    requirement moves into the signature, where it is visible without reading
+    the body, and a route cannot forget it by being written in a hurry.
+    """
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return email
 
 
 async def _who(request: Request) -> str:
@@ -3929,11 +3958,8 @@ class LeadState(BaseModel):
 
 
 @app.get("/api/state")
-async def get_state(request: Request):
+async def get_state(request: Request, email: str = Depends(signed_in)):
     """The signed-in user's saved list. 401 keeps the browser on localStorage."""
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
     doc = await _fs_get(FS_STATE, email) or _MEM_STATE.get(email)
     if not doc:
         return {"found": False, "settings": {}, "leads": [], "backend": storage_backend()}
@@ -3947,10 +3973,7 @@ async def get_state(request: Request):
 
 
 @app.put("/api/state")
-async def put_state(body: LeadState, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def put_state(body: LeadState, request: Request, email: str = Depends(signed_in)):
     payload = {"data": json.dumps({"settings": body.settings, "leads": body.leads}),
                "saved_at": time.time(), "lead_count": len(body.leads)}
     if not await _fs_set(FS_STATE, email, payload):
@@ -4153,10 +4176,7 @@ class ShareRequest(BaseModel):
 
 
 @app.get("/api/lists")
-async def get_lists(request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def get_lists(request: Request, email: str = Depends(signed_in)):
     idx = await _ensure_lists(email)
     mine = [dict(l, owner="", role="owner") for l in idx["lists"]]
     # Lists other advisors have shared, addressed as owner~id so the two kinds
@@ -4171,10 +4191,7 @@ async def get_lists(request: Request):
 
 
 @app.post("/api/lists")
-async def create_list(body: ListCreate, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def create_list(body: ListCreate, request: Request, email: str = Depends(signed_in)):
     name = (body.name or "").strip()[:60]
     if not name:
         raise HTTPException(status_code=400, detail="A list needs a name.")
@@ -4192,10 +4209,7 @@ async def create_list(body: ListCreate, request: Request):
 
 
 @app.get("/api/lists/{list_id}")
-async def read_list(list_id: str, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def read_list(list_id: str, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
     _check_list_id(rid)
     if owner:
@@ -4219,10 +4233,7 @@ async def read_list(list_id: str, request: Request):
 
 
 @app.put("/api/lists/{list_id}")
-async def save_list(list_id: str, body: ListSave, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def save_list(list_id: str, body: ListSave, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
     _check_list_id(rid)
     if owner:
@@ -4241,7 +4252,7 @@ async def save_list(list_id: str, body: ListSave, request: Request):
                 l["saved_at"] = time.time()
         await _write_index(owner, oidx["settings"], oidx["lists"], oidx["legacy_leads"])
         return {"ok": True, "leads": len(body.leads),
-                "lists": (await get_lists(request))["lists"]}
+                "lists": (await get_lists(request, email))["lists"]}
     idx = await _ensure_lists(email)
     lists = idx["lists"]
     if not any(l["id"] == rid for l in lists):
@@ -4253,14 +4264,11 @@ async def save_list(list_id: str, body: ListSave, request: Request):
             l["saved_at"] = time.time()
     await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
     return {"ok": True, "leads": len(body.leads),
-            "lists": (await get_lists(request))["lists"]}
+            "lists": (await get_lists(request, email))["lists"]}
 
 
 @app.get("/api/lists/{list_id}/shares")
-async def list_shares(list_id: str, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def list_shares(list_id: str, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
     if owner and owner != email:
         raise HTTPException(status_code=403, detail="Only the owner can see who a list is shared with.")
@@ -4273,10 +4281,7 @@ async def list_shares(list_id: str, request: Request):
 
 
 @app.post("/api/lists/{list_id}/shares")
-async def add_share(list_id: str, body: ShareRequest, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def add_share(list_id: str, body: ShareRequest, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
     if owner and owner != email:
         raise HTTPException(status_code=403, detail="Only the owner can share a list.")
@@ -4298,10 +4303,7 @@ async def add_share(list_id: str, body: ShareRequest, request: Request):
 
 
 @app.delete("/api/lists/{list_id}/shares/{who}")
-async def drop_share(list_id: str, who: str, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def drop_share(list_id: str, who: str, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
     who = who.lower().strip()
     # Either the owner revokes, or the recipient walks away from a list they
@@ -4323,10 +4325,7 @@ async def drop_share(list_id: str, who: str, request: Request):
 
 
 @app.patch("/api/lists/{list_id}")
-async def rename_list(list_id: str, body: ListPatch, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def rename_list(list_id: str, body: ListPatch, request: Request, email: str = Depends(signed_in)):
     _check_list_id(list_id)
     name = (body.name or "").strip()[:60]
     if not name:
@@ -4341,10 +4340,7 @@ async def rename_list(list_id: str, body: ListPatch, request: Request):
 
 
 @app.delete("/api/lists/{list_id}")
-async def delete_list(list_id: str, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def delete_list(list_id: str, request: Request, email: str = Depends(signed_in)):
     owner, list_id = _split_ref(list_id)
     if owner and owner != email:
         raise HTTPException(
@@ -4366,7 +4362,7 @@ async def delete_list(list_id: str, request: Request):
     # offering a list that no longer exists.
     for sh in (gone.get("shares") or []):
         await _revoke(email, list_id, sh.get("email") or "")
-    return {"ok": True, "lists": (await get_lists(request))["lists"]}
+    return {"ok": True, "lists": (await get_lists(request, email))["lists"]}
 
 
 # ------------------------- the admin view -------------------------
@@ -4396,11 +4392,8 @@ class TransferRequest(BaseModel):
 
 
 @app.get("/api/admin/overview")
-async def admin_overview(request: Request):
+async def admin_overview(request: Request, email: str = Depends(signed_in)):
     """Every advisor and every list in the firm, with what each is carrying."""
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
     _admin_only(email)
     advisors, lists = [], []
     for row in await _directory():
@@ -4462,7 +4455,7 @@ async def _transfer_one(frm: str, list_id: str, to: str) -> dict:
 
 
 @app.post("/api/admin/transfer")
-async def admin_transfer(body: TransferRequest, request: Request):
+async def admin_transfer(body: TransferRequest, request: Request, email: str = Depends(signed_in)):
     """Reclaim a list to the admin, or hand one out to an advisor.
 
     One operation in two directions: reclaiming is a transfer to yourself,
@@ -4470,9 +4463,6 @@ async def admin_transfer(body: TransferRequest, request: Request):
     keeps the two halves from drifting into different rules about shares and
     counts.
     """
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
     _admin_only(email)
     frm = (body.owner or email).lower().strip()
     to = (body.to or email).lower().strip()
@@ -4495,7 +4485,7 @@ async def admin_transfer(body: TransferRequest, request: Request):
         for l in list(src["lists"]):
             moved.append(await _transfer_one(frm, l["id"], to))
     return {"moved": moved, "leads": sum(m["leads"] for m in moved),
-            "overview": await admin_overview(request)}
+            "overview": await admin_overview(request, email)}
 
 
 class SettingsSave(BaseModel):
@@ -4503,11 +4493,8 @@ class SettingsSave(BaseModel):
 
 
 @app.put("/api/settings")
-async def save_settings(body: SettingsSave, request: Request):
+async def save_settings(body: SettingsSave, request: Request, email: str = Depends(signed_in)):
     """Settings belong to the user, not to any one list."""
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
     idx = await _ensure_lists(email)
     await _write_index(email, body.settings, idx["lists"], idx["legacy_leads"])
     return {"ok": True}
@@ -4621,16 +4608,13 @@ class SignalsRequest(BaseModel):
 
 
 @app.post("/api/signals")
-async def get_signals(body: SignalsRequest, request: Request):
+async def get_signals(body: SignalsRequest, request: Request, email: str = Depends(signed_in)):
     """Every money-in-motion event across the leads posted.
 
     The leads come from the client rather than being read server-side, so this
     works on the open list whether or not it has been saved, and on a list
     shared from another advisor without this route needing to re-derive access.
     """
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
 
     warn_index, warn_note = {}, ""
     warn_ran = False
@@ -4734,12 +4718,9 @@ class StatsPost(BaseModel):
 
 
 @app.put("/api/stats")
-async def put_stats(body: StatsPost, request: Request):
+async def put_stats(body: StatsPost, request: Request, email: str = Depends(signed_in)):
     """Today's counters for the signed-in advisor. Idempotent: the client sends
     totals for the day, not increments, so a replay cannot inflate a score."""
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
     day = body.day if re.match(r"^\d{4}-\d{2}-\d{2}$", body.day or "") else _today()
     payload = {"email": email, "day": day, "domain": _domain(email),
                "saved_at": time.time()}
@@ -4808,10 +4789,7 @@ def _score_row(row: dict) -> int:
 
 
 @app.get("/api/leaderboard")
-async def leaderboard(request: Request, days: int = 7):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def leaderboard(request: Request, days: int = 7, email: str = Depends(signed_in)):
     days = max(1, min(int(days or 7), 90))
     people = await _team_members(email)
     stats = await _stats_for(people, days)
@@ -4835,10 +4813,7 @@ class BattleCreate(BaseModel):
 
 
 @app.get("/api/battles")
-async def get_battles(request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def get_battles(request: Request, email: str = Depends(signed_in)):
     out = []
     db = _firestore()
     docs = []
@@ -4891,10 +4866,7 @@ def _battle_over(b: dict) -> bool:
 
 
 @app.post("/api/battles")
-async def create_battle(body: BattleCreate, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def create_battle(body: BattleCreate, request: Request, email: str = Depends(signed_in)):
     name = (body.name or "").strip()[:60]
     if not name:
         raise HTTPException(status_code=400, detail="A contest needs a name.")
@@ -4915,10 +4887,7 @@ async def create_battle(body: BattleCreate, request: Request):
 
 
 @app.delete("/api/battles/{bid}")
-async def delete_battle(bid: str, request: Request):
-    email = await _signed_in_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="Not signed in")
+async def delete_battle(bid: str, request: Request, email: str = Depends(signed_in)):
     doc = await _fs_get(FS_BATTLES, bid) or _MEM_BATTLES.get(bid)
     if not doc:
         raise HTTPException(status_code=404, detail="No such contest.")
