@@ -134,10 +134,19 @@ ck("a dead 5500 file does not lose the WARN events", d["count"] == 3, d.get("cou
 ck("  ...they are simply unpriced", d["matched"] == 0, d.get("matched"))
 main.FORM5500_URL = STUB + "/f5500.zip"
 
+# An empty panel has two very different causes and a new account met the wrong
+# answer to both: "see SETUP-prospecting.md", which is neither an explanation
+# nor something a user can act on.
 main.WARN_FEEDS = ""
 r = c.get("/api/opportunities", params={"refresh": "true"})
-ck("no feeds configured says so rather than returning junk",
-   r.json()["count"] == 0 and "SETUP-prospecting" in r.json().get("note", ""), r.json().get("note"))
+d = r.json()
+ck("nothing configured says who fixes it, not which file to read",
+   d["count"] == 0 and "an admin" in d.get("note", "") and ".md" not in d.get("note", ""),
+   d.get("note"))
+ck("  ...and says the rest of the app does not depend on it",
+   "work without it" in d.get("note", ""), d.get("note"))
+ck("  ...and flags itself as unconfigured, so the UI need not parse prose",
+   d.get("configured") is False, d.get("configured"))
 r = c.post("/api/sources/refresh")
 ck("  ...and refresh refuses to overwrite with nothing",
    r.json()["stored"] == 0 and "WARN_FEEDS" in r.json().get("note", ""), r.json().get("note"))
