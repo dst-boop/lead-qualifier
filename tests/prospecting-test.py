@@ -237,5 +237,47 @@ ck("  ...and the sentence comes back instead",
    "1/29/2021" in P.date_from_prose("from 1/29/2021 to 3/17/2021")[1])
 
 
+# --- county filtering --------------------------------------------------------
+# New York's WARN file publishes no city and no state column, only county, so
+# county is the only way to work one metro rather than a whole state.
+
+ck("a county name normalises to its bare form", P.norm_county("Nassau County") == "nassau",
+   P.norm_county("Nassau County"))
+ck("  ...however it is abbreviated", P.norm_county("NASSAU CO.") == P.norm_county("Nassau"))
+ck("  ...and a parish or borough is the same thing",
+   P.norm_county("Orleans Parish") == "orleans" and P.norm_county("Bronx Borough") == "bronx")
+ck("a two-word county keeps both words", P.norm_county("St. Lawrence County") == "st lawrence",
+   P.norm_county("St. Lawrence County"))
+ck("a county named only by the word county does not become empty",
+   P.norm_county("County") != "", P.norm_county("County"))
+
+_LI = [
+    {"employer_key": "a", "company": "Alpha", "state": "NY", "county": "Nassau", "workers": 100},
+    {"employer_key": "b", "company": "Beta", "state": "NY", "county": "Suffolk County", "workers": 90},
+    {"employer_key": "c", "company": "Gamma", "state": "NY", "county": "Erie", "workers": 400},
+    {"employer_key": "d", "company": "Delta", "state": "NY", "county": "", "workers": 80},
+]
+_NJ = {"employer_key": "e", "company": "Eps", "state": "NJ", "county": "Nassau", "workers": 70}
+
+
+def _keys(opps):
+    return sorted(o["employer_key"] for o in opps)
+
+
+_got = P.build_opportunities(_LI, {}, counties={"nassau", "suffolk"})
+ck("a county outside the set is dropped", "c" not in _keys(_got), _keys(_got))
+ck("  ...however the feed spells the ones you want", _keys(_got) == ["a", "b", "d"], _keys(_got))
+ck("an event with no county is kept, exactly as with no state", "d" in _keys(_got))
+ck("no county filter keeps everything", len(P.build_opportunities(_LI, {}, counties=None)) == 4)
+ck("an empty county set is not a filter",
+   len(P.build_opportunities(_LI, {}, counties=set())) == 4)
+ck("state and county filters compose",
+   _keys(P.build_opportunities(_LI + [_NJ], {}, states={"NY"}, counties={"nassau"})) == ["a", "d"],
+   _keys(P.build_opportunities(_LI + [_NJ], {}, states={"NY"}, counties={"nassau"})))
+ck("county filtering does not disturb the dollars-first ranking",
+   [o["employer_key"] for o in _got] == ["a", "b", "d"],
+   [o["employer_key"] for o in _got])
+
+
 print(("\nFAILURES: %d of %d" % (fail, TOTAL[0])) if fail else "\nall %d checks passed" % TOTAL[0])
 sys.exit(1 if fail else 0)

@@ -44,6 +44,7 @@ secret — these are public URLs — so plain env vars, no Secret Manager.
 | `FORM5500_SCHEDULE_URLS` | Schedule H and Schedule I, comma-separated. **Required for any dollar figure** — see below. |
 | `FORM5500_CSV_IN_ZIP` | Substring identifying which CSV inside the zip to read. Default `f_5500`. |
 | `SOURCE_STATES` | Comma-separated states to keep, e.g. `NY,NJ,CT,PA`. Empty keeps all. |
+| `SOURCE_COUNTIES` | Comma-separated counties to keep, e.g. `Nassau,Suffolk`. Empty keeps all. Narrows *inside* a state — see below. |
 | `SOURCE_MIN_WORKERS` | Ignore events smaller than this. Default `25`. |
 | `FIRESTORE_OPPS_COLLECTION` | Where the built list is stored. Default `opportunities`. |
 
@@ -66,6 +67,41 @@ Set it as one line:
 gcloud run services update lead-qualifier --region us-east1 \
   --set-env-vars 'WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
 ```
+
+## Working one metro rather than a whole state
+
+`SOURCE_STATES=NY` is too coarse for an advisor who covers Long Island. It
+returns Buffalo and Syracuse alongside Hicksville, and the list stops being a
+call list.
+
+`SOURCE_COUNTIES` narrows inside the state:
+
+```bash
+gcloud run services update lead-qualifier --region us-east1 \
+  --set-env-vars 'SOURCE_STATES=NY,SOURCE_COUNTIES=Nassau,Suffolk'
+```
+
+This matters more for New York than anywhere else, because — as the next
+section explains — **New York's WARN file publishes no city and no state
+column, only county.** County is not one filter among several there. It is the
+only geography the feed carries.
+
+Names are matched on their bare form, so `Nassau`, `Nassau County` and
+`NASSAU CO.` are the same county, and parishes and boroughs normalise the same
+way. Write them however you like.
+
+Two behaviours worth knowing:
+
+- **An event with no county is kept**, exactly as an event with no state is kept
+  by `SOURCE_STATES`. A feed that omits the column should not silently empty
+  your list; the row arrives and you can see it.
+- **The two filters compose.** `SOURCE_STATES=NY` with
+  `SOURCE_COUNTIES=Nassau,Suffolk` will not admit a New Jersey row that happens
+  to have a county called Nassau.
+
+For the five boroughs the county names are **New York** (Manhattan), **Kings**
+(Brooklyn), **Queens**, **Bronx** and **Richmond** (Staten Island) — the county
+is what the filing carries, not the borough name people say.
 
 ## What New York's file actually looks like
 

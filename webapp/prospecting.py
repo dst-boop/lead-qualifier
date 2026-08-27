@@ -60,6 +60,22 @@ def norm_company(s: str) -> str:
     return " ".join(kept or merged)
 
 
+# A county is written a dozen ways across feeds and inside one feed: "Nassau",
+# "Nassau County", "NASSAU CO.", "Suffolk Parish". Compare on the bare name.
+_COUNTY_WORDS = ("county", "counties", "co", "parish", "borough", "boro")
+
+
+def norm_county(s: str) -> str:
+    """County names for comparison. 'Nassau County' -> 'nassau'."""
+    words = re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split()
+    while words and words[-1] in _COUNTY_WORDS:
+        words.pop()
+    # "Prince George's" and "St. Lawrence" survive; a name that is only the word
+    # "county" keeps it rather than becoming empty and matching everything.
+    return " ".join(words) if words else " ".join(
+        re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split())
+
+
 def norm_header(h: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", (h or "").lower()).split())
 
@@ -468,17 +484,29 @@ def unzip_first_csv(blob: bytes, name_contains: str = "") -> str:
 
 def build_opportunities(events: list[dict], plans: dict, *,
                         min_workers: int = 0, states: Optional[set] = None,
+                        counties: Optional[set] = None,
                         today: Optional[date] = None) -> list[dict]:
     """WARN events joined to plan data, ranked by dollars likely in motion.
 
     A layoff with no plan match is still an opportunity — it is a dated
     separation event at a named employer — so it is kept and marked, rather than
     dropped for failing a join it never had to pass.
+
+    `counties` narrows inside a state, which is the only way to work a metro:
+    New York publishes no city or state column at all, only county, so for that
+    feed this is the sole geographic filter there is. Pass bare names —
+    {"nassau", "suffolk"} — they are normalised on both sides.
+
+    Both geographic filters keep an event whose own field is blank, matching how
+    `states` already behaves. A feed that omits the column should not silently
+    empty the list; the row arrives and the reader can see it.
     """
     today = today or date.today()
     out = []
     for e in events:
         if states and e.get("state") and e["state"].upper() not in states:
+            continue
+        if counties and e.get("county") and norm_county(e["county"]) not in counties:
             continue
         if min_workers and (e.get("workers") or 0) < min_workers:
             continue
