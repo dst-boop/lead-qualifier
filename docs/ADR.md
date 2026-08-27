@@ -2210,3 +2210,47 @@ thing built for another purpose paying for itself, like §34's browser fallback.
 The per-user ledger is a document per person per month rather than one map of
 everybody: a single document incremented by every lookup from every advisor is
 a hot key, and this way the writes spread out.
+
+## 36. A review pass, and the bug it found in last week's work
+
+"Review, debug, update, enhance, streamline, and simplify this APP!"
+
+The audit turned up one defect that mattered, and it was in §35's own work.
+
+**The per-user allowance could be skipped by having an old cookie.** Naming
+the spender read the identity stamped on the session by §31 — but sessions
+last thirty days, so anyone signed in before that shipped carried no name.
+`_wp_left("")` then fell back to the firm's pool as their personal allowance,
+which meant the hundred-lookup cap applied to everyone *except* the users the
+app could not identify. Precisely backwards, and reachable in production the
+day §35 deployed.
+
+Two changes close it. `_identity` now asks the Google link's own recorded
+address when no stamp is present — it was already on the session, nobody had
+thought to look. And an unnameable spender no longer inherits the firm's pool:
+they share one unattributed allowance of the same size, so the guarantee holds
+without refusing a legitimate user over an internal hiccup. The credit block
+also stopped being able to report more left than the budget it is measured
+against, which is how the bug showed itself: "1000 of your 100 lookups left".
+
+**Twenty routes opened with the same three lines** — fetch the address, refuse
+if absent. That became a `signed_in` dependency, which moves the requirement
+into the signature where it is visible without reading the body.
+
+The refactor broke three suites immediately, and the failure is worth
+recording: **four routes call other routes directly as functions**, and a route
+called that way never resolves its dependencies — the `Depends` sentinel
+arrived where an email belonged and was used as a Firestore key. The fix is to
+pass the address the caller already holds. The lesson is that a route is two
+things at once, an HTTP handler and a plain function, and only the first gets
+dependency injection. `lists-test.py` now pins the nested call returning real
+data rather than a shape.
+
+**The allowance moved to where it is spent.** It was visible only in the
+coverage panel, which is not where anyone is standing when they decide whether
+one lead is worth a lookup. The research panel now carries it, coloured when it
+is nearly gone, and it names the firm's ceiling instead of your own when the
+firm's is the one you will actually hit.
+
+Also removed: a comment describing the ZoomInfo credit pool that §35 had
+already established does not exist.

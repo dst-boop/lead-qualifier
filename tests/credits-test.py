@@ -283,6 +283,39 @@ ck("  ...and the reset date is the first of the next one",
    main._month_resets() == (f"{y + 1:04d}-01-01" if m == 12 else f"{y:04d}-{m + 1:02d}-01"),
    main._month_resets())
 
+# --- the allowance must not be skippable by having an old cookie -------------
+# A session created before the identity stamp shipped carries no name, and
+# sessions last thirty days. The per-user cap then applied to everyone EXCEPT
+# those users, which is precisely backwards — they were handed the firm's whole
+# pool as their personal allowance.
+ck("a session predating the identity stamp still knows who it is",
+   main._identity({"provider": "google",
+                   "google": {"email": "Dan@FPA.com", "refresh_token": "r"}})
+   == "dan@fpa.com")
+ck("  ...and a password account is unaffected by that fallback",
+   main._identity({"provider": "password", "account_email": "pat@anywhere.com",
+                   "google": {"email": "other@gmail.com"}}) == "pat@anywhere.com")
+
+import asyncio  # noqa: E402
+STORE.clear()
+unnamed = asyncio.run(main._wp_left(""))
+ck("a spender who cannot be named gets ONE allowance, not the firm's pool",
+   unnamed["mine"] == 3, unnamed)
+ck("  ...and is flagged as unnamed rather than silently trusted",
+   unnamed["named"] is False, unnamed)
+ck("  ...while a named one is marked as such",
+   asyncio.run(main._wp_left("dan@fpa.com"))["named"] is True)
+asyncio.run(main._ledger_add("wp", 3, ""))
+ck("  ...and their spending lands in a bucket that can run out",
+   asyncio.run(main._wp_left(""))["mine"] == 0,
+   asyncio.run(main._wp_left("")))
+ck("  ...without touching a named colleague's hundred",
+   asyncio.run(main._wp_left("ada@fpa.com"))["mine"] == 3)
+block = asyncio.run(main._credit_block(""))
+ck("the panel never shows more left than the budget it is measured against",
+   block["whitepages"]["yours_left"] <= block["whitepages"]["budget"],
+   block["whitepages"])
+
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)

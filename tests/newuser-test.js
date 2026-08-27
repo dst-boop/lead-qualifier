@@ -132,6 +132,37 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
        return /WhitePages lookup/.test(t) && /free/.test(t);
      }));
 
+  // --- the allowance, where it is spent ---------------------------------------
+  // It lived only in the coverage panel, which is not where anyone is standing
+  // when they decide whether one lead is worth a paid lookup.
+  await p.evaluate(() => {
+    CREDITS = { month: '2026-08', resets_on: '2026-09-01',
+                whitepages: { spent: 92, budget: 100, left: 8, yours_left: 8,
+                              firm_left: 400, firm_budget: 1000, capped_by: 'you' },
+                zoominfo: { used: 3, own_subscription: true } };
+    // toggleDetail toggles; an earlier check may have left it open.
+    if (expanded !== 'x1') toggleDetail('x1', 'research'); else render();
+  });
+  await p.waitForTimeout(250);
+  const panel = await p.evaluate(() => document.getElementById('research-x1').textContent);
+  ck('the research panel says what is left of your allowance',
+     /8 of your 100 lookups left/.test(panel), panel.slice(-160));
+  ck('  ...and colours it when it is nearly gone',
+     await p.evaluate(() => {
+       const el = [...document.querySelectorAll('#research-x1 p')]
+         .find(e => /WhitePages:/.test(e.textContent));
+       return el && /rgb\(/.test(getComputedStyle(el).color) && el.style.color !== '';
+     }));
+  await p.evaluate(() => {
+    CREDITS.whitepages = { spent: 2, budget: 100, left: 40, yours_left: 98,
+                           firm_left: 40, firm_budget: 1000, capped_by: 'firm' };
+    if (expanded !== 'x1') toggleDetail('x1', 'research'); else render();
+  });
+  await p.waitForTimeout(250);
+  const firm = await p.evaluate(() => document.getElementById('research-x1').textContent);
+  ck('when the firm is the tighter ceiling it says so, not your own number',
+     /firm's pool/.test(firm) && /lower than your own 98/.test(firm), firm.slice(-180));
+
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);
   await b.close(); process.exit(fail ? 1 : 0);
