@@ -394,8 +394,17 @@ async def _fs_inc(collection: str, key: str, deltas: dict) -> bool:
 # their own caps eventually — with a 429 and a wasted round trip — but a cap
 # discovered at the vendor is a cap discovered too late to choose differently.
 
+# Two ceilings, and both are real. The account-wide one is what the vendor
+# will actually bill; the per-user one is what stops the first advisor awake
+# on the first of the month from spending everyone else's share by lunchtime.
 WP_MONTHLY = int(os.environ.get("WHITEPAGES_MONTHLY_CREDITS", "1000"))
-ZI_MONTHLY = int(os.environ.get("ZOOMINFO_MONTHLY_CREDITS", "2000"))
+WP_PER_USER = int(os.environ.get("WHITEPAGES_USER_CREDITS", "100"))
+# ZoomInfo is deliberately NOT here. Every user brings their own subscription:
+# the app never holds a ZoomInfo seat of its own, and enrichment runs through
+# the user's own saved token or their own Claude connector. Counting a shared
+# pool would have been counting a pool that does not exist. What is counted is
+# usage, further down — how many enrichments this app ran for them — because
+# that is the number they reconcile against their own dashboard.
 _MEM_LEDGER: dict = {}
 
 
@@ -409,24 +418,43 @@ def _month_resets() -> str:
     return f"{y + 1:04d}-01-01" if m == 12 else f"{y:04d}-{m + 1:02d}-01"
 
 
-async def _ledger_read(month: str = "") -> dict:
-    month = month or _month()
-    doc = await _fs_get(FS_LEDGER, month) or _MEM_LEDGER.get(month) or {}
+def _ledger_key(who: str = "") -> str:
+    """The firm's month, or one person's month within it.
+
+    Two documents rather than one map of everybody: a single document
+    incremented by every lookup from every advisor is a hot key, and Firestore
+    would rather have the writes spread out.
+    """
+    return f"{_month()}|{who.lower()}" if who else _month()
+
+
+async def _ledger_read(who: str = "") -> dict:
+    key = _ledger_key(who)
+    doc = await _fs_get(FS_LEDGER, key) or _MEM_LEDGER.get(key) or {}
     return {"wp": int(doc.get("wp") or 0), "zi": int(doc.get("zi") or 0)}
 
 
-async def _ledger_add(kind: str, n: int = 1) -> None:
+async def _ledger_add(kind: str, n: int = 1, who: str = "") -> None:
     if n <= 0:
         return
-    month = _month()
-    if not await _fs_inc(FS_LEDGER, month, {kind: n}):
-        cur = _MEM_LEDGER.setdefault(month, {})
-        cur[kind] = int(cur.get(kind) or 0) + n
+    keys = [_ledger_key()] + ([_ledger_key(who)] if who else [])
+    for key in keys:
+        if not await _fs_inc(FS_LEDGER, key, {kind: n}):
+            cur = _MEM_LEDGER.setdefault(key, {})
+            cur[kind] = int(cur.get(kind) or 0) + n
 
 
-async def _budget_left(kind: str) -> int:
-    spent = (await _ledger_read())[kind]
-    return max(0, (WP_MONTHLY if kind == "wp" else ZI_MONTHLY) - spent)
+async def _wp_left(who: str = "") -> dict:
+    """What is left for this person, and why — theirs, or the firm's.
+
+    Both are returned rather than just the smaller, because they are different
+    problems with different fixes: your own allowance resets on the first, and
+    the firm's needs the admin to buy more.
+    """
+    firm = max(0, WP_MONTHLY - (await _ledger_read())["wp"])
+    mine = max(0, WP_PER_USER - (await _ledger_read(who))["wp"]) if who else firm
+    return {"mine": mine, "firm": firm, "left": min(mine, firm),
+            "capped_by": "you" if mine <= firm else "firm"}
 
 
 async def _fs_del(collection: str, key: str) -> bool:
@@ -1314,7 +1342,7 @@ async def me(request: Request):
     }
     encryption = encryption_backend()
     storage = storage_backend()
-    credits = await _credit_block()
+    credits = await _credit_block(_identity(session))
     if session.get("provider") == "password" and session.get("account_email"):
         email = session["account_email"]
         # Linked providers light their features up exactly as a native
@@ -1640,17 +1668,29 @@ def _wp_path(kind: str) -> str:
     return "/v2/person"            # both person search and reverse phone
 
 
-async def _wp_phone(digits: str, fresh: bool = False) -> tuple:
+async def _who(request: Request) -> str:
+    """Who is spending, without paying a round trip to find out.
+
+    The session already knows: a password account carries its own address, and
+    an OAuth sign-in stamps one at the callback. _signed_in_email is the
+    fallback for sessions predating that, and it costs a userinfo call — which
+    is why it is the fallback and not the answer.
+    """
+    who = _identity(request.state.session)
+    return who or await _signed_in_email(request)
+
+
+async def _wp_phone(digits: str, fresh: bool = False, who: str = "") -> tuple:
     """(person, line) for a number. The single door to a reverse-phone query.
 
     Both endpoints came here by different routes and built the same query by
     hand, which meant the cache saw two spellings of one question. Now there is
     one spelling.
     """
-    return _phone_owner(await _wp_get("phone", {"phone": digits}, fresh=fresh), digits)
+    return _phone_owner(await _wp_get("phone", {"phone": digits}, fresh=fresh, who=who), digits)
 
 
-async def _wp_get(kind: str, params: dict, fresh: bool = False):
+async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
     """One WhitePages call, or none at all.
 
     Three things stand between a caller and a charge:
@@ -1689,18 +1729,27 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False):
     # The allowance is checked here, at the one place a credit is actually
     # spent, so every caller is covered by construction and none of them has to
     # remember to ask.
-    if await _budget_left("wp") <= 0:
+    room = await _wp_left(who)
+    if room["left"] <= 0:
         WP_SPEND["refused"] += 1
-        raise HTTPException(
-            status_code=400,
-            detail=(f"This month's WhitePages allowance ({WP_MONTHLY} lookups) is spent. "
-                    f"It resets {_month_resets()}. Nothing was looked up. "
-                    f"Free sources still work — press Enrich all (free)."),
-        )
+        # Which ceiling was hit decides what the user does next: wait for the
+        # first of the month, or go and ask the admin. Saying "the allowance is
+        # spent" without saying whose sends half of them to the wrong place.
+        if room["mine"] <= 0 and who:
+            detail = (f"You have used all {WP_PER_USER} of your WhitePages lookups this "
+                      f"month. They reset {_month_resets()}. Nothing was looked up. "
+                      f"The free sources are unaffected — press Enrich all (free).")
+        else:
+            detail = (f"The firm's WhitePages allowance ({WP_MONTHLY} lookups) is spent for "
+                      f"this month, so nothing was looked up even though you have "
+                      f"{room['mine']} of your own left. It resets {_month_resets()}, or an "
+                      f"admin can raise it. The free sources are unaffected — press "
+                      f"Enrich all (free).")
+        raise HTTPException(status_code=400, detail=detail)
 
     url = WHITEPAGES_BASE_URL + _wp_path(kind)
     WP_SPEND["calls"] += 1
-    await _ledger_add("wp", 1)
+    await _ledger_add("wp", 1, who)
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
     if r.status_code in (401, 403):
@@ -2247,7 +2296,7 @@ async def verify_phone(req: VerifyPhoneRequest, request: Request):
     """
     await _active_token(request)
     want = _digits(req.phone)
-    person, hit = await _wp_phone(want)
+    person, hit = await _wp_phone(want, who=await _who(request))
     if not person or not hit:
         return {"valid": None, "line_type": "", "carrier": "", "prepaid": None,
                 "owner": "", "name_match": None, "note": "no record found"}
@@ -3354,23 +3403,29 @@ async def edgar_debug(request: Request, url: str = ""):
             "body": r.text[:4000]}
 
 
-async def _credit_block() -> dict:
-    """Both allowances, in the shape the browser renders.
+async def _credit_block(who: str = "") -> dict:
+    """What this person has left, in the shape the browser renders.
 
-    Returned by /api/me (once per page load, no extra request) and by every
-    endpoint that spends a credit, so the number a user is looking at was true
-    as of the last thing they did rather than as of the last time they thought
-    to ask.
+    Returned by /api/me (once per page load, no extra request) and by the
+    credits endpoint, so the number a user is looking at was true as of the
+    last thing they did rather than as of the last time they thought to ask.
+
+    WhitePages is an allowance because the app holds the key and pays the bill.
+    ZoomInfo is not: every user brings their own subscription, so what is
+    reported there is usage — what this app spent on their behalf, for
+    reconciling against their own dashboard — with no ceiling of ours to hit.
     """
     if not (WHITEPAGES_API_KEY or ZI_CLIENT_ID or ANTHROPIC_API_KEY):
         return {}
-    led = await _ledger_read()
+    mine = await _ledger_read(who) if who else {"wp": 0, "zi": 0}
+    room = await _wp_left(who)
     return {
         "month": _month(), "resets_on": _month_resets(),
-        "whitepages": {"spent": led["wp"], "budget": WP_MONTHLY,
-                       "left": max(0, WP_MONTHLY - led["wp"])},
-        "zoominfo": {"spent": led["zi"], "budget": ZI_MONTHLY,
-                     "left": max(0, ZI_MONTHLY - led["zi"])},
+        "whitepages": {"spent": mine["wp"], "budget": WP_PER_USER,
+                       "left": room["left"], "yours_left": room["mine"],
+                       "firm_left": room["firm"], "firm_budget": WP_MONTHLY,
+                       "capped_by": room["capped_by"]},
+        "zoominfo": {"used": mine["zi"], "own_subscription": True},
         "cache_entries": len(_WP_CACHE),
         "cache_days": round(WP_TTL / 86400),
     }
@@ -3390,28 +3445,33 @@ async def credits(request: Request):
     every time traffic paused.
     """
     await _active_token(request)
-    return await _credit_block()
+    return await _credit_block(await _who(request))
 
 
 @app.post("/api/credits")
 async def credits_spend(req: SpendReport, request: Request):
-    """Record credits spent on a route the server did not make itself.
+    """Record ZoomInfo enrichments this app ran on the user's own subscription.
 
-    ZoomInfo enrichment can run through the user's own Claude connector, which
-    never touches this server. Counting only what passes through here would
-    report a budget as untouched while it drained, so the client reports what
-    it spent — and reports only what it believes was billable, since
-    re-enriching the same contact inside a year is free at ZoomInfo.
+    Two of the three routes to ZoomInfo go through the user's own Claude
+    connector and never touch this server, so it cannot see them. This is not
+    a budget — the subscription is theirs and its ceiling is theirs — it is
+    usage, kept so they can reconcile what this app did against their own
+    dashboard.
+
+    WhitePages is not accepted here. That one the server spends itself, at a
+    single choke point, and a client-reported number for it would be a number
+    the server could have counted correctly.
     """
     await _active_token(request)
-    if req.kind not in ("zi", "wp"):
-        raise HTTPException(status_code=400, detail="kind must be zi or wp.")
+    if req.kind != "zi":
+        raise HTTPException(
+            status_code=400,
+            detail="Only ZoomInfo usage is self-reported; WhitePages is counted "
+                   "where it is spent.")
+    who = await _who(request)
     n = max(0, min(int(req.n or 0), 10000))
-    await _ledger_add(req.kind, n)
-    led = await _ledger_read()
-    budget = ZI_MONTHLY if req.kind == "zi" else WP_MONTHLY
-    return {"spent": led[req.kind], "budget": budget,
-            "left": max(0, budget - led[req.kind]), "resets_on": _month_resets()}
+    await _ledger_add("zi", n, who)
+    return {"used": (await _ledger_read(who))["zi"], "own_subscription": True}
 
 
 @app.get("/api/wp-spend")
@@ -3722,7 +3782,7 @@ async def enrich(req: EnrichRequest, request: Request):
 
     if req.phone and WP_PHONE_RE.match(_digits(req.phone)):
         steps.append("phone")
-        p, _hit = await _wp_phone(_digits(req.phone), req.fresh)
+        p, _hit = await _wp_phone(_digits(req.phone), req.fresh, who=await _who(request))
         if _mine(p):
             person, matched_by = p, "phone"
 
@@ -3731,7 +3791,7 @@ async def enrich(req: EnrichRequest, request: Request):
     # shares one. This rung is why a lead with no phone is now worth a press.
     if not person and req.email and WP_EMAIL_RE.match(req.email.strip()):
         steps.append("email")
-        p = _best_person(await _wp_get("person", {"email": req.email.strip()},
+        p = _best_person(await _wp_get("person", {"email": req.email.strip()}, who=await _who(request),
                                        fresh=req.fresh),
                          require_last=req.last_name)
         if _mine(p):
@@ -3765,7 +3825,7 @@ async def enrich(req: EnrichRequest, request: Request):
                     "rejected": "a name with no city, state or ZIP matches too many "
                                 "people to be worth a lookup — add a location"}
         steps.append("name")
-        person = _best_person(await _wp_get("person", params, fresh=req.fresh),
+        person = _best_person(await _wp_get("person", params, fresh=req.fresh, who=await _who(request)),
                               require_last=req.last_name)
         matched_by = "name"
 
@@ -3797,7 +3857,7 @@ async def enrich(req: EnrichRequest, request: Request):
         if addr["zip"]:
             prop_params["zipcode"] = addr["zip"]
         steps.append("property")
-        prop = await _wp_get("property", prop_params, fresh=req.fresh)
+        prop = await _wp_get("property", prop_params, fresh=req.fresh, who=await _who(request))
         result = (prop or {}).get("result") if isinstance(prop, dict) else None
         if isinstance(result, dict):
             info = result.get("ownership_info") or {}

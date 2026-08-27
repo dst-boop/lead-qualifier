@@ -1974,18 +1974,21 @@ async function loadCredits(){
   try{renderPipeline();}catch(e){/* pre-render */}
   return CREDITS;
 }
+/* ZoomInfo runs on the user's OWN subscription, so this is not a drawdown of
+   anything we hold — it is usage, recorded so they can reconcile what this app
+   did against their own dashboard. */
 async function reportSpend(kind,n){
   if(!n||!creditsKnown())return;
-  const which=kind==='zi'?'zoominfo':'whitepages';
   try{
-    const d=await api('/api/credits',{kind:kind,n:n});
-    if(CREDITS[which])Object.assign(CREDITS[which],{spent:d.spent,left:d.left});
-  }catch(e){/* the lookup already happened; a lost count is not worth a failure */}
+    const d=await api('/api/credits',{kind:'zi',n:n});
+    if(CREDITS.zoominfo)Object.assign(CREDITS.zoominfo,{used:d.used});
+  }catch(e){/* the enrichment already happened; a lost count is not worth a failure */}
 }
 function creditLine(which){
   const c=CREDITS[which];
+  if(which==='zoominfo')return '';   // their subscription, not our allowance
   if(!c||!c.budget)return '';
-  return `${c.left.toLocaleString()} of ${c.budget.toLocaleString()} ${which==='zoominfo'?'ZoomInfo':'WhitePages'} credits left this month`;
+  return `${c.left.toLocaleString()} of your ${c.budget.toLocaleString()} WhitePages lookups left this month`;
 }
 const OUTSIDE_MSG='To use ZoomInfo here, save your ZoomInfo MCP token under ICP settings — then build & enrich work in any browser. Without one, they only work while this app is running inside Claude, using the connector on your Claude account. Everything else — CSV import, scoring, calling, export — works anywhere.';
 /* Two routes to ZoomInfo, in order of preference:
@@ -2283,7 +2286,7 @@ Pass every value as a string, exactly as given — a personId identifies a conta
     if(billed)await reportSpend('zi',billed);
     const parked=blocked?` ${blocked} parked in Retry blocked — your credit limit is spent; click Retry blocked when it resets.`:'';
     const free=done-billed;
-    const cost=done?` ${billed} credit${billed===1?'':'s'} spent${free>0?`, ${free} free (enriched within the last year)`:''}${CREDITS.zoominfo?` — ${Math.max(0,CREDITS.zoominfo.left)} of ${CREDITS.zoominfo.budget} left this month`:''}.`:'';
+    const cost=done?` ${billed} credit${billed===1?'':'s'} from your ZoomInfo subscription${free>0?`, and ${free} free (enriched within the last year)`:''}.`:'';
     st.textContent=done
       ?`Enriched ${done} leads${failed?` — ${failed} failed. Last error: ${lastErr}`:''}.${cost}${parked} Emails, phones and start dates are live; scores are now firm.`
       :`Enriched 0 leads.${parked} ${blocked?'':(lastErr||'ZoomInfo returned nothing usable.')}`;
@@ -2428,7 +2431,7 @@ function renderPipeline(){
   // Not "no ZoomInfo id" any more — a name and an employer are a lookup key
   // too. This counts only the leads nothing can be asked about.
   const gapNoId=leads.filter(L=>!ziKey(L)&&(!L.mobilePhone||!L.email)).length;
-  const ziLeft=creditLine('zoominfo');
+  const ziLeft='';   // ZoomInfo is the user's own subscription; we hold no pool
   const billable=leads.filter(L=>needsEnrich(L)&&ziBillable(L)).length;
   $('sEnrich').textContent=enrichable
     ? `${enrichable} lead${enrichable===1?'':'s'} missing an email or a mobile, and ZoomInfo can fill them`
@@ -3760,23 +3763,18 @@ document.getElementById('btnEnrichAll').addEventListener('click',async()=>{
   await loadCredits();
   const bill=targets.filter(ziBillable).length;
   const free=targets.length-bill;
-  const left=(CREDITS.zoominfo&&CREDITS.zoominfo.left);
-  if(left!==undefined&&bill>left){
-    if(!await appConfirm(
-      `Enriching ${targets.length} lead${targets.length>1?'s':''} would cost about ${bill} credits, `+
-      `and only ${left} of this month's ${CREDITS.zoominfo.budget} are left `+
-      `(they reset ${CREDITS.zoominfo.resets_on||CREDITS.resets_on}). ZoomInfo will stop billing when the pool runs out and the rest will park in Retry blocked. `+
-      `Sort by tier and enrich the A-list first if you would rather choose where the credits go.`,
-      'More than the budget left'))return;
-  }else{
-    const noId=targets.filter(L=>!L.contactId).length;
-    if(!await appConfirm(
-      `Enrich ${targets.length} lead${targets.length>1?'s':''}? `+
-      `About ${bill} ZoomInfo credit${bill===1?'':'s'}${free?`, and ${free} free — re-enriching the same contact within a year costs nothing`:''}. `+
-      (left!==undefined?`That leaves ${Math.max(0,left-bill)} of ${CREDITS.zoominfo.budget} this month. `:'')+
-      (noId?`${noId} of them have no ZoomInfo id, so they are matched on name and employer — a match is not guaranteed, and an unmatched lead is not billed.`:''),
-      'Enrich leads'))return;
-  }
+  const noId=targets.filter(L=>!L.contactId).length;
+  // No ceiling of ours to warn against: the credits are the user's own, from
+  // their own ZoomInfo subscription. What the dialog owes them is the count
+  // before they spend it, and where it lands if the match is uncertain.
+  const used=(CREDITS.zoominfo&&CREDITS.zoominfo.used)||0;
+  if(!await appConfirm(
+    `Enrich ${targets.length} lead${targets.length>1?'s':''}? `+
+    `About ${bill} credit${bill===1?'':'s'} from your own ZoomInfo subscription`+
+    `${free?`, and ${free} free \u2014 re-enriching the same contact within a year costs nothing`:''}. `+
+    (used?`This app has used ${used} on your subscription so far this month. `:'')+
+    (noId?`${noId} of them have no ZoomInfo id, so they are matched on name and employer \u2014 a match is not guaranteed, and an unmatched lead is not billed.`:''),
+    'Enrich leads'))return;
   enrichLeads(targets);
 });
 /* The overflow menu. Everything that is not one of the four stages lives here,
@@ -4059,23 +4057,31 @@ function renderCoverage(){
 function renderBudgets(){
   const box=document.getElementById('covBudget');
   if(!box)return;
-  const bits=[];
-  ['zoominfo','whitepages'].forEach(k=>{
-    const c=CREDITS[k];
-    if(!c||!c.budget)return;
-    const pct=Math.round(100*c.left/c.budget);
-    const col=pct>=40?'var(--tierA)':pct>=10?'var(--tierB)':'var(--tierX)';
-    bits.push(`<div class="sigrow"><span><strong>${k==='zoominfo'?'ZoomInfo':'WhitePages'}</strong>
-      &nbsp;${c.left.toLocaleString()} of ${c.budget.toLocaleString()} credits left`
-      +(c.spent?` &mdash; <span class="hint">${c.spent.toLocaleString()} spent since ${CREDITS.month}-01</span>`:'')
-      +`</span><span class="pts" style="color:${col}">${pct}%</span></div>`);
-  });
-  box.innerHTML=bits.length
-    ? `<p class="hint" style="margin-top:14px">Paid allowances, resetting ${esc(CREDITS.resets_on||'')}. `
-      +`The free sources cost nothing and are not counted here.`
-      +(CREDITS.cache_entries?` ${CREDITS.cache_entries.toLocaleString()} WhitePages answer${CREDITS.cache_entries===1?' is':'s are'} remembered for ${CREDITS.cache_days} days, so re-checking one of them spends nothing.`:'')
-      +`</p>`+bits.join('')
-    : '';
+  const wp=CREDITS.whitepages, zi=CREDITS.zoominfo;
+  if(!wp||!wp.budget){box.innerHTML='';return;}
+  const pct=Math.round(100*wp.yours_left/wp.budget);
+  const col=pct>=40?'var(--tierA)':pct>=10?'var(--tierB)':'var(--tierX)';
+  const rows=[`<div class="sigrow"><span><strong>WhitePages</strong>
+    &nbsp;${wp.yours_left.toLocaleString()} of your ${wp.budget.toLocaleString()} lookups left this month`
+    +(wp.spent?` &mdash; <span class="hint">you have used ${wp.spent.toLocaleString()} since ${esc(CREDITS.month)}-01</span>`:'')
+    +`</span><span class="pts" style="color:${col}">${pct}%</span></div>`];
+  // The firm's ceiling only earns a line when it is the one that will stop you
+  // — otherwise it is a number about somebody else's month.
+  if(wp.capped_by==='firm')rows.push(`<div class="sigrow neg"><span>
+    <strong>The firm&rsquo;s pool is lower than your allowance</strong><br>
+    <span class="hint">${wp.firm_left.toLocaleString()} of ${wp.firm_budget.toLocaleString()} left across everyone, so that is what you will hit first. An admin can raise it.</span>
+    </span><span class="pts">${wp.firm_left.toLocaleString()}</span></div>`);
+  // ZoomInfo is deliberately not a bar: there is no pool of ours to fill or
+  // empty. Their subscription, their ceiling, our usage count.
+  if(zi)rows.push(`<div class="sigrow"><span><strong>ZoomInfo</strong>
+    &nbsp;your own subscription<br><span class="hint">${
+      zi.used?`This app has used ${zi.used.toLocaleString()} credit${zi.used===1?'':'s'} on it this month.`
+             :'Nothing used through this app this month.'} Your ZoomInfo dashboard is the authority on what is left.</span>
+    </span><span class="pts hint">&mdash;</span></div>`);
+  box.innerHTML=`<p class="hint" style="margin-top:14px">Paid lookups, resetting ${esc(CREDITS.resets_on||'')}. `
+    +`The free sources cost nothing and are not counted here.`
+    +(CREDITS.cache_entries?` ${CREDITS.cache_entries.toLocaleString()} WhitePages answer${CREDITS.cache_entries===1?' is':'s are'} remembered for ${CREDITS.cache_days} days, so re-checking one of them spends nothing.`:'')
+    +`</p>`+rows.join('');
 }
 document.getElementById('btnCoverage').addEventListener('click',async()=>{
   renderCoverage();openModal('mCoverage');
