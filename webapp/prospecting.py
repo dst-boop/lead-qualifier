@@ -482,6 +482,103 @@ def unzip_first_csv(blob: bytes, name_contains: str = "") -> str:
 
 # ---------------------------------------------------------------- the join
 
+# ------------------------------------------------------------------- warmth
+# An opportunity ranked only by dollars is a list of strangers. The same list
+# ranked by what you already have inside each employer is a list of doors, some
+# of which are already open. Nothing here is new data: it is the lead list the
+# advisor already has, turned sideways and asked a different question — not
+# "does this person have money moving" but "at this event, who do I know".
+
+# Lead status -> how warm a way in it represents. The vocabulary is the one the
+# UI already offers; anything unrecognised counts as a name on file.
+_STATUS_WARMTH = {
+    "set": "set",                 # a meeting is booked — you are already inside
+    "call back": "engaged",       # a live conversation, and they asked you back
+    "called": "engaged",          # a live conversation
+    "new": "known",               # a name and a number, not a stranger company
+}
+
+# Skipped when judging warmth, for the same reason signals.py skips them: a
+# person who has said no is not a way in. They are still counted and reported,
+# because "everyone I know here has an advisor" is worth seeing before you
+# spend a week on the employer.
+DECLINED_STATUSES = ("not interested", "has advisor")
+
+WARMTH_RANK = {"set": 3, "engaged": 2, "known": 1, "cold": 0}
+
+
+def lead_name(lead: dict) -> str:
+    return " ".join(x for x in ((lead.get("firstName") or "").strip(),
+                                (lead.get("lastName") or "").strip()) if x)
+
+
+def index_leads_by_employer(leads: Iterable[dict]) -> dict:
+    """Leads grouped by the same normalised employer key the WARN join uses."""
+    by: dict = {}
+    for lead in leads or []:
+        key = norm_company(lead.get("employer") or "")
+        if key:
+            by.setdefault(key, []).append(lead)
+    return by
+
+
+def annotate_warmth(opps: list[dict], leads: Iterable[dict]) -> list[dict]:
+    """Mark each opportunity with the warmest way in you already have.
+
+    Warmth is decided by the best status among the leads you hold at that
+    employer: a booked meeting beats a live conversation beats a name on file
+    beats nothing. `cold` is the honest label for an employer where you know
+    no one — it is not a failure, it is the reason to work the others first.
+    """
+    by_employer = index_leads_by_employer(leads)
+    for opp in opps:
+        key = norm_company(opp.get("employer") or "")
+        matches = by_employer.get(key, [])
+
+        counts: dict = {}
+        declined = 0
+        best, best_rank = "cold", 0
+        best_lead = None
+        for lead in matches:
+            status = (lead.get("status") or "New").strip()
+            counts[status] = counts.get(status, 0) + 1
+            if status.lower() in DECLINED_STATUSES:
+                declined += 1
+                continue
+            warmth = _STATUS_WARMTH.get(status.lower(), "known")
+            rank = WARMTH_RANK[warmth]
+            if rank > best_rank:
+                best, best_rank, best_lead = warmth, rank, lead
+
+        opp["warmth"] = best
+        opp["warmth_rank"] = best_rank
+        opp["known_leads"] = len(matches) - declined
+        opp["declined_leads"] = declined
+        opp["lead_statuses"] = counts
+        opp["warmest_lead"] = ({"id": best_lead.get("id"), "name": lead_name(best_lead),
+                                "status": best_lead.get("status") or "New"}
+                               if best_lead else None)
+    return opps
+
+
+def sort_opportunities(opps: list[dict], by: str = "dollars") -> list[dict]:
+    """Order the list. `dollars` is the default the app has always used.
+
+    `warmth` puts the doors you can already walk through first and keeps
+    dollars as the tie-break, which is the ordering that actually reduces cold
+    calling: a $30M event where a meeting is booked outranks a $40M event at a
+    company where you know no one.
+    """
+    if by == "warmth":
+        opps.sort(key=lambda r: (r.get("warmth_rank") or 0,
+                                 r.get("dollars_in_motion") or 0,
+                                 r.get("workers") or 0), reverse=True)
+    else:
+        opps.sort(key=lambda r: (r.get("dollars_in_motion") or 0,
+                                 r.get("workers") or 0), reverse=True)
+    return opps
+
+
 def build_opportunities(events: list[dict], plans: dict, *,
                         min_workers: int = 0, states: Optional[set] = None,
                         counties: Optional[set] = None,

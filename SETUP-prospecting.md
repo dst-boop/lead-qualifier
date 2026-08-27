@@ -304,3 +304,56 @@ modal does the same thing by hand.
   officers, or a graduation year on import.
 - **Plan assets are a year or two stale.** Form 5500 is an annual filing with a
   long lag. The average balance is an order of magnitude, not a quote.
+
+## Which of these doors is already open
+
+Ranking by dollars answers *where is the most money moving*. It does not answer
+*which of these can I actually get into*, and that second question is the one
+that decides whether the week is spent cold calling.
+
+`POST /api/opportunities/warmth` takes the advisor's own leads — posted by the
+client, exactly as `/api/signals` takes them, so it works on an unsaved list and
+on a list shared by another advisor — and marks every opportunity with the
+warmest way in that already exists at that employer.
+
+```
+POST /api/opportunities/warmth
+{"leads": [...], "sort": "warmth"}
+```
+
+| Warmth | Means | Comes from a lead at that employer marked |
+|---|---|---|
+| `set` | A meeting is booked. You are already inside. | Set |
+| `engaged` | A live conversation is running. | Called, Call Back |
+| `known` | A name and a number, not a stranger company. | New, or anything unrecognised |
+| `cold` | You know no one here. | *(no leads at that employer)* |
+
+Each row also carries `known_leads`, `declined_leads`, `lead_statuses`, and
+`warmest_lead` — id, name and status — so the row can link straight to the
+person rather than making you search for them.
+
+Employers are matched with the same normaliser the WARN × 5500 join uses, so
+`Beacon Materials Corp` on the notice finds `Beacon Materials Corporation` on
+your list.
+
+**A lead who has said no does not make a door warm.** Anyone marked *Not
+Interested* or *Has Advisor* is left out of the warmth judgement, for the same
+reason `signals.py` skips them. They are still counted in `declined_leads` and
+returned, because *"the three people I know there all have advisors"* is worth
+seeing **before** you spend a week on that employer, not after.
+
+### Ordering
+
+`sort` is `warmth` by default on this route and `dollars` on the GET route,
+which is unchanged. Warmth ordering keeps dollars as the tie-break, so within a
+band the bigger event still wins:
+
+```
+set      Beacon Materials      $30M   meeting booked with Margaret Halvorsen
+engaged  Northwind Robotics    $40M   Daniel Okonkwo, called
+cold     Cascade Health        $50M   nobody
+```
+
+The $50M event is the biggest and it is last, because there is no way into it
+yet. That inversion is the entire point of the route — work the open doors
+first, and let the cold giant wait until it is the best thing left.

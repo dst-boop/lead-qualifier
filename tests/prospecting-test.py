@@ -279,5 +279,88 @@ ck("county filtering does not disturb the dollars-first ranking",
    [o["employer_key"] for o in _got])
 
 
+# --- warmth ------------------------------------------------------------------
+# The same opportunities asked a different question: at this event, who do I
+# already know? A door you can walk through beats a bigger door you cannot.
+
+_OPPS = lambda: [                                                     # noqa: E731
+    {"employer": "Cascade Health Systems", "dollars_in_motion": 50_000_000, "workers": 500},
+    {"employer": "Northwind Robotics Inc.", "dollars_in_motion": 40_000_000, "workers": 400},
+    {"employer": "Beacon Materials Corp", "dollars_in_motion": 30_000_000, "workers": 300},
+]
+_LEADS = [
+    {"id": "1", "firstName": "Margaret", "lastName": "Halvorsen",
+     "employer": "Beacon Materials Corporation", "status": "Set"},
+    {"id": "2", "firstName": "Daniel", "lastName": "Okonkwo",
+     "employer": "Northwind Robotics", "status": "Called"},
+    {"id": "3", "firstName": "Anne", "lastName": "Delacroix",
+     "employer": "Northwind Robotics Inc", "status": "Has Advisor"},
+]
+
+
+def _warm(opps=None, leads=None):
+    o = opps if opps is not None else _OPPS()
+    P.annotate_warmth(o, _LEADS if leads is None else leads)
+    return {x["employer"]: x for x in o}
+
+
+w = _warm()
+ck("a booked meeting is the warmest way in",
+   w["Beacon Materials Corp"]["warmth"] == "set", w["Beacon Materials Corp"]["warmth"])
+ck("  ...matched across differing legal suffixes", w["Beacon Materials Corp"]["known_leads"] == 1)
+ck("a live conversation is warm but not booked",
+   w["Northwind Robotics Inc."]["warmth"] == "engaged", w["Northwind Robotics Inc."]["warmth"])
+ck("an employer you know nobody at is cold, and says so",
+   w["Cascade Health Systems"]["warmth"] == "cold" and
+   w["Cascade Health Systems"]["warmest_lead"] is None)
+ck("the warmest lead is named so the row can link to a person",
+   w["Beacon Materials Corp"]["warmest_lead"]["name"] == "Margaret Halvorsen",
+   w["Beacon Materials Corp"]["warmest_lead"])
+
+ck("a lead who has said no does not make a door warm",
+   w["Northwind Robotics Inc."]["warmth"] == "engaged")
+ck("  ...but is counted, because 'they all have advisors' is worth seeing",
+   w["Northwind Robotics Inc."]["declined_leads"] == 1,
+   w["Northwind Robotics Inc."]["declined_leads"])
+ck("  ...and is left out of the known count",
+   w["Northwind Robotics Inc."]["known_leads"] == 1,
+   w["Northwind Robotics Inc."]["known_leads"])
+
+only_declined = _warm(leads=[{"id": "9", "firstName": "Z", "lastName": "Q",
+                              "employer": "Cascade Health Systems", "status": "Not Interested"}])
+ck("an employer where everyone declined is cold, not warm",
+   only_declined["Cascade Health Systems"]["warmth"] == "cold")
+ck("  ...and the decline is still reported",
+   only_declined["Cascade Health Systems"]["declined_leads"] == 1)
+
+ck("an unrecognised status still counts as a name on file",
+   _warm(leads=[{"id": "8", "employer": "Cascade Health Systems",
+                 "status": "Mailed"}])["Cascade Health Systems"]["warmth"] == "known")
+ck("no leads at all leaves every door cold",
+   all(o["warmth"] == "cold" for o in P.annotate_warmth(_OPPS(), [])))
+ck("a lead with no employer is ignored rather than matching everything",
+   P.annotate_warmth(_OPPS(), [{"id": "7", "employer": "", "status": "Set"}])[0]["warmth"] == "cold")
+
+_o = _OPPS()
+P.annotate_warmth(_o, _LEADS)
+P.sort_opportunities(_o, by="warmth")
+ck("warmth ordering puts the open door first, though it is the smallest",
+   [x["employer"] for x in _o][0] == "Beacon Materials Corp", [x["employer"] for x in _o])
+ck("  ...and the cold giant last", [x["employer"] for x in _o][-1] == "Cascade Health Systems")
+ck("dollars remain the tie-break inside a warmth band",
+   [x["employer"] for x in P.sort_opportunities(
+       P.annotate_warmth([
+           {"employer": "A Co", "dollars_in_motion": 10, "workers": 1},
+           {"employer": "B Co", "dollars_in_motion": 99, "workers": 1}], []), by="warmth")]
+   == ["B Co", "A Co"])
+
+_d = _OPPS()
+P.annotate_warmth(_d, _LEADS)
+P.sort_opportunities(_d, by="dollars")
+ck("the dollars ordering is untouched by any of this",
+   [x["employer"] for x in _d] == ["Cascade Health Systems", "Northwind Robotics Inc.",
+                                   "Beacon Materials Corp"], [x["employer"] for x in _d])
+
+
 print(("\nFAILURES: %d of %d" % (fail, TOTAL[0])) if fail else "\nall %d checks passed" % TOTAL[0])
 sys.exit(1 if fail else 0)
