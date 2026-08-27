@@ -71,11 +71,12 @@ ck("revoking removes it from the recipient",
    not [l for l in c.get("/api/lists").json()["lists"] if l.get("owner")])
 ck("  ...and access is refused", c.get(f"/api/lists/{ref}").status_code==403)
 
-# deleting a shared list revokes it
+# deleting a shared list revokes it. A campaign list, deliberately: the first
+# list is the master now, and the master refuses deletion outright.
 WHO["e"]="dan@fpa.com"
-c.post(f"/api/lists/{lid}/shares",json={"email":"sam@fpa.com"})
 n2=c.post("/api/lists",json={"name":"Second"}).json()["list"]["id"]
-c.delete(f"/api/lists/{lid}")
+c.post(f"/api/lists/{n2}/shares",json={"email":"sam@fpa.com"})
+c.delete(f"/api/lists/{n2}")
 WHO["e"]="sam@fpa.com"
 ck("deleting a list revokes it from everyone",
    not [l for l in c.get("/api/lists").json()["lists"] if l.get("owner")])

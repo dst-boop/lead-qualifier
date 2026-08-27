@@ -2283,3 +2283,44 @@ exact required shape.
 Also from the same screenshots: the AI-QC menu line implied the user needs a
 Claude account (it runs on the app's own key — a real question from a real
 user reading it), and Search ZoomInfo now says it needs your own subscription.
+
+## 38. The master list, the invite that needs nobody, and the double-billed race
+
+Three asks answered in one branch, plus what an hour of stress-testing found.
+
+**The master list.** "Each user should have 1 master list that all leads are
+on and cannot be over written by accident." The list with id `default` is that
+list. Every lead that enters the app — import, paste, sheet, ZoomInfo build,
+household add — lands on it even when added to a campaign list, which is what
+makes a campaign list safely deletable. The four landing sites collapsed into
+one `landLead()`; captures queue and flush with the debounced save, and
+`switchList` flushes explicitly because it bypasses save() — a capture waiting
+for "the next edit" waits forever if the tab closes first. The master cannot
+be deleted (server refusal plus a disabled button that says why), a restore
+MERGES into it rather than replacing it, and deleting a lead from a campaign
+list never touches it: the master is the archive (Dan's chosen behavior).
+
+**The Equitable invite that needs nobody's permission.** "I dont want to have
+to ask for help from an Admin." The OAuth calendar route stays for tenants
+that allow user consent, but the new primary is simpler: Outlook on the web,
+opened with the invite pre-filled via deeplink, already signed in as the
+advisor. Their press of Send IS the authentication — no OAuth, no Azure app
+registration, no tenant admin, nothing configured on the server at all. An
+.ics twin covers desktop Outlook. The signed-out-only .ics path this grew from
+had been unreachable since accounts shipped.
+
+**What the stress hour found.** Two real defects, both mine, both now tested:
+the first version of the 5,000-lead stress test seeded the store before
+switching lists, so the outgoing save clobbered the seed and the "stress" test
+measured a 7-lead master (the giveaway was the assertion's own debug output);
+and a failed capture flush retried while the user stood on the master would
+write to the server behind the page's back, to be clobbered by the page's
+next save — flushing into `state.leads` when the master is active closes it.
+
+And one defect that predates the branch: **two identical WhitePages lookups
+in the air at once both billed.** A double-click, or two advisors pressing
+verify on the same lead in the same second — both miss the cache, both pay.
+`_wp_get` now single-flights per cache key: the second caller awaits the
+first answer. A failure is not an answer — waiters re-raise rather than being
+handed a corpse, and the key frees for the next attempt. The test uses a
+deliberately slowed stub so the race window is real rather than lucky.

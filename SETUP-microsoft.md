@@ -131,3 +131,14 @@ The example requested `Calendars.ReadWrite.Shared` too; adding an attendee
 needs only `Calendars.ReadWrite`, so this app deliberately asks for less.
 Its authorize URL also carried no `state` parameter — ours does, plus PKCE,
 both supplied by MSAL. Borrow the scope set, not the CSRF hole.
+
+## The route that needs nobody's permission
+
+Registering the Azure app (above) is still the full-featured path. But sending
+an invite **from a work mailbox with zero setup** needs none of it: in the
+invite dialog, **Open in work Outlook** opens Outlook on the web with the
+invite pre-filled — attendee, time, subject, body — already signed in as you.
+Press Send there and it goes out from that address through the firm's normal
+pipeline. No OAuth, no admin consent, no server configuration; the **.ics**
+button is the same invite for desktop Outlook. This is the route for a
+corporate tenant (Equitable, a wirehouse) whose IT approves nothing.
