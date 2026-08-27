@@ -126,6 +126,54 @@ ck("an unmatched employer is kept and flagged",
    and items["halstead marine"]["dollars_in_motion"] is None, items.get("halstead marine"))
 ck("the source URL state survives", items["ridgeline capital"]["state"] == "CT")
 
+# --- warmth -------------------------------------------------------------------
+# The advisor's own list, posted the same way /api/signals takes it, deciding
+# which of these employers is already a door rather than a cold call.
+
+ck("signed out cannot ask for warmth",
+   anon.post("/api/opportunities/warmth", json={"leads": []}).status_code == 401)
+
+_LEADS = [
+    {"id": "1", "firstName": "Margaret", "lastName": "Halvorsen",
+     "employer": "Cordova Industrial Group Inc", "status": "Set"},
+    {"id": "2", "firstName": "Daniel", "lastName": "Okonkwo",
+     "employer": "Ridgeline Capital LLC", "status": "Called"},
+    {"id": "3", "firstName": "Anne", "lastName": "Delacroix",
+     "employer": "Halstead Marine", "status": "Has Advisor"},
+]
+r = c.post("/api/opportunities/warmth", json={"leads": _LEADS, "refresh": True})
+ck("warmth endpoint answers", r.status_code == 200, r.text[:160])
+d = r.json()
+byname = {o["employer"]: o for o in d["items"]}
+ck("  ...over the same events the GET route returns", d["count"] == 3, d.get("count"))
+ck("a booked meeting marks that employer 'set'",
+   byname["Cordova Industrial Group"]["warmth"] == "set",
+   byname["Cordova Industrial Group"]["warmth"])
+ck("a call in progress marks that employer 'engaged'",
+   byname["Ridgeline Capital"]["warmth"] == "engaged", byname["Ridgeline Capital"]["warmth"])
+ck("an employer whose only contact has an advisor stays cold",
+   byname["Halstead Marine LLC"]["warmth"] == "cold", byname["Halstead Marine LLC"]["warmth"])
+ck("  ...with the decline reported rather than hidden",
+   byname["Halstead Marine LLC"]["declined_leads"] == 1)
+ck("the tally counts each band", d["warmth"] == {"set": 1, "engaged": 1, "cold": 1}, d.get("warmth"))
+ck("warmth is the default ordering for this route",
+   d["items"][0]["employer"] == "Cordova Industrial Group", d["items"][0]["employer"])
+
+r = c.post("/api/opportunities/warmth", json={"leads": _LEADS, "sort": "dollars"})
+_order = [o["employer"] for o in r.json()["items"]]
+ck("  ...and dollars ordering is still available",
+   _order == ["Cordova Industrial Group", "Ridgeline Capital", "Halstead Marine LLC"], _order)
+ck("  ...with the unpriced employer sorting last rather than crashing the sort",
+   r.json()["items"][-1]["dollars_in_motion"] is None)
+
+r = c.post("/api/opportunities/warmth", json={"leads": []})
+ck("no leads posted leaves every door cold rather than failing",
+   all(o["warmth"] == "cold" for o in r.json()["items"]), r.json().get("warmth"))
+
+r = c.get("/api/opportunities")
+ck("the GET route is unchanged and carries no warmth",
+   "warmth" not in (r.json()["items"][0] if r.json().get("items") else {}))
+
 # --- degrading ----------------------------------------------------------------
 main.FORM5500_URL = STUB + "/missing.csv"
 r = c.get("/api/opportunities", params={"refresh": "true"})

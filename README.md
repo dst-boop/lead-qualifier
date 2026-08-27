@@ -37,6 +37,12 @@ refused rather than attached.
 five wealth-management gates and returns per-gate evidence plus a first-call
 verification checklist. Needs `ANTHROPIC_API_KEY`.
 
+**Rank by the way in.** Opportunities carry the dollars about to come loose;
+warmth adds which of those employers you can already get into — a booked
+meeting, a live conversation, or nobody at all — so a $30M event you can walk
+into outranks a $50M event full of strangers. See
+[SETUP-prospecting.md](SETUP-prospecting.md).
+
 **Work the list.** Click-to-call, email and calendar invites sent from your
 signed-in Google or Microsoft account, round-robin assignment across advisors,
 activity logging, and a CRM-shaped CSV export carrying the home address, both

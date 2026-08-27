@@ -44,6 +44,7 @@ secret — these are public URLs — so plain env vars, no Secret Manager.
 | `FORM5500_SCHEDULE_URLS` | Schedule H and Schedule I, comma-separated. **Required for any dollar figure** — see below. |
 | `FORM5500_CSV_IN_ZIP` | Substring identifying which CSV inside the zip to read. Default `f_5500`. |
 | `SOURCE_STATES` | Comma-separated states to keep, e.g. `NY,NJ,CT,PA`. Empty keeps all. |
+| `SOURCE_COUNTIES` | Comma-separated counties to keep, e.g. `Nassau,Suffolk`. Empty keeps all. Narrows *inside* a state — see below. |
 | `SOURCE_MIN_WORKERS` | Ignore events smaller than this. Default `25`. |
 | `FIRESTORE_OPPS_COLLECTION` | Where the built list is stored. Default `opportunities`. |
 
@@ -66,6 +67,41 @@ Set it as one line:
 gcloud run services update lead-qualifier --region us-east1 \
   --set-env-vars 'WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
 ```
+
+## Working one metro rather than a whole state
+
+`SOURCE_STATES=NY` is too coarse for an advisor who covers Long Island. It
+returns Buffalo and Syracuse alongside Hicksville, and the list stops being a
+call list.
+
+`SOURCE_COUNTIES` narrows inside the state:
+
+```bash
+gcloud run services update lead-qualifier --region us-east1 \
+  --set-env-vars 'SOURCE_STATES=NY,SOURCE_COUNTIES=Nassau,Suffolk'
+```
+
+This matters more for New York than anywhere else, because — as the next
+section explains — **New York's WARN file publishes no city and no state
+column, only county.** County is not one filter among several there. It is the
+only geography the feed carries.
+
+Names are matched on their bare form, so `Nassau`, `Nassau County` and
+`NASSAU CO.` are the same county, and parishes and boroughs normalise the same
+way. Write them however you like.
+
+Two behaviours worth knowing:
+
+- **An event with no county is kept**, exactly as an event with no state is kept
+  by `SOURCE_STATES`. A feed that omits the column should not silently empty
+  your list; the row arrives and you can see it.
+- **The two filters compose.** `SOURCE_STATES=NY` with
+  `SOURCE_COUNTIES=Nassau,Suffolk` will not admit a New Jersey row that happens
+  to have a county called Nassau.
+
+For the five boroughs the county names are **New York** (Manhattan), **Kings**
+(Brooklyn), **Queens**, **Bronx** and **Richmond** (Staten Island) — the county
+is what the filing carries, not the borough name people say.
 
 ## What New York's file actually looks like
 
@@ -268,3 +304,56 @@ modal does the same thing by hand.
   officers, or a graduation year on import.
 - **Plan assets are a year or two stale.** Form 5500 is an annual filing with a
   long lag. The average balance is an order of magnitude, not a quote.
+
+## Which of these doors is already open
+
+Ranking by dollars answers *where is the most money moving*. It does not answer
+*which of these can I actually get into*, and that second question is the one
+that decides whether the week is spent cold calling.
+
+`POST /api/opportunities/warmth` takes the advisor's own leads — posted by the
+client, exactly as `/api/signals` takes them, so it works on an unsaved list and
+on a list shared by another advisor — and marks every opportunity with the
+warmest way in that already exists at that employer.
+
+```
+POST /api/opportunities/warmth
+{"leads": [...], "sort": "warmth"}
+```
+
+| Warmth | Means | Comes from a lead at that employer marked |
+|---|---|---|
+| `set` | A meeting is booked. You are already inside. | Set |
+| `engaged` | A live conversation is running. | Called, Call Back |
+| `known` | A name and a number, not a stranger company. | New, or anything unrecognised |
+| `cold` | You know no one here. | *(no leads at that employer)* |
+
+Each row also carries `known_leads`, `declined_leads`, `lead_statuses`, and
+`warmest_lead` — id, name and status — so the row can link straight to the
+person rather than making you search for them.
+
+Employers are matched with the same normaliser the WARN × 5500 join uses, so
+`Beacon Materials Corp` on the notice finds `Beacon Materials Corporation` on
+your list.
+
+**A lead who has said no does not make a door warm.** Anyone marked *Not
+Interested* or *Has Advisor* is left out of the warmth judgement, for the same
+reason `signals.py` skips them. They are still counted in `declined_leads` and
+returned, because *"the three people I know there all have advisors"* is worth
+seeing **before** you spend a week on that employer, not after.
+
+### Ordering
+
+`sort` is `warmth` by default on this route and `dollars` on the GET route,
+which is unchanged. Warmth ordering keeps dollars as the tie-break, so within a
+band the bigger event still wins:
+
+```
+set      Beacon Materials      $30M   meeting booked with Margaret Halvorsen
+engaged  Northwind Robotics    $40M   Daniel Okonkwo, called
+cold     Cascade Health        $50M   nobody
+```
+
+The $50M event is the biggest and it is last, because there is no way into it
+yet. That inversion is the entire point of the route — work the open doors
+first, and let the cold giant wait until it is the best thing left.

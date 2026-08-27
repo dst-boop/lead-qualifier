@@ -81,6 +81,7 @@ FORM5500_CSV_IN_ZIP = os.environ.get("FORM5500_CSV_IN_ZIP", "f_5500")
 FORM5500_SCHEDULE_URLS = [u.strip() for u in
                           os.environ.get("FORM5500_SCHEDULE_URLS", "").split(",") if u.strip()]
 SOURCE_STATES = os.environ.get("SOURCE_STATES", "")     # e.g. "NY,NJ,CT,PA"
+SOURCE_COUNTIES = os.environ.get("SOURCE_COUNTIES", "")  # e.g. "Nassau,Suffolk"
 SOURCE_MIN_WORKERS = int(os.environ.get("SOURCE_MIN_WORKERS", "25"))
 FS_OPPS = os.environ.get("FIRESTORE_OPPS_COLLECTION", "opportunities")
 
@@ -2404,6 +2405,12 @@ def _source_states() -> set:
     return {s.strip().upper() for s in SOURCE_STATES.split(",") if s.strip()}
 
 
+def _source_counties() -> set:
+    # Normalised here so "Nassau County" in the env var matches "Nassau" in a
+    # feed, and the comparison inside build_opportunities stays a set lookup.
+    return {prospecting.norm_county(c) for c in SOURCE_COUNTIES.split(",") if c.strip()}
+
+
 def _warn_feeds() -> list:
     if not WARN_FEEDS.strip():
         return []
@@ -2606,7 +2613,8 @@ async def sources_probe(request: Request, which: str = "all"):
     column alias that needs adding.
     """
     await _active_token(request)
-    out = {"states": sorted(_source_states()), "min_workers": SOURCE_MIN_WORKERS}
+    out = {"states": sorted(_source_states()), "counties": sorted(_source_counties()),
+           "min_workers": SOURCE_MIN_WORKERS}
     if which in ("all", "warn"):
         feeds = _warn_feeds()
         out["warn"] = {"configured": len(feeds)}
@@ -2656,7 +2664,8 @@ async def sources_refresh(request: Request):
         plans = {"plans": {}, "note": f"Form 5500 unavailable: {type(e).__name__}: {str(e)[:200]}"}
     opps = prospecting.build_opportunities(
         warn["events"], plans.get("plans") or {},
-        min_workers=SOURCE_MIN_WORKERS, states=_source_states() or None)
+        min_workers=SOURCE_MIN_WORKERS, states=_source_states() or None,
+        counties=_source_counties() or None)
     await _fs_set(FS_OPPS, "latest", {
         "built_at": int(time.time()),
         "count": len(opps),
@@ -2706,9 +2715,52 @@ async def opportunities(request: Request, refresh: bool = False):
         plans = {}
     opps = prospecting.build_opportunities(
         warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
-        states=_source_states() or None)
+        states=_source_states() or None, counties=_source_counties() or None)
     return {"built_at": int(time.time()), "count": len(opps),
             "matched": sum(1 for o in opps if o["plan_matched"]),
+            "items": opps[:500], "feeds": warn["feeds"]}
+
+
+class WarmOpportunitiesRequest(BaseModel):
+    leads: list = []
+    refresh: bool = False
+    sort: str = "warmth"
+
+
+@app.post("/api/opportunities/warmth")
+async def opportunities_warmth(body: WarmOpportunitiesRequest, request: Request):
+    """The same opportunities, ranked by the way in you already have.
+
+    The leads are posted by the client rather than read server-side, for the
+    same reason /api/signals does it: it then works on the list currently open
+    whether or not it has been saved, and on a list shared by another advisor,
+    without this route re-deriving who may see what.
+
+    Nothing is fetched that the GET route would not fetch. This only asks a
+    second question of a list the advisor already has.
+    """
+    await _active_token(request)
+    warn = await _load_warn(await _drive_token_for(request), fresh=body.refresh)
+    if not warn["events"]:
+        return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
+                "feeds": warn["feeds"], "warmth": {},
+                "note": "No WARN feeds configured — see SETUP-prospecting.md."}
+    try:
+        plans = (await _load_plans(await _drive_token_for(request),
+                                   fresh=body.refresh)).get("plans") or {}
+    except Exception:
+        plans = {}
+    opps = prospecting.build_opportunities(
+        warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
+        states=_source_states() or None, counties=_source_counties() or None)
+    prospecting.annotate_warmth(opps, body.leads)
+    prospecting.sort_opportunities(opps, by=body.sort)
+    tally = {}
+    for o in opps:
+        tally[o["warmth"]] = tally.get(o["warmth"], 0) + 1
+    return {"built_at": int(time.time()), "count": len(opps),
+            "matched": sum(1 for o in opps if o["plan_matched"]),
+            "warmth": tally, "sort": body.sort,
             "items": opps[:500], "feeds": warn["feeds"]}
 
 
@@ -4538,7 +4590,8 @@ async def get_signals(body: SignalsRequest, request: Request):
             except Exception:
                 pass
             opps = prospecting.build_opportunities(
-                got["events"], plans, min_workers=1, states=_source_states() or None)
+                got["events"], plans, min_workers=1,
+                states=_source_states() or None, counties=_source_counties() or None)
             warn_index = signals.index_warn(opps)
             warn_ran = True
         except Exception as e:
