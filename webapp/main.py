@@ -210,6 +210,20 @@ FS_LISTS = os.environ.get("FIRESTORE_LISTS_COLLECTION", "lead_lists")
 # Lists shared with you, keyed by your email: a reverse index, because
 # Firestore cannot ask "which of everyone's lists name me" without one.
 FS_SHARED = os.environ.get("FIRESTORE_SHARED_COLLECTION", "lead_shares")
+# Everyone who has ever signed in, so an admin can be shown the firm rather
+# than only the people who happen to have shared something with them. Firestore
+# cannot answer "who exists" without an index somebody wrote.
+FS_DIRECTORY = os.environ.get("FIRESTORE_DIRECTORY_COLLECTION", "directory")
+# Admins are named in the environment, not promoted inside the app. An admin
+# can read and reclaim every lead in the firm, so the grant lives where only a
+# deploy can change it: a compromised account cannot promote itself, and there
+# is no bootstrap problem where the first admin has to be created by hand.
+ADMIN_EMAILS = os.environ.get("ADMIN_EMAILS", "")
+_ADMINS = {e.strip().lower() for e in ADMIN_EMAILS.split(",") if e.strip()}
+
+
+def _is_admin(email: str) -> bool:
+    return bool(email) and email.lower() in _ADMINS
 # One document per advisor per day of counted activity. Aggregating the team
 # from everyone's lead documents would mean reading every lead in the firm to
 # draw a leaderboard; a daily counter is two numbers and a date.
@@ -221,6 +235,7 @@ TEAM_BY_DOMAIN = os.environ.get("TEAM_BY_DOMAIN", "1") not in ("0", "false", "no
 
 _MEM_SESSIONS: dict[str, dict] = {}
 _MEM_STATE: dict[str, dict] = {}
+_MEM_DIRECTORY: dict[str, dict] = {}
 _fs_client = None
 _fs_failed = False
 
@@ -1312,7 +1327,8 @@ async def me(request: Request):
                 "linked_microsoft": bool(session.get("ms_token_cache")),
                 "zi_connected": bool(session.get("zoominfo")),
                 "zi_mcp_connected": bool(_zi_mcp_token(session)),
-                "storage": storage, "encryption": encryption, "credits": credits}
+                "storage": storage, "encryption": encryption, "credits": credits,
+                "is_admin": _is_admin(email)}
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -1326,7 +1342,8 @@ async def me(request: Request):
                         "providers": providers, "features": features,
                         "zi_connected": bool(session.get("zoominfo")),
                         "zi_mcp_connected": bool(_zi_mcp_token(session)),
-                        "storage": storage, "encryption": encryption, "credits": credits}
+                        "storage": storage, "encryption": encryption, "credits": credits,
+                        "is_admin": _is_admin(d.get("email") or "")}
     token = _ms_token(session)
     if token:
         async with httpx.AsyncClient(timeout=15) as cx:
@@ -1342,7 +1359,8 @@ async def me(request: Request):
                     "linked_google": bool(session.get("google")),
                     "linked_microsoft": bool(session.get("ms_token_cache")),
                     "zi_connected": bool(session.get("zoominfo")),
-                    "storage": storage, "encryption": encryption, "credits": credits}
+                    "storage": storage, "encryption": encryption, "credits": credits,
+                    "is_admin": _is_admin(d.get("mail") or d.get("userPrincipalName") or "")}
     return JSONResponse({"signed_in": False, "providers": providers,
                          "features": features, "storage": storage,
                          "encryption": encryption})
@@ -3868,6 +3886,44 @@ async def _write_index(email: str, settings: dict, lists: list, legacy: list) ->
                "saved_at": time.time(), "lead_count": sum(l.get("count", 0) for l in lists)}
     if not await _fs_set(FS_STATE, email, payload):
         _MEM_STATE[email] = payload
+    await _touch_directory(email, lists)
+
+
+async def _touch_directory(email: str, lists: list) -> None:
+    """Record that this advisor exists, and how much they are carrying.
+
+    Written here rather than at sign-in because this is the moment the counts
+    change, and the counts are what an admin actually reads. A first page load
+    creates the default list, so everyone lands in the directory on day one.
+    """
+    if not email:
+        return
+    row = {"email": email.lower(), "lists": len(lists),
+           "leads": sum(int(l.get("count") or 0) for l in lists),
+           "last_seen": time.time()}
+    prior = await _fs_get(FS_DIRECTORY, email.lower()) or _MEM_DIRECTORY.get(email.lower()) or {}
+    row["first_seen"] = prior.get("first_seen") or row["last_seen"]
+    if not await _fs_set(FS_DIRECTORY, email.lower(), row):
+        _MEM_DIRECTORY[email.lower()] = row
+
+
+async def _directory() -> list:
+    """Every advisor, newest activity first. Firestore when it is there."""
+    db = _firestore()
+    rows = []
+    if db is not None:
+        try:
+            async for snap in db.collection(FS_DIRECTORY).stream():
+                d = snap.to_dict() or {}
+                if d.get("email"):
+                    rows.append(d)
+        except Exception as e:
+            print(f"[storage] directory read failed, using memory: {e}")
+            rows = []
+    if not rows:
+        rows = list(_MEM_DIRECTORY.values())
+    rows.sort(key=lambda r: r.get("last_seen") or 0, reverse=True)
+    return rows
 
 
 async def _read_list(email: str, list_id: str) -> list:
@@ -3959,6 +4015,12 @@ async def _access(email: str, owner: str, list_id: str) -> str:
     """'owner', 'editor', 'viewer' or '' for the caller on one list."""
     if owner == email:
         return "owner"
+    # An admin can open and work any list in the firm. Deliberately "editor"
+    # and not "owner": ownership carries the right to delete and to re-share,
+    # and an admin who wants a list for good takes it explicitly, by reclaiming
+    # it, which leaves a record on the list itself.
+    if _is_admin(email):
+        return "editor"
     for r in await _shared_index(email):
         if r.get("owner") == owner and r.get("id") == list_id:
             return r.get("role") or "viewer"
@@ -4193,6 +4255,135 @@ async def delete_list(list_id: str, request: Request):
     for sh in (gone.get("shares") or []):
         await _revoke(email, list_id, sh.get("email") or "")
     return {"ok": True, "lists": (await get_lists(request))["lists"]}
+
+
+# ------------------------- the admin view -------------------------
+#
+# "Both Advisors & Admin can add, upload, and share leads. The admin must have
+# access to all leads and the ability to reclaim all leads."
+#
+# So an admin is an advisor with two extra powers, not a different application:
+# they see the whole firm, and they can move any list to themselves. Everything
+# else — building, importing, enriching, sharing — they do exactly as anyone
+# else does, with their own lists.
+#
+# Reclaiming is a MOVE, not a copy. A copy would leave the advisor holding a
+# second, diverging set of the same people, which is how two advisors end up
+# calling one prospect. The list arrives whole: leads, enrichment, activity
+# history, and a note on the list saying where it came from and when.
+
+def _admin_only(email: str) -> None:
+    if not _is_admin(email):
+        raise HTTPException(status_code=403, detail="Admins only.")
+
+
+class TransferRequest(BaseModel):
+    owner: str = ""          # who holds it now ("" = the admin themselves)
+    list_id: str = ""        # "" with an owner means every list they have
+    to: str = ""             # who gets it ("" = the admin themselves)
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request):
+    """Every advisor and every list in the firm, with what each is carrying."""
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _admin_only(email)
+    advisors, lists = [], []
+    for row in await _directory():
+        who = row["email"]
+        idx = await _read_index(who)
+        theirs = idx["lists"]
+        advisors.append({"email": who, "lists": len(theirs),
+                         "leads": sum(int(l.get("count") or 0) for l in theirs),
+                         "first_seen": row.get("first_seen"),
+                         "last_seen": row.get("last_seen"),
+                         "is_admin": _is_admin(who)})
+        for l in theirs:
+            lists.append({"ref": f"{who}~{l['id']}", "owner": who,
+                          "id": l["id"], "name": l.get("name") or "Untitled",
+                          "count": int(l.get("count") or 0),
+                          "saved_at": l.get("saved_at"),
+                          "created_at": l.get("created_at"),
+                          "shares": [sh.get("email") for sh in (l.get("shares") or [])],
+                          "reclaimed_from": l.get("reclaimed_from") or ""})
+    lists.sort(key=lambda l: l["count"], reverse=True)
+    return {"you": email, "advisors": advisors, "lists": lists,
+            "total_leads": sum(a["leads"] for a in advisors),
+            "backend": storage_backend()}
+
+
+async def _transfer_one(frm: str, list_id: str, to: str) -> dict:
+    """Move one list, whole, from one advisor to another.
+
+    The leads document is rewritten under the new owner and deleted from the
+    old one, every share on it is revoked, and the entry records where it came
+    from. Anything less than all of that leaves a copy somewhere, and a second
+    copy of a call list is how two advisors phone the same person.
+    """
+    src = await _read_index(frm)
+    entry = next((l for l in src["lists"] if l["id"] == list_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"{frm} has no list {list_id}.")
+    leads = await _read_list(frm, list_id)
+
+    dst = await _ensure_lists(to)
+    new_id = list_id
+    if any(l["id"] == new_id for l in dst["lists"]):
+        new_id = "l" + secrets.token_urlsafe(9).replace("-", "_")
+    moved = {"id": new_id, "name": entry.get("name") or "Reclaimed list",
+             "created_at": entry.get("created_at") or time.time(),
+             "count": len(leads), "saved_at": time.time(),
+             "reclaimed_from": frm, "reclaimed_at": time.time()}
+    await _write_list(to, new_id, leads)
+    await _write_index(to, dst["settings"], dst["lists"] + [moved], dst["legacy_leads"])
+
+    for sh in (entry.get("shares") or []):
+        await _revoke(frm, list_id, sh.get("email") or "")
+    remaining = [l for l in src["lists"] if l["id"] != list_id]
+    await _write_index(frm, src["settings"], remaining, src["legacy_leads"])
+    key = _list_key(frm, list_id)
+    await _fs_del(FS_LISTS, key)
+    _MEM_LISTS.pop(key, None)
+    return {"from": frm, "to": to, "list": moved, "leads": len(leads)}
+
+
+@app.post("/api/admin/transfer")
+async def admin_transfer(body: TransferRequest, request: Request):
+    """Reclaim a list to the admin, or hand one out to an advisor.
+
+    One operation in two directions: reclaiming is a transfer to yourself,
+    assigning is a transfer from yourself. Naming one endpoint for both is what
+    keeps the two halves from drifting into different rules about shares and
+    counts.
+    """
+    email = await _signed_in_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    _admin_only(email)
+    frm = (body.owner or email).lower().strip()
+    to = (body.to or email).lower().strip()
+    if frm == to:
+        raise HTTPException(status_code=400,
+                            detail="That list is already there — name a different owner.")
+    if "@" not in frm or "@" not in to:
+        raise HTTPException(status_code=400, detail="Both sides need an email address.")
+
+    if body.list_id:
+        _check_list_id(body.list_id)
+        moved = [await _transfer_one(frm, body.list_id, to)]
+    else:
+        # Every list this advisor holds — the case that actually comes up, when
+        # someone leaves and their pipeline has to keep being worked.
+        src = await _read_index(frm)
+        if not src["lists"]:
+            raise HTTPException(status_code=404, detail=f"{frm} has no lists.")
+        moved = []
+        for l in list(src["lists"]):
+            moved.append(await _transfer_one(frm, l["id"], to))
+    return {"moved": moved, "leads": sum(m["leads"] for m in moved),
+            "overview": await admin_overview(request)}
 
 
 class SettingsSave(BaseModel):

@@ -383,6 +383,7 @@
       </div>
     </div>
     <button class="tbtn" id="btnFreeAll" onclick="enrichAllFree()" title="Every free source, in one pass: political donations and SEC insider filings from the public record, and proxy-statement ages for officers of public companies. No credits, no lookups spent. WhitePages is not included &mdash; it spends credits, so it stays a per-lead button.">Enrich all (free)</button>
+    <button class="tbtn" id="btnAdmin" style="display:none" title="Every advisor and every list in the firm \u2014 and the power to take any of them back">Admin</button>
     <button class="tbtn" id="btnTeam" title="Leaderboard and contests across your firm">Team</button>
     <button class="tbtn" id="btnExport">Export call list</button>
     <div class="menuwrap">
@@ -859,6 +860,25 @@
 </div></div>
 
 <!-- Leaderboard & contests -->
+<div class="overlay" id="mAdmin"><div class="modal" style="max-width:860px">
+  <h2>The firm&rsquo;s leads</h2>
+  <p class="hint">Every advisor and every list, including the ones nobody shared with you.
+  Reclaiming <strong>moves</strong> a list to you &mdash; leads, enrichment and call history
+  together &mdash; and removes it from the advisor. It is not a copy: two copies of one call
+  list is how two advisors phone the same person.</p>
+  <div id="adminSummary" class="hint" style="margin:10px 0"></div>
+  <h3 style="margin:14px 0 6px;font-weight:500">Advisors</h3>
+  <table class="maptable" style="table-layout:auto"><thead><tr>
+    <th>Advisor</th><th style="text-align:right">Lists</th><th style="text-align:right">Leads</th>
+    <th>Last active</th><th></th>
+  </tr></thead><tbody id="adminAdvisors"></tbody></table>
+  <h3 style="margin:16px 0 6px;font-weight:500">Lists</h3>
+  <table class="maptable" style="table-layout:auto"><thead><tr>
+    <th>List</th><th>Owner</th><th style="text-align:right">Leads</th><th>Shared with</th><th></th>
+  </tr></thead><tbody id="adminLists"></tbody></table>
+  <div class="mfoot"><button class="mbtn save" onclick="closeModal('mAdmin')">Close</button></div>
+</div></div>
+
 <div class="overlay" id="mTeam"><div class="modal" style="max-width:760px">
   <h2>Team</h2>
   <div class="mgrid" style="margin-bottom:8px">
@@ -3611,6 +3631,67 @@ document.getElementById('btnDue').addEventListener('click',()=>{
   document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
 });
 document.getElementById('lbDays').addEventListener('change',loadTeam);
+/* ---- the admin view ----
+   The button is hidden unless /api/me says so, but that is a courtesy, not the
+   control: every one of these endpoints checks the role itself, because a
+   hidden button is one devtools keystroke from being pressed. */
+let ADMIN=null;
+function adminAgo(t){
+  if(!t)return '\u2014';
+  const d=Math.floor((Date.now()/1000-t)/86400);
+  return d<=0?'today':d===1?'yesterday':d+' days ago';
+}
+async function loadAdmin(){
+  const box=document.getElementById('adminSummary');
+  box.textContent='Reading the firm\u2026';
+  try{ADMIN=await api('/api/admin/overview',null,'GET');}
+  catch(e){box.textContent='Could not read it: '+e.message;return;}
+  const a=ADMIN.advisors||[],L=ADMIN.lists||[];
+  box.innerHTML=`<strong>${ADMIN.total_leads.toLocaleString()}</strong> lead${ADMIN.total_leads===1?'':'s'} `
+    +`across <strong>${L.length}</strong> list${L.length===1?'':'s'} and <strong>${a.length}</strong> `
+    +`advisor${a.length===1?'':'s'}.`;
+  document.getElementById('adminAdvisors').innerHTML=a.map(x=>`<tr>
+    <td>${esc(x.email)}${x.is_admin?' <span class="badge">admin</span>':''}${x.email===ADMIN.you?' <span class="hint">(you)</span>':''}</td>
+    <td style="text-align:right">${x.lists}</td>
+    <td style="text-align:right">${x.leads.toLocaleString()}</td>
+    <td>${esc(adminAgo(x.last_seen))}</td>
+    <td style="text-align:right">${(x.email===ADMIN.you||!x.leads)?'':
+      `<button class="abtn" onclick="adminReclaim('${esc(x.email)}','')">Reclaim all</button>`}</td>
+  </tr>`).join('')||'<tr><td colspan="5" class="hint">Nobody yet.</td></tr>';
+  document.getElementById('adminLists').innerHTML=L.map(l=>`<tr>
+    <td>${esc(l.name)}${l.reclaimed_from?` <span class="hint">\u2014 reclaimed from ${esc(l.reclaimed_from)}</span>`:''}</td>
+    <td>${esc(l.owner)}${l.owner===ADMIN.you?' <span class="hint">(you)</span>':''}</td>
+    <td style="text-align:right">${l.count.toLocaleString()}</td>
+    <td class="hint">${l.shares.length?esc(l.shares.join(', ')):'\u2014'}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="abtn" onclick="adminOpen('${esc(l.ref)}')">Open</button>
+      ${l.owner===ADMIN.you?'':`<button class="abtn" onclick="adminReclaim('${esc(l.owner)}','${esc(l.id)}')">Reclaim</button>`}</td>
+  </tr>`).join('')||'<tr><td colspan="5" class="hint">No lists yet.</td></tr>';
+}
+window.adminOpen=async ref=>{
+  closeModal('mAdmin');
+  await switchList(ref);
+};
+window.adminReclaim=async(owner,listId)=>{
+  const one=ADMIN.lists.find(l=>l.owner===owner&&l.id===listId);
+  const all=ADMIN.lists.filter(l=>l.owner===owner);
+  const leads=listId?(one?one.count:0):all.reduce((n,l)=>n+l.count,0);
+  const what=listId?`\u201c${one?one.name:listId}\u201d`:`all ${all.length} of ${owner}\u2019s lists`;
+  if(!await appConfirm(
+    `Move ${what} to you? ${leads.toLocaleString()} lead${leads===1?'':'s'} with their `
+    +`enrichment and call history come with it, and ${owner} loses access \u2014 this is a move, `
+    +`not a copy. Anyone the list was shared with loses it too. You can hand it back afterwards.`,
+    'Reclaim leads'))return;
+  try{
+    const d=await api('/api/admin/transfer',{owner:owner,list_id:listId||''});
+    ADMIN=d.overview;await loadAdmin();
+    toast(`Reclaimed ${d.leads.toLocaleString()} lead${d.leads===1?'':'s'} from ${owner}.`);
+    // The switcher has to catch up: a reclaimed list is now one of yours, and
+    // a list you handed out has just left it.
+    try{myLists=(await api('/api/lists',null,'GET')).lists||myLists;renderLists();}catch(e){}
+  }catch(e){toast('Reclaim failed: '+e.message);}
+};
+document.getElementById('btnAdmin').addEventListener('click',()=>{openModal('mAdmin');loadAdmin();});
 document.getElementById('btnTeam').addEventListener('click',()=>{openModal('mTeam');pushStats().then(loadTeam);});
 
 /* ---- the new controls ---- */
@@ -3793,6 +3874,7 @@ async function loadMe(){
     bar.innerHTML=`<a href="#" onclick="openAuth();return false" ${A}>Sign in / create an account</a>`+
       ' \u2014 with any email, Google, or Microsoft';
   }
+  if(ME.is_admin)document.getElementById('btnAdmin').style.display='';
   // Without Drive, "Check my sheet" can only fail — so it stops being the
   // biggest button on the page and "Import a file" takes the primary slot.
   try{
