@@ -78,12 +78,22 @@ const PUB = {
   await p.waitForTimeout(600);
 
   // --- the free lookup --------------------------------------------------------
-  ck('every lead with a surname offers the free lookup', await p.evaluate(() =>
+  // The six research actions moved off the row and into the panel that opens
+  // under it: one Research button per row rather than up to eleven glyphs.
+  ck('every lead with a surname offers research', await p.evaluate(() =>
     [...document.querySelectorAll('#rows tr.lead')].every(tr =>
-      [...tr.querySelectorAll('button')].some(x => /Public records/.test(x.title)))));
-  ck('  ...and its tooltip says it is free', await p.evaluate(() =>
-    [...document.querySelectorAll('button')].find(x => /Public records/.test(x.title))
-      .title.includes('no credits')));
+      [...tr.querySelectorAll('button')].some(x => /Look this person up/.test(x.title)))));
+  ck('  ...and the public record is one of the actions inside it', await p.evaluate(() =>
+    researchActions(state.leads.find(x => x.id === 'g')).some(a => a[0] === 'freeLookup')));
+  ck('  ...listed as costing nothing', await p.evaluate(() =>
+    (researchActions(state.leads.find(x => x.id === 'g')).find(a => a[0] === 'freeLookup') || [])[3] === 'free'));
+  await p.evaluate(() => toggleDetail('g', 'research'));
+  await p.waitForTimeout(350);
+  ck('  ...and the panel says what it looks for, not just its name', await p.evaluate(() =>
+    /Political donations/.test(document.getElementById('research-g').textContent)),
+    await p.evaluate(() => (document.getElementById('research-g') || {}).textContent || 'no panel'));
+  await p.evaluate(() => toggleDetail('g'));
+  await p.waitForTimeout(250);
 
   await p.evaluate(() => freeLookup('g'));
   await p.waitForTimeout(600);

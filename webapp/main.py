@@ -2686,9 +2686,29 @@ async def opportunities(request: Request, refresh: bool = False):
             return doc
     warn = await _load_warn(await _drive_token_for(request), fresh=refresh)
     if not warn["events"]:
+        # Two different silences, and telling them apart is the whole point:
+        # nothing is configured yet, or feeds ran and found nothing. Pointing
+        # a user at a markdown file answers neither, and it was the first
+        # thing a new account saw here.
+        if not WARN_FEEDS.strip():
+            note = ("This needs at least one state's layoff-notice feed, which an admin "
+                    "sets once for the whole firm (WARN_FEEDS). Nothing else in the app "
+                    "depends on it — sourcing, enrichment and scoring all work without it.")
+        else:
+            # A feed reports either events+mapped, or an error. There is no
+            # "ok" flag to read; the absence of an error is the success.
+            ran = [f for f in warn["feeds"] if not f.get("error")]
+            broke = [f for f in warn["feeds"] if f.get("error")]
+            note = (f"{len(ran)} feed{'' if len(ran) == 1 else 's'} ran and reported no "
+                    f"notices in the window.")
+            if broke:
+                note += (" " + ", ".join(f"{f.get('id') or 'a feed'} failed "
+                                         f"({str(f.get('error') or 'no answer')[:60]})"
+                                         for f in broke[:3])
+                         + " — a feed that fails is a gap, not an all-clear.")
         return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
-                "feeds": warn["feeds"],
-                "note": "No WARN feeds configured — see SETUP-prospecting.md."}
+                "feeds": warn["feeds"], "configured": bool(WARN_FEEDS.strip()),
+                "note": note}
     try:
         plans = (await _load_plans(await _drive_token_for(request), fresh=refresh)).get("plans") or {}
     except Exception:
