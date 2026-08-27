@@ -25,7 +25,8 @@ def ck(name,cond,d=""):
     if not cond: bad+=1
 
 r=c.get("/api/lists").json()
-ck("a first read creates one list", len(r["lists"])==1 and r["lists"][0]["name"]=="My leads", r["lists"])
+ck("a first read creates one list — the master, and named as what it is",
+   len(r["lists"])==1 and r["lists"][0]["name"]=="All leads", r["lists"])
 lid=r["lists"][0]["id"]
 ck("  ...called default", lid=="default", lid)
 
@@ -58,7 +59,9 @@ ids=[l["id"] for l in c.get("/api/lists").json()["lists"]]
 for i in ids[1:]: c.delete(f"/api/lists/{i}")
 last=c.delete(f"/api/lists/{ids[0]}")
 ck("the only list cannot be deleted", last.status_code==400, last.status_code)
-ck("  ...with a reason", "rename it instead" in last.json()["detail"], last.json()["detail"])
+# The sole survivor is always the master now, so the refusal is the master's.
+ck("  ...with a reason", "master list" in last.json()["detail"]
+   or "rename it instead" in last.json()["detail"], last.json()["detail"])
 
 ck("a bad list id is refused", c.get("/api/lists/../../etc").status_code in (400,404), c.get("/api/lists/..%2F..%2Fetc").status_code)
 ck("an unknown list 404s", c.put("/api/lists/nope",json={"leads":[]}).status_code==404)
@@ -113,6 +116,26 @@ ck("saving a list returns the index the nested call built",
 ck("  ...with the new count on it, so the switcher is not stale",
    any(x.get("id") == nested and x.get("count") == 1 for x in r.json()["lists"]),
    r.json().get("lists"))
+
+# --- the master list ----------------------------------------------------------
+# "Each user should have 1 master list that all leads are on and cannot be
+# over written by accident." Server half: it exists from the first read, it is
+# marked so the client renders a fact, and it cannot be deleted no matter how
+# many other lists exist.
+r = c.get("/api/lists").json()
+master = next((l for l in r["lists"] if l["id"] == "default"), None)
+ck("the master list exists and is flagged", master and master.get("master") is True, master)
+ck("  ...and campaign lists are not flagged",
+   all(l.get("master") is False for l in r["lists"] if l["id"] != "default" and not l.get("owner")),
+   [(l["id"], l.get("master")) for l in r["lists"]])
+r = c.delete("/api/lists/default")
+ck("the master cannot be deleted, even with other lists present",
+   r.status_code == 400, r.status_code)
+ck("  ...and the refusal explains the point of it",
+   "master list" in r.json()["detail"] and "cannot be deleted" in r.json()["detail"],
+   r.json()["detail"])
+ck("  ...while a campaign list still can be",
+   c.delete(f"/api/lists/{nested}").status_code == 200)
 
 # --- signed out ---------------------------------------------------------------
 async def nobody(request): return ""

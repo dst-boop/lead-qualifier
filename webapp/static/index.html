@@ -745,9 +745,14 @@
   </div>
   <label class="fromrow" id="invFromRow" style="display:none">Send from
     <select id="invFrom"></select></label>
-  <p class="hint">The invite lands on the chosen account's calendar, so that is the address the attendee sees. Signed out: downloads an .ics for Outlook.</p>
+  <p class="hint">The invite lands on the chosen account's calendar, so that is the address the attendee sees.</p>
+  <p class="hint" style="margin-top:6px"><strong>From a work mailbox instead</strong> (Equitable, a wirehouse) &mdash; no connection, no IT approval:
+  <em>Open in work Outlook</em> pre-fills this invite in Outlook on the web, already signed in as you; press its Send and it goes out from that address
+  through the firm&rsquo;s normal pipeline. Or download the .ics and open it in desktop Outlook.</p>
   <div class="mfoot">
     <button class="mbtn" onclick="closeModal('mInvite')">Cancel</button>
+    <button class="mbtn" id="btnInvIcs" title="A standard invite file — opening it in desktop Outlook composes the invite from whatever account Outlook runs as">.ics</button>
+    <button class="mbtn" id="btnOwa" title="Opens Outlook on the web with this invite pre-filled — sends from your work address, no connection to this app needed">Open in work Outlook</button>
     <button class="mbtn save" id="btnMakeIcs">Create Outlook invite</button>
   </div>
 </div></div>
@@ -1026,6 +1031,49 @@ async function localDrop(key){
 /* Which of the user's lists is open. Held on the client only as a pointer; the
    lists themselves live on the server, one document each. */
 let activeList='', myLists=[];
+/* ---- the master list ----
+   "Each user should have 1 master list that all leads are on and cannot be
+   overwritten by accident." The list with id "default" is that list. Every
+   lead that enters the app — import, paste, sheet, ZoomInfo build, household
+   add — lands on it even when it was added to a campaign list, so a campaign
+   list can be deleted without losing anyone. Deleting a lead from a campaign
+   list never touches the master: the master is the archive. */
+let MASTER_PENDING=[];
+function landLead(L){
+  scoreLead(L);state.leads.push(L);
+  if(serverState()&&activeList&&activeList!=='default')
+    MASTER_PENDING.push(JSON.parse(JSON.stringify(L)));
+}
+async function flushToMaster(){
+  if(!MASTER_PENDING.length||!serverState())return;
+  const batch=MASTER_PENDING;MASTER_PENDING=[];
+  // Standing ON the master (a failed flush retried after switching here):
+  // writing to the server behind the page's back would be clobbered by the
+  // page's own next save. Land in state.leads instead and let the normal
+  // save carry it — one source of truth per list at a time.
+  if(activeList==='default'){
+    const seen=seenIndex();
+    const fresh=batch.filter(L=>{const k=dedupeKeys(L);
+      if(k.some(x=>seen.has(x)))return false;k.forEach(x=>seen.add(x));return true;});
+    if(fresh.length){state.leads=state.leads.concat(fresh);save();render();}
+    return;
+  }
+  try{
+    const d=await api('/api/lists/default',null,'GET');
+    const cur=d.leads||[];
+    const seen=new Set();cur.forEach(L=>dedupeKeys(L).forEach(k=>seen.add(k)));
+    const fresh=batch.filter(L=>{
+      const keys=dedupeKeys(L);
+      if(keys.some(k=>seen.has(k)))return false;
+      keys.forEach(k=>seen.add(k));return true;
+    });
+    if(fresh.length)await api('/api/lists/default',{leads:cur.concat(fresh)},'PUT');
+  }catch(e){
+    // Not lost, just not landed yet: the next save retries them.
+    MASTER_PENDING=batch.concat(MASTER_PENDING);
+    console.error('master capture failed',e);
+  }
+}
 function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
   const payload=JSON.stringify({settings:state.settings,leads:state.leads,listId:activeList});
   // Always keep the local copy — it is the offline fallback and the thing that
@@ -1037,6 +1085,7 @@ function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
         const r=await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
         myLists=r.lists||myLists;renderLists();
         await api('/api/settings',{settings:state.settings},'PUT');
+        await flushToMaster();
       }else{
         await api('/api/state',{settings:state.settings,leads:state.leads},'PUT');
       }
@@ -1826,7 +1875,7 @@ function importRows(rows,map,batch){
     const keys=dedupeKeys(L);
     if(keys.some(k=>seen.has(k))){dup++;return;}
     keys.forEach(k=>seen.add(k));
-    scoreLead(L); state.leads.push(L); added++;
+    landLead(L); added++;
   });
   return {added,dup,blank};
 }
@@ -2157,7 +2206,7 @@ document.getElementById('btnBuild').addEventListener('click',async()=>{
       if(!L.firstName&&!L.lastName)return;
       const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
       if(L.contactId&&seen.has(dk)){dup++;return;}
-      seen.add(dk);scoreLead(L);state.leads.push(L);added++;
+      seen.add(dk);landLead(L);added++;
     });
     save();render();
     st.textContent=`Added ${added} leads${dup?`, skipped ${dup} duplicates`:''}${total?` — ${total} total match your filters`:''}. Scores marked ~ until enriched. Next: select and enrich, or bump the page number for more.`;
@@ -2184,7 +2233,7 @@ async function runScsBuild(btn,st){
       L.campaign='scs';
       const dk=(L.contactId||'')+'|'+(L.email||'').toLowerCase();
       if(L.contactId&&seen.has(dk)){dup++;return;}
-      seen.add(dk);scoreLead(L);state.leads.push(L);added++;
+      seen.add(dk);landLead(L);added++;
       if(L.employer)employers[L.employer]=(employers[L.employer]||0)+1;
     });
     save();render();
@@ -2994,6 +3043,50 @@ window.openInvite=id=>{inviteFor=id;const L=byId(id);
   document.getElementById('btnMakeIcs').textContent=
     (window.ME&&ME.signed_in)?'Send invite':'Download .ics for Outlook';
   openModal('mInvite');};
+function inviteDraft(){
+  const L=byId(inviteFor);if(!L)return null;
+  const s=state.settings;
+  const dt=new Date(document.getElementById('invDate').value+'T'+document.getElementById('invTime').value);
+  if(isNaN(dt)){toast('Pick a date and time.');return null;}
+  const dur=+document.getElementById('invDur').value||30;
+  const merge=str=>(''+str).split('{firstName}').join(L.firstName).split('{lastName}').join(L.lastName).split('{yourName}').join(s.orgName||'your advisor');
+  return {L,dt,end:new Date(dt.getTime()+dur*60000),subj:merge(s.subj),body:merge(s.body)};
+}
+/* The Equitable answer that needs nobody's permission: Outlook on the web,
+   already signed in as the advisor, with the invite pre-filled. Their press of
+   Send is the authentication — no OAuth, no Azure app, no tenant admin. The
+   calendar-only OAuth route stays for tenants that allow it; this one works
+   even where IT approves nothing. */
+document.getElementById('btnOwa').addEventListener('click',()=>{
+  const d=inviteDraft();if(!d)return;
+  const iso=x=>x.toISOString();
+  const u='https://outlook.office.com/calendar/deeplink/compose?'+
+    new URLSearchParams({path:'/calendar/action/compose',rru:'addevent',
+      subject:d.subj,body:d.body,startdt:iso(d.dt),enddt:iso(d.end),
+      to:d.L.email}).toString();
+  window.open(u,'_blank');
+  logAct(inviteFor,'invite','Prepared in work Outlook for '+d.dt.toLocaleString());
+  closeModal('mInvite');
+  toast('Outlook opened with the invite filled in — press Send there and it goes out from your work address.');
+});
+function inviteIcs(d){
+  const escI=t=>(''+t).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
+  const fmt=x=>x.getFullYear()+pad(x.getMonth()+1)+pad(x.getDate())+'T'+pad(x.getHours())+pad(x.getMinutes())+'00';
+  const s=state.settings;
+  return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//LeadQualifier//EN','METHOD:REQUEST','BEGIN:VEVENT',
+    'UID:'+d.L.id+'-'+Date.now()+'@leadqualifier',
+    'DTSTAMP:'+fmt(new Date()),'DTSTART:'+fmt(d.dt),'DTEND:'+fmt(d.end),
+    'SUMMARY:'+escI(d.subj),'DESCRIPTION:'+escI(d.body),
+    (s.orgEmail?'ORGANIZER;CN='+escI(s.orgName||s.orgEmail)+':mailto:'+s.orgEmail:''),
+    'ATTENDEE;CN='+escI(d.L.firstName+' '+d.L.lastName)+';RSVP=TRUE:mailto:'+d.L.email,
+    'STATUS:CONFIRMED','END:VEVENT','END:VCALENDAR'].filter(Boolean).join('\r\n');
+}
+document.getElementById('btnInvIcs').addEventListener('click',()=>{
+  const d=inviteDraft();if(!d)return;
+  dl(new Blob([inviteIcs(d)],{type:'text/calendar'}),`Invite - ${d.L.firstName} ${d.L.lastName}.ics`);
+  logAct(inviteFor,'invite','.ics for '+d.dt.toLocaleString());
+  closeModal('mInvite');toast('Invite created — open the .ics and Outlook composes it from your work account.');
+});
 document.getElementById('btnMakeIcs').addEventListener('click',async()=>{
   const L=byId(inviteFor);if(!L)return;
   const s=state.settings;
@@ -3297,7 +3390,10 @@ document.getElementById('jsonFile').addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;const r=new FileReader();
   r.onload=async()=>{try{const s=JSON.parse(r.result);
     if(!s.leads||!s.settings)throw 0;
-    if(!await appConfirm(`Restore ${s.leads.length} leads? This replaces what's currently loaded.`,'Restore backup'))return;
+    const ontoMaster=serverState()&&activeList==='default';
+    if(!await appConfirm(ontoMaster
+      ?`Restore ${s.leads.length} leads? They are ADDED to your master list — nothing already on it is replaced or removed.`
+      :`Restore ${s.leads.length} leads? This replaces what's currently loaded.`,'Restore backup'))return;
     // Restored lists can predate fields the table now assumes. status in
   // particular is read with .replace() during render, so a list saved before it
   // existed takes the whole table down on load rather than degrading.
@@ -3306,6 +3402,16 @@ document.getElementById('jsonFile').addEventListener('change',e=>{
     if(!L.status)L.status='New';
     if(!L.id)L.id='r'+Math.random().toString(36).slice(2,10);
   });
+    if(ontoMaster){
+      const seen=seenIndex();
+      const fresh=s.leads.filter(L=>{const k=dedupeKeys(L);
+        if(k.some(x=>seen.has(x)))return false;k.forEach(x=>seen.add(x));return true;});
+      state.settings={...DEFAULTS,...s.settings};
+      state.leads=state.leads.concat(fresh);
+      rescoreAll();save();render();
+      toast(`Backup merged — ${fresh.length} added, ${s.leads.length-fresh.length} already here.`);
+      return;
+    }
     state={settings:{...DEFAULTS,...s.settings},leads:s.leads};rescoreAll();save();render();toast('Backup restored.');
   }catch(x){toast('That file is not a valid Lead Qualifier backup.');}finally{e.target.value='';}};
   r.readAsText(f);});
@@ -3385,7 +3491,7 @@ function renderLists(){
   document.getElementById('listRows').innerHTML=myLists.map(l=>
     `<button class="listrow ${l.id===activeList?'on':''}" onclick="switchList('${esc(l.id)}')">`
     +`<span class="tick">${l.id===activeList?'✓':''}</span>`
-    +`<span>${esc(l.name)}${l.owner?`<br><span class="hint">shared by ${esc(l.owner)}${l.role==='viewer'?' · view only':''}</span>`:''}</span>`
+    +`<span>${esc(l.name)}${l.master?' <span class="hint">· master</span>':''}${l.owner?`<br><span class="hint">shared by ${esc(l.owner)}${l.role==='viewer'?' · view only':''}</span>`:''}</span>`
     +`<span class="lc">${l.count||0}</span></button>`).join('');
   // A list someone shared with you is not yours to rename, duplicate-in-place
   // or delete. Leaving it is the equivalent action, and it is a different verb.
@@ -3394,6 +3500,11 @@ function renderLists(){
   const del=document.getElementById('btnDeleteList');
   del.textContent=own?'Delete this list':'Leave this shared list';
   del.disabled=own&&myLists.filter(l=>!l.owner).length<2;
+  // The master holds every lead ever added; the server refuses to delete it
+  // and the button says so instead of offering a press that can only fail.
+  if(own&&activeList==='default'){del.disabled=true;
+    del.title='This is your master list — every lead you have added lives here. Campaign lists are the deletable kind.';}
+  else del.title='';
 }
 window.switchList=async id=>{
   if(id===activeList)return;
@@ -3402,6 +3513,10 @@ window.switchList=async id=>{
   clearTimeout(_pt);
   try{
     if(activeList)await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
+    // Captures queued on the outgoing list must land before it is left behind:
+    // switching bypasses save(), and a master capture that waits for "the next
+    // edit" waits forever if the user closes the tab first.
+    await flushToMaster();
     const d=await api('/api/lists/'+encodeURIComponent(id),null,'GET');
     activeList=id;
     const k=lastListKey();
@@ -4196,7 +4311,7 @@ window.addHousehold=id=>{
     title:'',employer:'',email:'',status:'New',
     notes:`Household member of ${(L.firstName+' '+L.lastName).trim()} — holds ${h.phone}. Not from the ICP pull; qualify before calling.`,
     jobHopper:false,ageVerified:false,activity:[],createdAt:Date.now(),updatedAt:Date.now()};
-  scoreLead(N);state.leads.push(N);
+  landLead(N);
   logAct(id,'household',h.name+' added as a lead');
   save();render();toast(h.name+' added — unscored until you fill in their details.');
 };

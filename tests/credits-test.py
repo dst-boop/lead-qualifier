@@ -50,6 +50,11 @@ async def userinfo():
 @stub.get("/v2/person")
 async def person(request: Request):
     HITS["n"] += 1
+    # Slow answer for one number, so two callers can genuinely be in the air
+    # at once — the single-flight test needs a real window, not a lucky race.
+    if request.query_params.get("phone") == "2065559999":
+        import asyncio as _a
+        await _a.sleep(0.5)
     return {"results": [{"id": "p1", "match_score": 90,
                          "name": "Janet Melter", "age": 61,
                          "current_addresses": [{"city": "Kent", "state_code": "WA"}]}]}
@@ -315,6 +320,34 @@ block = asyncio.run(main._credit_block(""))
 ck("the panel never shows more left than the budget it is measured against",
    block["whitepages"]["yours_left"] <= block["whitepages"]["budget"],
    block["whitepages"])
+
+# --- two identical questions in the air bill once ------------------------------
+# A double-click, or two advisors pressing verify on the same lead in the same
+# second: both miss the cache, and before single-flight both paid. The second
+# caller now waits for the first answer instead of buying its own copy.
+STORE.clear()
+main._WP_CACHE.clear()
+before_hits, spent0 = HITS["n"], 0
+
+
+async def _race():
+    return await asyncio.gather(
+        main._wp_get("phone", {"phone": "2065559999"}, who="dan@fpa.com"),
+        main._wp_get("phone", {"phone": "2065559999"}, who="dan@fpa.com"))
+
+
+got = asyncio.run(_race())
+ck("both concurrent callers get the answer",
+   all(g and g.get("results") for g in got), [bool(g) for g in got])
+ck("  ...the vendor was asked ONCE", HITS["n"] == before_hits + 1, HITS["n"] - before_hits)
+ck("  ...and one credit was spent, not two",
+   asyncio.run(main._ledger_read("dan@fpa.com"))["wp"] == 1,
+   asyncio.run(main._ledger_read("dan@fpa.com")))
+ck("  ...a later identical call is a plain cache hit",
+   asyncio.run(main._wp_get("phone", {"phone": "2065559999"}, who="dan@fpa.com")) is not None
+   and HITS["n"] == before_hits + 1, HITS["n"] - before_hits)
+ck("  ...and the in-flight table is empty afterwards — no leaked keys",
+   main._WP_INFLIGHT == {}, main._WP_INFLIGHT)
 
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")

@@ -1754,6 +1754,37 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
         if found:
             WP_SPEND["served_from_cache"] += 1
             return value
+        # Single-flight: two identical questions in the air at once — a
+        # double-click, or two advisors on the same lead — both miss the
+        # cache and both bill. The second caller waits for the first answer
+        # instead of buying its own copy.
+        if key in _WP_INFLIGHT:
+            value = await asyncio.shield(_WP_INFLIGHT[key])
+            WP_SPEND["served_from_cache"] += 1
+            return value
+        fut = asyncio.get_running_loop().create_future()
+        _WP_INFLIGHT[key] = fut
+        try:
+            value = await _wp_fetch(kind, params, key, who)
+            if not fut.done():
+                fut.set_result(value)
+            return value
+        except BaseException as e:
+            # A failure is not an answer: waiters re-raise rather than being
+            # handed a corpse, and the key is freed for the next attempt.
+            if not fut.done():
+                fut.set_exception(e)
+            raise
+        finally:
+            _WP_INFLIGHT.pop(key, None)
+    return await _wp_fetch(kind, params, key, who)
+
+
+_WP_INFLIGHT: dict = {}
+
+
+async def _wp_fetch(kind: str, params: dict, key: str, who: str = ""):
+    """The half of _wp_get that actually spends a credit."""
 
     # The allowance is checked here, at the one place a credit is actually
     # spent, so every caller is covered by construction and none of them has to
@@ -4114,7 +4145,11 @@ async def _ensure_lists(email: str) -> dict:
     if idx["lists"]:
         return idx
     legacy = idx["legacy_leads"]
-    first = {"id": "default", "name": "My leads", "created_at": time.time(),
+    # id "default" IS the master list. Every lead that enters the app lands on
+    # it (the client appends imports made into campaign lists), it cannot be
+    # deleted, and a restore merges into it instead of replacing it. Existing
+    # users keep whatever they renamed theirs to; the id is the identity.
+    first = {"id": "default", "name": "All leads", "created_at": time.time(),
              "count": len(legacy)}
     if legacy:
         await _write_list(email, "default", legacy)
@@ -4207,7 +4242,8 @@ class ShareRequest(BaseModel):
 @app.get("/api/lists")
 async def get_lists(request: Request, email: str = Depends(signed_in)):
     idx = await _ensure_lists(email)
-    mine = [dict(l, owner="", role="owner") for l in idx["lists"]]
+    mine = [dict(l, owner="", role="owner", master=(l["id"] == "default"))
+            for l in idx["lists"]]
     # Lists other advisors have shared, addressed as owner~id so the two kinds
     # can live in one switcher without their ids colliding.
     shared = []
@@ -4376,6 +4412,12 @@ async def delete_list(list_id: str, request: Request, email: str = Depends(signe
             status_code=403,
             detail=f"That list belongs to {owner}. Remove your own access instead of deleting it.")
     _check_list_id(list_id)
+    if list_id == "default":
+        raise HTTPException(
+            status_code=400,
+            detail="That is your master list — every lead you have ever added lives "
+                   "on it, which is exactly why it cannot be deleted. Campaign lists "
+                   "are the deletable kind.")
     idx = await _ensure_lists(email)
     if len(idx["lists"]) <= 1:
         raise HTTPException(status_code=400, detail="This is your only list — rename it instead of deleting it.")
