@@ -60,6 +60,13 @@
   .menuwrap{position:relative}
   .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);
         border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:230px;z-index:60;padding:5px}
+  /* Anchored to its trigger's right edge, which is right for a button near the
+     right of the window and wrong for one near the left: the panel opens
+     leftward into nothing. "Other ways" is fine until the button row wraps and
+     moves it to the card's left edge, at which point the menu lands 98px off
+     the screen. Measured and flipped on open rather than authored per menu, so
+     the next menu added cannot get it wrong. */
+  .menu.flip{right:auto;left:0}
   .menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 11px;
         font-size:.85rem;color:var(--ink);border-radius:4px}
   .menu button:hover{background:var(--brass-soft)}
@@ -3436,15 +3443,7 @@ document.getElementById('btnDeleteList').addEventListener('click',async()=>{
     myLists=r.lists;activeList='';await switchList(myLists[0].id);}
   catch(e){toast('Could not delete: '+e.message);}
 });
-(function(){
-  const b=document.getElementById('btnLists'), m=document.getElementById('listMenu');
-  const close=()=>{m.hidden=true;b.setAttribute('aria-expanded','false');};
-  b.addEventListener('click',e=>{e.stopPropagation();
-    m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));});
-  m.addEventListener('click',()=>setTimeout(close,0));
-  document.addEventListener('click',close);
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
-})();
+wireMenu('btnLists','listMenu');
 
 /* ---- free enrichment: what the employer's plan is worth ----
    The Form 5500 file was already being fetched to price WARN employers. The
@@ -3794,7 +3793,12 @@ function wireMenu(btnId,menuId){
   if(!b||!m)return;
   const close=()=>{m.hidden=true;b.setAttribute('aria-expanded','false');};
   b.addEventListener('click',e=>{e.stopPropagation();
-    m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));});
+    m.hidden=!m.hidden;b.setAttribute('aria-expanded',String(!m.hidden));
+    if(!m.hidden){
+      // Measured after showing: a hidden element has no box to measure.
+      m.classList.remove('flip');
+      if(m.getBoundingClientRect().left<8)m.classList.add('flip');
+    }});
   m.addEventListener('click',()=>setTimeout(close,0));
   document.addEventListener('click',close);
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});

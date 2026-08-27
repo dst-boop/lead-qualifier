@@ -195,6 +195,28 @@ ck("  ...and says the rest of the app does not depend on it",
    "work without it" in d.get("note", ""), d.get("note"))
 ck("  ...and flags itself as unconfigured, so the UI need not parse prose",
    d.get("configured") is False, d.get("configured"))
+
+# A variable that was typed and is doing nothing is the worst of the three
+# silences: configured from the outside, reporting no layoffs from the inside.
+# Reported live as "0 feeds ran and reported no notices", which named neither
+# the cause nor the fix.
+for bad, want in [("not json at all", "not valid JSON"),
+                  ('{"id":"nj"}', "must be a list"),
+                  ('[{"id":"nj","state":"NJ"}]', 'none of them carries a "url"')]:
+    main.WARN_FEEDS = bad
+    feeds, complaint = main._warn_feeds_checked()
+    ck(f"a WARN_FEEDS that {want[:28]} is named, not called empty",
+       feeds == [] and want in complaint, complaint[:110])
+    r = c.get("/api/opportunities", params={"refresh": "true"})
+    ck("  ...and the panel says so rather than 'no notices'",
+       want in r.json().get("note", "") and "0 feeds ran" not in r.json().get("note", ""),
+       r.json().get("note", "")[:110])
+main.WARN_FEEDS = '[{"id":"nj","state":"NJ","format":"csv","url":"' + STUB + '/warn.csv"}]'
+ck("a well-formed setting produces no complaint",
+   main._warn_feeds_checked() == ([{"id": "nj", "state": "NJ", "format": "csv",
+                                    "url": STUB + "/warn.csv"}], ""),
+   main._warn_feeds_checked()[1])
+main.WARN_FEEDS = ""          # back to the unconfigured precondition below
 r = c.post("/api/sources/refresh")
 ck("  ...and refresh refuses to overwrite with nothing",
    r.json()["stored"] == 0 and "WARN_FEEDS" in r.json().get("note", ""), r.json().get("note"))
