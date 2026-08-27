@@ -52,6 +52,9 @@ const OPPS={built_at:1756000000,items:[
   ck('button shown when feeds are configured', await shown('btnOpps'));
 
   // --- opening it ------------------------------------------------------------
+  // The five ways of getting leads in became two plus a menu; Find employers
+  // is one of the three inside it.
+  await p.click('#btnAdd');await p.waitForTimeout(250);
   await p.click('#btnOpps');await p.waitForTimeout(500);
   ck('modal opens', await p.isVisible('#mOpps'));
   ck('it fetched without refresh', asked.length===1&&!/refresh/.test(asked[0]), asked[0]);

@@ -39,14 +39,38 @@ const ROW=['Ellen','Whitfield','Chief Financial Officer','Boeing','NJ','(973) 55
     await p.click('#btnDoImport');await p.waitForTimeout(700);
   };
 
+  // Research moved into the row's detail panel. openResearch() is how a user
+  // reaches these now: press Research, which opens the panel at that section.
+  const openResearch = async () => {
+    const btn = await p.$('button[onclick^="toggleDetail"][title^="Look this person up"]');
+    if (!btn) return false;
+    await btn.click(); await p.waitForTimeout(300); return true;
+  };
+  const hasAction = async fn => {
+    const opened = await openResearch();
+    const found = opened && await p.isVisible(`button[onclick^="${fn}("]`);
+    if (opened) { await p.click('button[onclick^="toggleDetail"]:not([title])')
+                    .catch(() => {}); await p.waitForTimeout(200); }
+    return !!found;
+  };
+  const doAction = async fn => {
+    await openResearch();
+    await p.click(`button[onclick^="${fn}("]`);
+    await p.waitForTimeout(600);
+    // Leave the panel closed, so a later explicit open in this suite means
+    // what it did before the actions moved in here.
+    const close = await p.$('button[onclick^="toggleDetail"]:not([title])');
+    if (close) { await close.click(); await p.waitForTimeout(250); }
+  };
+
   await load(); await importOne(ROW);
   const before=await p.evaluate(()=>({t:state.leads[0].tier,s:state.leads[0].score}));
   ck('imports without an age', before.s>0, JSON.stringify(before));
   ck('signal A starts unhit',
      await p.evaluate(()=>!state.leads[0].signals.find(x=>x.k==='A').hit));
-  ck('the SEC button is offered', await p.isVisible('button[onclick^="edgarAge"]'));
+  ck('the SEC lookup is offered', await hasAction('edgarAge'));
 
-  await p.click('button[onclick^="edgarAge"]');await p.waitForTimeout(600);
+  await doAction('edgarAge');
   ck('it sends name and employer',
      sent&&sent.last_name==='Whitfield'&&sent.employer==='Boeing', JSON.stringify(sent));
   const after=await p.evaluate(()=>({t:state.leads[0].tier,s:state.leads[0].score,
@@ -58,7 +82,7 @@ const ROW=['Ellen','Whitfield','Chief Financial Officer','Boeing','NJ','(973) 55
   // landing spot — a lead with no recent move and no prior-experience data
   // cannot reach A on age alone.
   ck('  ...tier improves', after.t==='B'&&before.t==='C', before.t+' -> '+after.t);
-  ck('the button disappears once answered', !(await p.isVisible('button[onclick^="edgarAge"]')));
+  ck('it is not offered again once answered', !(await hasAction('edgarAge')));
 
   // the evidence has to be visible, or the advisor cannot check the person
   await p.click('button[onclick^="toggleDetail"]');await p.waitForTimeout(400);
@@ -74,10 +98,10 @@ const ROW=['Ellen','Whitfield','Chief Financial Officer','Boeing','NJ','(973) 55
   edgarReply={found:false,age:null,title:'',as_of:'',quote:'',
     company:{name:'The Boeing Company'},filing:{url:'u',filed:'2026-03-15'},
     reason:'Ellen Whitfield is not listed with an age in that proxy statement.'};
-  await p.click('button[onclick^="edgarAge"]');await p.waitForTimeout(600);
+  await doAction('edgarAge');
   ck('a miss leaves the score alone',
      await p.evaluate(()=>state.leads[0].score)===before.s, '');
-  ck('  ...and does not re-offer the button', !(await p.isVisible('button[onclick^="edgarAge"]')));
+  ck('  ...and does not re-offer it', !(await hasAction('edgarAge')));
   await p.click('button[onclick^="toggleDetail"]');await p.waitForTimeout(400);
   ck('  ...but explains itself in the detail',
      /not listed with an age/.test(await p.innerHTML('#rows')));
@@ -85,17 +109,17 @@ const ROW=['Ellen','Whitfield','Chief Financial Officer','Boeing','NJ','(973) 55
   // no employer means nothing to look up
   await load();
   await importOne(['Ray','Okonjo','SVP','','ME','(207) 555-0117','r@x.com','2024-09-15']);
-  ck('no employer, no button', !(await p.isVisible('button[onclick^="edgarAge"]')));
+  ck('no employer, nothing to look up', !(await hasAction('edgarAge')));
 
   // service not configured
   await load(); who=me({features:{whitepages:true,ai_qc:true,server_state:false,drive:false,zoominfo:false,edgar:false}});
   await load(); await importOne(ROW);
-  ck('feature off, no button', !(await p.isVisible('button[onclick^="edgarAge"]')));
+  ck('feature off, not offered', !(await hasAction('edgarAge')));
 
   // an SEC error surfaces rather than vanishing
   who=me(); await load(); await importOne(ROW);
   edgarStatus=502;
-  await p.click('button[onclick^="edgarAge"]');await p.waitForTimeout(600);
+  await doAction('edgarAge');
   ck('an SEC error is shown to the user',
      /EDGAR_USER_AGENT/.test(await p.textContent('#toast')), await p.textContent('#toast'));
   ck('  ...and nothing is written to the lead',

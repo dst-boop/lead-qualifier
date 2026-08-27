@@ -90,10 +90,17 @@ const LEADS=[
   ck('the actions survive switching to SCS',
      await p.evaluate(()=>{const r=document.getElementById('btnCopySearch').getBoundingClientRect();
        return r.width>0&&r.height>0;}));
+  // "Reachable" now has a third shape: Paste a list moved into the Source
+  // stage's "Other ways" menu, so it is present and pressable but sized zero
+  // until that menu is opened. Still reachable; still not a dead form.
   ck('  ...all of them',
      await p.evaluate(()=>['btnBuild','btnEnrich','btnPaste','btnCopySearch']
-       .every(id=>{const r=document.getElementById(id).getBoundingClientRect();
-                   return r.width>0||getComputedStyle(document.getElementById(id)).display==='none';})));
+       .every(id=>{const el=document.getElementById(id);
+                   if(!el)return false;
+                   const r=el.getBoundingClientRect();
+                   return r.width>0
+                     ||getComputedStyle(el).display==='none'
+                     ||!!el.closest('.menu');})));
   ck('  ...and are not inside a campaign panel',
      await p.evaluate(()=>!document.getElementById('rolloverInner')
        .contains(document.getElementById('btnBuild'))

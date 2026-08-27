@@ -81,12 +81,15 @@ const RECORD = {
                             null, { timeout: 15000 });
     await p.waitForTimeout(600);
   };
-  // Buttons on a lead's row, by the phone glyph they carry.
+  // The phone checks moved off the row into the panel that opens under it —
+  // one Research button per row instead of up to eleven glyphs. What used to
+  // be "which glyphs does this row carry" is now "which lookups does this lead
+  // have left", which is the same question asked of the same function.
   const rowBtns = name => p.evaluate(who => {
-    const tr = [...document.querySelectorAll('#rows tr.lead')].find(t => t.textContent.includes(who));
-    if (!tr) return null;
-    return [...tr.querySelectorAll('button')].map(x => x.textContent.trim())
-      .filter(t => /☎|📞/.test(t));
+    const L = state.leads.find(x => (x.firstName + ' ' + x.lastName).includes(who));
+    if (!L) return null;
+    return researchActions(L).filter(a => a[0] === 'verifyLead' || a[0] === 'recheck')
+      .map(a => a[0]);
   }, name);
 
   await load();
@@ -99,20 +102,21 @@ const RECORD = {
      bea.length === 1, JSON.stringify(bea));
   // This is the bug in one line: it used to be zero.
   ck('  ...which is the whole point — it used to be nothing', bea.length > 0);
-  ck('  ...and it is a different button, not the first-time one',
+  ck('  ...and it is a different action, not the first-time one',
      bea[0] !== (await rowBtns('Ada'))[0], JSON.stringify([bea[0], (await rowBtns('Ada'))[0]]));
   const tip = await p.evaluate(() => {
-    const tr = [...document.querySelectorAll('#rows tr.lead')].find(t => t.textContent.includes('Bea'));
-    return [...tr.querySelectorAll('button')].map(x => x.title).find(t => /re-check|Re-check/i.test(t)) || '';
+    const L = state.leads.find(x => x.firstName === 'Bea');
+    const a = researchActions(L).find(x => x[0] === 'recheck') || [];
+    return (a[2] || '') + ' \u00b7 ' + (a[3] || '');
   });
-  ck('  ...whose tooltip says what re-running buys',
-     /date of birth/.test(tip), tip.slice(0, 80));
-  ck('  ...and that it costs a lookup', /1 lookup/.test(tip), tip.slice(-30));
+  ck('  ...which says what re-running buys',
+     /date of birth/.test(tip), tip.slice(0, 90));
+  ck('  ...and that it costs a lookup', /1 WhitePages lookup/.test(tip), tip.slice(-40));
 
-  // A lead already read in full does not need a row button; the panel has one.
-  ck('a lead whose record was already read has no row button',
+  // A lead already read in full has nothing left to buy.
+  ck('a lead whose record was already read is offered no phone lookup',
      (await rowBtns('Cara')).length === 0, JSON.stringify(await rowBtns('Cara')));
-  ck('a lead with no number has none either',
+  ck('a lead with no number is offered none either',
      (await rowBtns('Dev')).length === 0, JSON.stringify(await rowBtns('Dev')));
 
   // --- the panel offers a re-check for anything already checked ---------------
