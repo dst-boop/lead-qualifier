@@ -61,11 +61,15 @@ secret — these are public URLs — so plain env vars, no Secret Manager.
 carry its own state column. `id` is a label that shows up in the probe output so
 you can tell which feed failed.
 
-Set it as one line:
+Set it as one line — **with the `^|^` prefix**. gcloud splits `--set-env-vars`
+and `--update-env-vars` values on commas, so passing JSON without it shreds the
+value at every comma and the app then reports *"WARN_FEEDS is set but is not
+valid JSON"* in Money in motion. The `^|^` prefix tells gcloud to split on `|`
+instead, which the JSON never contains:
 
 ```bash
 gcloud run services update lead-qualifier --region us-east1 \
-  --set-env-vars 'WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
+  --update-env-vars '^|^WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
 ```
 
 ## Working one metro rather than a whole state

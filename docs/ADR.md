@@ -2324,3 +2324,58 @@ verify on the same lead in the same second — both miss the cache, both pay.
 first answer. A failure is not an answer — waiters re-raise rather than being
 handed a corpse, and the key frees for the next attempt. The test uses a
 deliberately slowed stub so the race window is real rather than lucky.
+
+## 39. The first live afternoon
+
+Dan used the app on a real list and sent back what an afternoon of actual
+work surfaces and a test plan never does. Each item below shipped together.
+
+**The counter counted the wrong thing.** "Enriching 8/926 but there are only
+400+": the free sweep's denominator summed leads-needing-public-records with
+employers-needing-proxy-reads, two phases with two different units. The label
+now names its phase — "Public record 8/412", then "Reading proxies 3/61" —
+and each phase counts only its own unit.
+
+**A field asked for a token nobody has.** The ZoomInfo panel demanded an "MCP
+token" as if everyone knows what that is. The copy now says none is required
+— Copy this search / Open in Claude work with a plain claude.ai connector —
+and the field is explicitly optional, for the rare shop whose ZoomInfo admin
+issued one.
+
+**The watched sheet was hard-coded.** "Check my sheet seems to only be tied
+to 1 sheet in my google drive" — true: the name was a constant. The Source
+card now names what it watches and offers "watch a different sheet", taking
+either a sheet name or a pasted Drive link (`state.settings.sourceSheet`).
+The Drive import button remains a one-time import; the watch is a setting.
+
+**The table fought the reader.** Wide rows scrolled the action buttons out
+of reach and only a small chevron toggled a record. The Actions column is
+now sticky at the right edge, and the whole row is a click target — clicks
+on buttons, links and inputs excepted — with Escape closing the open record
+when no dialog has claim to the key first.
+
+**An open record took the whole page.** The detail grid is capped at 58vh
+and scrolls inside itself, so the row that opened it — with its Close —
+never leaves the screen. The research column, mostly empty, no longer leads:
+the score explains first, research follows, CRM fields close.
+
+**Two WhitePages buttons for one decision.** "Check the number" and
+"Household" were separate rows because they are separate billed calls — but
+the order between them was never the user's choice to make. The number check
+is cheaper and reads back the whole person record, so one button now runs it
+first and searches by name only if the household is still empty after it.
+The re-check of an already-answered number stays where its answer is shown.
+
+**The public-records dump became a summary.** "Helpful at a high level...
+do not provide this much": the panel now leads with conclusions — total
+given, home city, "they told the FEC they are retired", insider filings mean
+equity compensation — and folds every itemised gift, address, employer and
+filing behind one disclosure. The detail still drives scoring, badges and
+CRM notes; the FEC no-solicitation notice stays visible whenever donation
+data shows.
+
+**And the configured feed that "wasn't".** §37's diagnostic worked: Dan's
+Money in motion showed *"WARN_FEEDS is set but is not valid JSON"*. The
+cause was our own setup doc — gcloud splits `--set-env-vars` on commas, so
+the documented command shredded the JSON at every comma. The doc now leads
+with the `^|^` delimiter syntax.

@@ -155,6 +155,17 @@
   thead th{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);text-align:left;padding:9px 10px;border-bottom:2px solid var(--ink);background:#fbfcfa;white-space:nowrap;position:sticky;top:0}
   tbody td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
   tbody tr.lead:hover{background:#f7f8f4}
+  /* "The screen is not easily accessible. It's hard to scroll and I cant see
+     the buttons or easily click in and out of records." Three fixes:
+     the Actions cell rides sticky on the right, so Research and the status
+     never scroll out of reach; the whole row is a click target for opening
+     the record; and the header was already sticky. The scrollbar itself sits
+     under 250 rows — pinning the working controls beats reaching it. */
+  #tbl td:last-child,#tbl th:last-child{position:sticky;right:0;background:var(--panel);
+    box-shadow:-10px 0 10px -10px rgba(5,29,75,.25)}
+  #tbl th:last-child{background:#fbfcfa;z-index:2}
+  tbody tr.lead:hover td:last-child{background:#f7f8f4}
+  tbody tr.lead{cursor:pointer}
   .mono{font-family:var(--font-mono);font-size:.8rem}
   .name{font-weight:600;white-space:nowrap}
   .subline{font-size:.75rem;color:var(--ink-faint)}
@@ -214,7 +225,11 @@
 
   /* expanded detail */
   tr.detail td{background:#fbfcf9;border-bottom:1px solid var(--line);padding:14px 16px}
-  .detail-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:18px}
+  /* "the record details took over the page and it was hard to find." The
+     panel now scrolls inside itself, capped well under the viewport, so the
+     lead's own row — with Close on it — never leaves the screen. */
+  .detail-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:18px;
+    max-height:58vh;overflow-y:auto;overscroll-behavior:contain}
   @media(max-width:860px){.detail-grid{grid-template-columns:1fr}}
   .dsec h4{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px;border-bottom:1px solid var(--line);padding-bottom:4px}
   .sigrow{display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0;gap:10px}
@@ -401,7 +416,7 @@
         <button id="btnTemplate">CSV template &amp; research prompt<small>Download a blank CSV with the column names the importer recognises, plus a prompt for a research tool</small></button>
         <button id="btnShareList">Share this list&hellip;<small>Give a colleague view or edit access to the leads you are looking at now</small></button>
         <button id="btnRecipe">Search recipe<small>The ZoomInfo filters behind this list, ready to copy or run again</small></button>
-        <button id="btnDrive" style="display:none">Pick a different sheet&hellip;<small>Point &ldquo;Check my sheet&rdquo; at another Google Sheet in your Drive</small></button>
+        <button id="btnDrive" style="display:none">Import another sheet&hellip;<small>One-time import from any Google Sheet in your Drive. To change which sheet is watched, use &ldquo;watch a different sheet&rdquo; on the Source card</small></button>
         <button id="btnQC" style="display:none">AI quality control<small>Have Claude grade each lead and flag the ones the score got wrong</small></button>
         <button id="btnAssign" style="display:none">Auto-assign to advisors<small>Split this list evenly between the advisors named in scoring rules</small></button>
         <button id="btnBackup">Back up list<small>Save every lead to a JSON file on this computer</small></button>
@@ -436,6 +451,7 @@
       </div>
     </div>
     <p class="srcnote" id="srcNote"></p>
+    <p class="hint" id="sheetLine" style="display:none;margin:2px 0 0"></p>
   </div>
 
   <div class="stage" id="stEnrich">
@@ -651,7 +667,7 @@
   <h3>ZoomInfo access</h3>
   <div class="mcol" style="display:grid;gap:10px">
     <p class="hint" style="margin:0" id="ziMcpState"></p>
-    <label>ZoomInfo MCP token<input type="password" id="sZiMcp" autocomplete="off" placeholder="paste to connect — leave blank to keep the saved one"></label>
+    <label>ZoomInfo MCP token (optional)<input type="password" id="sZiMcp" autocomplete="off" placeholder="only if your ZoomInfo admin issued one — leave blank to keep the saved one"></label>
     <p class="hint" style="margin:0">Saved to your account, not to this browser, and encrypted at rest with the same key as your Google and Microsoft tokens. It is never sent back to the page. With one saved, Build&nbsp;list and Enrich work in any browser; without one they only work while this app runs inside Claude.
     <a href="#" id="lnkZiMcpClear" style="color:var(--brass)">Remove saved token</a></p>
   </div>
@@ -1894,7 +1910,26 @@ document.getElementById('btnDoImport').addEventListener('click',()=>{
    maps any CSV, and adds whoever is new.
    Nothing is ever overwritten and nothing is deleted: a row already on the list
    is skipped, so a sheet that grows is the only thing that changes anything. */
-const SOURCE_SHEET='Wealth Management Lead Prospecting';
+const DEFAULT_SHEET='Wealth Management Lead Prospecting';
+/* "Check my sheet seems to only be tied to 1 sheet." It was — the name was a
+   constant. The watched sheet is now a setting: a name to search Drive for,
+   or a pasted Drive link/id, changeable from the Source card itself. */
+function watchedSheet(){
+  const v=(state.settings.sourceSheet||'').trim();
+  if(!v)return {name:DEFAULT_SHEET,id:'',label:DEFAULT_SHEET};
+  const id=driveIdFrom(v);
+  return id?{name:'',id:id,label:'your linked sheet'}:{name:v,id:'',label:v};
+}
+window.changeSheet=async()=>{
+  const v=await appPrompt('Which Google Sheet should “Check my sheet” watch? Type its exact name, or paste its Drive link. Leave empty to go back to the default.',
+    state.settings.sourceSheet||'');
+  if(v===null)return;
+  state.settings.sourceSheet=(v||'').trim();
+  save();
+  toast(state.settings.sourceSheet?('Now watching “'+watchedSheet().label+'”.')
+        :('Back to the default sheet — “'+DEFAULT_SHEET+'”.'));
+  syncFromSheet(true);
+};
 let sourcing=false;
 
 function sourceLine(msg,kind){
@@ -1917,12 +1952,17 @@ async function syncFromSheet(manual){
   }
   sourcing=true;
   const btn=document.getElementById('btnSync');if(btn)btn.disabled=true;
-  sourceLine('Checking '+SOURCE_SHEET+'…');
+  const want=watchedSheet();
+  sourceLine('Checking '+want.label+'…');
   try{
-    const found=await api('/api/drive/find?name='+encodeURIComponent(SOURCE_SHEET),null,'GET');
-    const file=(found.files||[])[0];
+    let file;
+    if(want.id){file={id:want.id,name:want.label};}
+    else{
+      const found=await api('/api/drive/find?name='+encodeURIComponent(want.name),null,'GET');
+      file=(found.files||[])[0];
+    }
     if(!file){
-      sourceLine('No sheet named “'+SOURCE_SHEET+'” in your Drive yet. Point your research tool at that name and it will appear here.','warn');
+      sourceLine('No sheet named “'+want.name+'” in your Drive yet. Point your research tool at that name, or use “watch a different sheet” to name one.','warn');
       return;
     }
     const d=await api('/api/drive/rows?id='+encodeURIComponent(file.id),null,'GET');
@@ -2489,6 +2529,14 @@ function renderPipeline(){
        +(last?` · sheet last checked ${new Date(last).toLocaleString()}`:'')
     : 'Nothing yet. Check your sheet, or search ZoomInfo.';
 
+  const shl=$('sheetLine');
+  if(shl){
+    const drive=!!(window.ME&&ME.features&&ME.features.drive);
+    shl.style.display=drive?'':'none';
+    if(drive)shl.innerHTML='Watching “'+esc(watchedSheet().label)
+      +'” · <a href="#" onclick="changeSheet();return false" style="color:var(--brass)">watch a different sheet</a>';
+  }
+
   // 2 — Enrich
   $('cEnrich').textContent=enrichable;
   // Not "no ZoomInfo id" any more — a name and an employer are a lookup key
@@ -2581,7 +2629,7 @@ function render(){
     const dnc=truthy(L.mobileDnc)?' <span class="badge">EMAIL FIRST</span>':'';
     const cbDue=callbackDue(L);
     const inv=L.email?'' :'disabled title="No email on file"';
-    return `<tr class="lead">
+    return `<tr class="lead" data-id="${esc(L.id)}">
       <td><span class="tierchip ${L.tier}" title="${esc(L.tier==='X'?(L.exclReason||'Excluded'):(L.enriched===false?'Provisional — enrich to firm up':''))}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${
         // An excluded lead still carries the tier it would hold once it has a
         // mobile. Showing it is the whole point of the bucket — otherwise a
@@ -2628,12 +2676,10 @@ function researchActions(L){
   const out=[];
   const zi=L.enriched===false&&L.contactId&&(window.__inClaude||ziMcpReady());
   if(zi)out.push(['enrichOne','ZoomInfo','Reveal email, phones, start date and LinkedIn','1 ZoomInfo credit']);
-  if(canVerify(L)&&!L.pv)
-    out.push(['verifyLead','Check the number','Is it valid, is it a mobile, and does the owner match the name','1 WhitePages lookup']);
-  if(canVerify(L)&&L.pv&&!fullyRead(L))
-    out.push(['recheck','Re-read the record','The same lookup, read properly: date of birth, other names, every line and every email','1 WhitePages lookup']);
-  if(!L.hd&&L.lastName&&window.ME&&ME.features&&ME.features.whitepages)
-    out.push(['enrichHome','Household','Confirmed age, home address, mobile numbers, properties owned','1-2 WhitePages lookups']);
+  const wp=wpPlan(L);
+  if(wp)out.push(['wpLookup','WhitePages',
+    'Is the number real and theirs, plus confirmed age, date of birth, home address and mobile numbers. Checks the number first; searches by name only if that leaves the household empty',
+    (wp.length===1&&wp[0]!=='home')?'1 WhitePages lookup':'1-2 WhitePages lookups']);
   if(!L.edgar&&L.lastName&&L.employer&&window.ME&&ME.features&&ME.features.edgar)
     out.push(['edgarAge','Age from the SEC','Their employer\u2019s proxy statement prints ages for officers and directors','free']);
   if(!L.pub&&L.lastName&&window.ME&&ME.signed_in)
@@ -2645,7 +2691,7 @@ function researchPanel(L){
   const acts=researchActions(L);
   if(!acts.length)return '<p class="hint">Every source this app can reach has already been asked about this lead.</p>';
   const rows=acts.map(([fn,label,what,cost])=>{
-    const call=fn==='recheck'?`verifyLead('${L.id}',true)`:`${fn}('${L.id}')`;
+    const call=`${fn}('${L.id}')`;
     const free=cost==='free';
     return `<div class="sigrow ${free?'hit':''}" style="align-items:flex-start">
       <span><strong>${esc(label)}</strong><br><span class="hint">${what}</span></span>
@@ -2660,9 +2706,6 @@ function researchPanel(L){
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
   return `<tr class="detail"><td colspan="10"><div class="detail-grid">
-    <div class="dsec" id="research-${L.id}"><h4>Look this person up</h4>${researchPanel(L)}
-      <div style="margin-top:8px"><button class="abtn li" onclick="openLI('${L.id}')" title="Copies your note, then opens their profile">Connect on LinkedIn</button></div>
-    </div>
     <div class="dsec"><h4>Why this score</h4>${sigs}
       ${L.qc?`<h4 style="margin-top:12px">AI quality control &mdash; grade ${L.qc.grade}</h4>
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
@@ -2725,6 +2768,9 @@ function detailRow(L){
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
     </div>
+    <div class="dsec" id="research-${L.id}"><h4>Look this person up</h4>${researchPanel(L)}
+      <div style="margin-top:8px"><button class="abtn li" onclick="openLI('${L.id}')" title="Copies your note, then opens their profile">Connect on LinkedIn</button></div>
+    </div>
     <div class="dsec"><h4>CRM export fields</h4>
       <div class="fieldgrid">
         <label>Street Address<input value="${esc(L.street)}" onchange="setField('${L.id}','street',this.value)"></label>
@@ -2745,6 +2791,18 @@ function detailRow(L){
   </div></td></tr>`;
 }
 window.setTier=t=>{filterTier=(filterTier===t?'':t);render();};
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&expanded&&!document.querySelector('.overlay.open')){
+    expanded=null;render();
+  }
+});
+document.getElementById('rows').addEventListener('click',e=>{
+  // A press on a control is a press on that control; anywhere else on the row
+  // opens the record, and a second press closes it. "Easily click in and out."
+  if(e.target.closest('button,a,select,input,label'))return;
+  const tr=e.target.closest('tr.lead');
+  if(tr&&tr.dataset.id)toggleDetail(tr.dataset.id);
+});
 window.toggleDetail=(id,focus)=>{
   expanded=(expanded===id?null:id);render();
   // Pressing Research opens the panel AT the research section rather than at
@@ -3438,7 +3496,7 @@ function ziMcpStateLine(){
     : ziMcpReady()
       ? '<b style="color:var(--tierA)">Connected.</b> Build &amp; enrich work in any browser.'
       : (HAS_WS ? 'Not connected — running inside Claude, so the connector on your Claude account is being used instead.'
-                : '<b style="color:var(--tierX)">Not connected.</b> Build &amp; enrich are unavailable until a token is saved or the app is opened inside Claude.');
+                : '<b>No token saved</b> — and none is required: use <b>Copy this search / Open in Claude</b> in the Build panel, which runs on your own Claude account with the ZoomInfo connector (claude.ai → Settings → Connectors → ZoomInfo, signed in with your ZoomInfo login). A token only makes the in-app Build &amp; Enrich buttons work directly; if whoever manages your ZoomInfo subscription has issued you an MCP or API token, paste it below.');
 }
 async function saveZiMcpToken(tok){
   await api('/api/zi/mcp-token',{token:tok});
@@ -4089,6 +4147,28 @@ function canVerify(L){
   return !!((L.mobilePhone||L.directPhone)&&window.ME&&ME.signed_in
             &&ME.features&&ME.features.whitepages);
 }
+/* "There should not be 2 whitepage look up buttons. It should just be 1."
+   The number check and the household search were two rows because they are
+   two billed calls — but the order between them is not a choice the user
+   should be making: the number check is cheaper AND reads back the whole
+   person record, so it always goes first, and the name search runs only if
+   the household is still empty after it. One button, spending the minimum. */
+function wpPlan(L){
+  if(!(window.ME&&ME.signed_in&&ME.features&&ME.features.whitepages))return null;
+  const steps=[];
+  if(canVerify(L)&&!L.pv)steps.push('verify');
+  else if(canVerify(L)&&L.pv&&!fullyRead(L)&&!L.hd)steps.push('recheck');
+  if(!L.hd&&L.lastName)steps.push('home');
+  return steps.length?steps:null;
+}
+window.wpLookup=async id=>{
+  const L=byId(id);if(!L)return;
+  const steps=wpPlan(L)||[];
+  if(steps[0]==='verify')await verifyLead(id);
+  else if(steps[0]==='recheck')await verifyLead(id,true);
+  const after=byId(id);
+  if(after&&!after.hd&&after.lastName&&steps.includes('home'))await enrichHome(id);
+};
 window.verifyLead=async(id,recheck)=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first \u2014 phone lookups use your WhitePages credits.');return;}
@@ -4430,16 +4510,23 @@ function pubSection(L){
   // check that never ran must not read as an all-clear.
   const off=Object.keys(src).filter(k=>src[k]&&src[k].ran===false);
   if(off.length)bits.push('<p class="hint" style="color:var(--tierB)">Not checked: '+off.map(k=>(k==='fec'?'political donations':'SEC insider filings')+' — '+esc(src[k].reason||'')).join('; ')+'</p>');
+  // "This information is helpful at a high level. Use the detail in your
+  //  analysis and labeling, but do not provide this much" \u2014 so the panel keeps
+  // the conclusions (how much, from where, retired, insider) and folds the
+  // itemised record behind one disclosure. The detail still feeds the scoring,
+  // the badges and the CRM notes exactly as before.
+  const deep=[];
   if(d.count){
+    const home=(d.places||[])[0];
     bits.push(`<div class="sigrow hit"><span>Political donations on record</span><span class="pts">${d.count} &middot; $${(d.total||0).toLocaleString()}</span></div>`);
-    if(d.first)bits.push(`<div class="hint" style="margin-top:2px">${esc(d.first.slice(0,4))}&ndash;${esc((d.latest||'').slice(0,4))}${d.biggest?' &middot; largest single gift $'+d.biggest.toLocaleString():''}. Itemised gifts start at $200 &mdash; giving at this level is discretionary money.</div>`);
-    (d.places||[]).slice(0,3).forEach(pl=>bits.push(`<div class="sigrow hit"><span>Gave from</span><span class="pts">${esc(pl.value)} &middot; last ${esc(pl.last.slice(0,7))}</span></div>`));
-    if((d.places||[]).length)bits.push('<p class="hint" style="margin-top:2px">The address on a donation is where they told a federal form they live &mdash; your list usually carries the employer\u2019s address instead.</p>');
-    if(d.streets&&d.streets.length)bits.push(`<div class="hint mono" style="margin-top:2px">${esc(d.streets[0].value)}</div><p class="hint" style="margin-top:1px">Street as filed &mdash; for confirming this is the right person, not for mailing.</p>`);
-    (d.employers||[]).slice(0,3).forEach(e=>bits.push(`<div class="sigrow ${e.value==='RETIRED'?'':'hit'}"><span>Employer, as they reported it</span><span class="pts">${esc(e.value==='RETIRED'?'\u201cretired\u201d':e.value.toLowerCase())} &middot; ${esc(e.last.slice(0,7))}</span></div>`));
-    if(d.says_retired)bits.push('<p class="hint" style="margin-top:2px;color:var(--tierA)"><strong>They told the FEC they are retired.</strong> Dated above &mdash; for a rollover conversation that is not a disqualifier, it is the event having already happened.</p>');
-    else if(d.employer_match===false)bits.push(`<p class="hint" style="margin-top:2px;color:var(--tierB)">The list says ${esc(L.employer||'')}; their donations name a different employer. Whichever is newer is the truth &mdash; and a job change is money in motion.</p>`);
-    bits.push('<p class="hint" style="margin-top:4px;color:var(--tierX)">Federal law (52 U.S.C. \u00a730111(a)(4)) forbids using FEC contributor information for commercial purposes or to solicit. Treat this as corroboration of identity, address and employment dates &mdash; not as a reason to contact anyone. See SETUP-free-sources.md.</p>');
+    bits.push(`<div class="hint" style="margin-top:2px">${esc((d.first||'').slice(0,4))}&ndash;${esc((d.latest||'').slice(0,4))}${home?' &middot; home: '+esc(home.value):''}${d.biggest?' &middot; largest gift $'+d.biggest.toLocaleString():''} &mdash; discretionary money.</div>`);
+    if(d.says_retired)bits.push('<p class="hint" style="margin-top:2px;color:var(--tierA)"><strong>They told the FEC they are retired</strong> &mdash; the rollover event has already happened.</p>');
+    else if(d.employer_match===false)bits.push(`<p class="hint" style="margin-top:2px;color:var(--tierB)">Their donations name a different employer than the list &mdash; whichever is newer is the truth, and a job change is money in motion.</p>`);
+    (d.places||[]).slice(0,3).forEach(pl=>deep.push(`<div class="sigrow hit"><span>Gave from</span><span class="pts">${esc(pl.value)} &middot; last ${esc(pl.last.slice(0,7))}</span></div>`));
+    if((d.places||[]).length)deep.push('<p class="hint" style="margin-top:2px">The address on a donation is where they told a federal form they live &mdash; your list usually carries the employer\u2019s address instead.</p>');
+    if(d.streets&&d.streets.length)deep.push(`<div class="hint mono" style="margin-top:2px">${esc(d.streets[0].value)}</div><p class="hint" style="margin-top:1px">Street as filed &mdash; for confirming this is the right person, not for mailing.</p>`);
+    (d.employers||[]).slice(0,3).forEach(e=>deep.push(`<div class="sigrow ${e.value==='RETIRED'?'':'hit'}"><span>Employer, as they reported it</span><span class="pts">${esc(e.value==='RETIRED'?'\u201cretired\u201d':e.value.toLowerCase())} &middot; ${esc(e.last.slice(0,7))}</span></div>`));
+    deep.push('<p class="hint" style="margin-top:2px">Itemised gifts start at $200 &mdash; giving at this level is discretionary money.</p>');
   } else if(src.fec&&src.fec.ran){
     bits.push('<div class="sigrow miss"><span>Political donations on record</span><span class="pts">none found</span></div>');
   }
@@ -4447,13 +4534,15 @@ function pubSection(L){
   if(ins)bits.push(`<div class="sigrow hit"><span>SEC insider, on record as</span><span class="pts">${esc(ins.name)} \u00b7 ${ins.count} filing${ins.count>1?'s':''}</span></div>`);
   if(f.length){
     if(!ins)bits.push('<div class="sigrow hit"><span>SEC insider filings</span><span class="pts">'+f.length+'</span></div>');
-    f.slice(0,4).forEach(x=>bits.push(`<div class="hint mono" style="margin-top:2px">Form ${esc(x.form)} &middot; ${esc(x.date)} &middot; ${esc(x.company)}${x.url?` &middot; <a target="_blank" rel="noopener" href="${esc(x.url)}">filing</a>`:''}</div>`));
-    bits.push('<p class="hint" style="margin-top:2px"><strong>An insider filing means equity compensation.</strong> Concentrated employer stock is its own planning conversation, before any rollover.</p>');
+    bits.push('<p class="hint" style="margin-top:2px"><strong>Insider filings mean equity compensation</strong> &mdash; concentrated employer stock is its own planning conversation, before any rollover.</p>');
+    f.slice(0,4).forEach(x=>deep.push(`<div class="hint mono" style="margin-top:2px">Form ${esc(x.form)} &middot; ${esc(x.date)} &middot; ${esc(x.company)}${x.url?` &middot; <a target="_blank" rel="noopener" href="${esc(x.url)}">filing</a>`:''}</div>`));
   } else if(!ins&&src.edgar&&src.edgar.ran){
     bits.push('<div class="sigrow miss"><span>SEC insider filings</span><span class="pts">none found</span></div>');
   }
   const lk=P.links||{};
-  bits.push(`<p class="hint" style="margin-top:4px">Check these yourself: ${lk.fec?`<a target="_blank" rel="noopener" href="${esc(lk.fec)}">FEC donor search</a>`:''}${lk.fec&&lk.edgar?' &middot; ':''}${lk.edgar?`<a target="_blank" rel="noopener" href="${esc(lk.edgar)}">EDGAR insider search</a>`:''}</p>`);
+  if(lk.fec||lk.edgar)deep.push(`<p class="hint" style="margin-top:4px">Check these yourself: ${lk.fec?`<a target="_blank" rel="noopener" href="${esc(lk.fec)}">FEC donor search</a>`:''}${lk.fec&&lk.edgar?' &middot; ':''}${lk.edgar?`<a target="_blank" rel="noopener" href="${esc(lk.edgar)}">EDGAR insider search</a>`:''}</p>`);
+  if(deep.length)bits.push(`<details style="margin-top:4px"><summary class="hint" style="cursor:pointer;color:var(--brass)">The full record &mdash; every gift, address, employer and filing</summary><div style="margin-top:4px">${deep.join('')}</div></details>`);
+  if(d.count)bits.push('<p class="hint" style="margin-top:4px;color:var(--tierX)">FEC data is corroboration only &mdash; federal law (52 U.S.C. \u00a730111(a)(4)) forbids using it for commercial purposes or to solicit. See SETUP-free-sources.md.</p>');
   return bits.join('');
 }
 /* One store for both the per-lead button and the sweep, so the two cannot
@@ -4568,9 +4657,13 @@ window.enrichAllFree=async()=>{
     `FEC_API_KEY (api.open.fec.gov/developers) lifts that to 1,000.`);
   if(!await appConfirm(bits.join(' '),'Enrich from every free source'))return;
 
-  SWEEP={stop:false,done:0,total:pubTodo.length+ageTodo.length};
+  // "It says enriching 900+ leads but there are only 400+." The denominator
+  // was pubTodo+ageTodo — two TASKS per lead — shown as if it were leads.
+  // Each phase now names itself and counts its own unit: leads for the
+  // public record, employers for the proxy reads.
+  SWEEP={stop:false,done:0,total:pubTodo.length,phase:'Public record'};
   const found={sec:0,donors:0,retired:0,fecMissed:0,ages:0,firmsRead:0,errors:0};
-  const label=()=>{if(btn)btn.textContent=`Enriching ${SWEEP.done}/${SWEEP.total} \u2014 click to stop`;};
+  const label=()=>{if(btn)btn.textContent=`${SWEEP.phase} ${SWEEP.done}/${SWEEP.total} \u2014 click to stop`;};
   label();
 
   // --- the public record ------------------------------------------------------
@@ -4592,6 +4685,7 @@ window.enrichAllFree=async()=>{
   };
   await Promise.all(Array.from({length:Math.min(3,pubTodo.length)},pubWorker));
   if(pubTodo.length){save();render();}
+  SWEEP.phase='Reading proxies';SWEEP.done=0;SWEEP.total=firms.length;label();
 
   // --- proxy ages, one read per employer --------------------------------------
   // The batch endpoint is what makes this affordable at list scale: ten leads at
@@ -4617,7 +4711,7 @@ window.enrichAllFree=async()=>{
               ((d.filing&&d.filing.filed)||'')+') \u2014 now '+L.tier+'\u00b7'+L.score);}
         });
       }catch(e){found.errors++;}
-      SWEEP.done+=group.length;label();
+      SWEEP.done++;label();     // one per employer — this phase's own unit
     }
   };
   await Promise.all(Array.from({length:Math.min(2,firms.length)},ageWorker));
