@@ -138,15 +138,15 @@ const LEADS = [
      await p.evaluate(() => !fullyRead(state.leads.find(L => L.id === 'f'))));
   // The phone glyphs moved into the row's research panel; the question is the
   // same one, asked of the function that decides what is still worth buying.
-  ck('  ...so the re-check is still offered', await p.evaluate(() =>
-    researchActions(state.leads.find(L => L.id === 'f')).some(a => a[0] === 'recheck')));
+  ck('  ...so the re-check is still offered, inside her household section', await p.evaluate(() =>
+    /Re-check this number/.test(detailRow(state.leads.find(L => L.id === 'f')))));
   ck('a record written by the current reader IS fully read',
      await p.evaluate(() => fullyRead(state.leads.find(L => L.id === 'a'))));
-  ck('  ...so no re-check is offered on it', await p.evaluate(() =>
-    !researchActions(state.leads.find(L => L.id === 'a')).some(a => a[0] === 'recheck')));
+  ck('  ...so no re-read is left to buy on it', await p.evaluate(() =>
+    !(wpPlan(state.leads.find(L => L.id === 'a')) || []).includes('recheck')));
   // She has never been phone-checked at all, so the first-time check is right.
   ck('  ...though a first check still is, since she has never had one', await p.evaluate(() =>
-    researchActions(state.leads.find(L => L.id === 'a')).some(a => a[0] === 'verifyLead')));
+    (wpPlan(state.leads.find(L => L.id === 'a')) || [])[0] === 'verify'));
   ck('a lead never checked is unaffected either way',
      await p.evaluate(() => !fullyRead(state.leads.find(L => L.id === 'd'))));
 

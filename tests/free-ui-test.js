@@ -107,15 +107,26 @@ const PUB = {
   await p.waitForTimeout(300);
   const text = await p.evaluate(() => document.body.innerText.replace(/\s+/g, ' '));
   ck('the panel shows the donations with their span', /6 · \$5,400/.test(text), (text.match(/6 · \$[\d,]+/) || [])[0]);
-  // This line is the Knoxville answer: where he told a federal form he lives.
-  ck('  ...and where he gave from', /Gave from Knoxville, TN/.test(text));
-  ck('  ...explaining why that beats the list address', /where they told a federal form they live/.test(text));
-  ck('  ...the street shown as identity confirmation, with its limit stated',
-     /12 Cherokee Trl, Knoxville/.test(text) && /not for mailing/.test(text));
-  ck('  ...the employer as he reported it, dated', /cordova industries · 2024-10/.test(text));
+  // This line is the Knoxville answer: where he told a federal form he lives —
+  // now one summary line, with the itemised gifts folded behind a disclosure.
+  ck('  ...and where their home is, on one line', /home: Knoxville, TN/.test(text));
   ck('the retired report is called out as the event having happened',
-     /told the FEC they are retired/i.test(text) && /event having already happened/.test(text));
-  ck('the insider filing shows with its meaning', /Form 4 · 2025-11-03/.test(text) && /equity compensation/i.test(text));
+     /told the FEC they are retired/i.test(text) && /already happened/.test(text));
+  ck('the insider filing shows with its meaning', /equity compensation/i.test(text));
+  // "Use the detail in your analysis and labeling, but do not provide this
+  //  much" — the record is folded, not gone.
+  ck('the itemised record hides behind one disclosure',
+     await p.evaluate(() => !!document.querySelector('tr.detail details'))
+     && !/Gave from Knoxville/.test(text) && !/Form 4 · 2025-11-03/.test(text));
+  await p.evaluate(() => { document.querySelector('tr.detail details').open = true; });
+  await p.waitForTimeout(150);
+  const full = await p.evaluate(() => document.body.innerText.replace(/\s+/g, ' '));
+  ck('  ...which opens on where he gave from', /Gave from Knoxville, TN/.test(full));
+  ck('  ...explaining why that beats the list address', /where they told a federal form they live/.test(full));
+  ck('  ...the street shown as identity confirmation, with its limit stated',
+     /12 Cherokee Trl, Knoxville/.test(full) && /not for mailing/.test(full));
+  ck('  ...the employer as he reported it, dated', /cordova industries · 2024-10/.test(full));
+  ck('  ...and the filing itself', /Form 4 · 2025-11-03/.test(full));
   ck('  ...linking to the SEC archive itself', await p.evaluate(() =>
     !![...document.querySelectorAll('a')].find(a => a.href.includes('sec.gov/Archives'))));
   ck('every number is checkable: both source links render', await p.evaluate(() =>

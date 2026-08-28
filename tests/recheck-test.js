@@ -88,8 +88,7 @@ const RECORD = {
   const rowBtns = name => p.evaluate(who => {
     const L = state.leads.find(x => (x.firstName + ' ' + x.lastName).includes(who));
     if (!L) return null;
-    return researchActions(L).filter(a => a[0] === 'verifyLead' || a[0] === 'recheck')
-      .map(a => a[0]);
+    return (wpPlan(L) || []).filter(s => s === 'verify' || s === 'recheck');
   }, name);
 
   await load();
@@ -106,12 +105,15 @@ const RECORD = {
      bea[0] !== (await rowBtns('Ada'))[0], JSON.stringify([bea[0], (await rowBtns('Ada'))[0]]));
   const tip = await p.evaluate(() => {
     const L = state.leads.find(x => x.firstName === 'Bea');
-    const a = researchActions(L).find(x => x[0] === 'recheck') || [];
+    const a = researchActions(L).find(x => x[0] === 'wpLookup') || [];
     return (a[2] || '') + ' \u00b7 ' + (a[3] || '');
   });
   ck('  ...which says what re-running buys',
      /date of birth/.test(tip), tip.slice(0, 90));
-  ck('  ...and that it costs a lookup', /1 WhitePages lookup/.test(tip), tip.slice(-40));
+  ck('  ...and that it costs a lookup', /WhitePages lookup/.test(tip), tip.slice(-40));
+  ck('  ...and it is the ONLY WhitePages row — one button, not two',
+     await p.evaluate(() => researchActions(state.leads.find(x => x.firstName === 'Bea'))
+       .filter(x => /WhitePages/.test(x[3])).length === 1));
 
   // A lead already read in full has nothing left to buy.
   ck('a lead whose record was already read is offered no phone lookup',

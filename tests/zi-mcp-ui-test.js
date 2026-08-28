@@ -45,8 +45,10 @@ const me=(o)=>({signed_in:true,provider:'google',name:'Dan',email:'d@f.com',
   ck('Build list is hidden', !(await shown('btnBuild')));
   ck('ziMcpReady() is false', await p.evaluate(()=>ziMcpReady())===false);
   await p.click('#btnMore'); await p.click('#btnSettings');await p.waitForTimeout(400);
-  ck('settings explains it is not connected',
-     /Not connected/.test(await p.textContent('#ziMcpState')), await p.textContent('#ziMcpState'));
+  ck('settings says no token is saved, and that none is required',
+     /No token saved/.test(await p.textContent('#ziMcpState'))
+     && /none is required/.test(await p.textContent('#ziMcpState')),
+     await p.textContent('#ziMcpState'));
   ck('the token box is a password field',
      await p.getAttribute('#sZiMcp','type')==='password');
 

@@ -131,6 +131,15 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
        const t = document.getElementById('research-x1').textContent;
        return /WhitePages lookup/.test(t) && /free/.test(t);
      }));
+  // "There should not be 2 whitepage look up buttons. It should just be 1."
+  ck('  ...and WhitePages is ONE row, not a number check plus a household',
+     await p.evaluate(() => researchActions(byId('x1'))
+       .filter(a => /WhitePages/.test(a[3])).length === 1),
+     await p.evaluate(() => JSON.stringify(researchActions(byId('x1')).map(a => a[1]))));
+  ck('  ...that checks the number first and searches by name only on a miss',
+     await p.evaluate(() => /verifyLead/.test(wpLookup.toString())
+       && /enrichHome/.test(wpLookup.toString())
+       && /hd/.test(wpLookup.toString())));
 
   // --- the allowance, where it is spent ---------------------------------------
   // It lived only in the coverage panel, which is not where anyone is standing
@@ -185,6 +194,98 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   }
   await p.setViewportSize({ width: 1500, height: 1000 });
   await p.waitForTimeout(200);
+
+  // --- the table is workable without hunting -----------------------------------
+  // "It's hard to scroll and I cant see the buttons or easily click in and out
+  // of records." The Actions cell rides sticky on the right so the working
+  // controls never scroll away, and the whole row is a click target.
+  const sticky = await p.evaluate(() => {
+    const td = document.querySelector('#rows tr.lead td:last-child');
+    const st = getComputedStyle(td);
+    return { pos: st.position, bg: st.backgroundColor };
+  });
+  ck('the Actions cell is sticky, so its buttons never scroll out of reach',
+     sticky.pos === 'sticky', JSON.stringify(sticky));
+  ck('  ...with its own background — content cannot bleed through it',
+     sticky.bg !== 'rgba(0, 0, 0, 0)', sticky.bg);
+  await p.evaluate(() => { expanded = null; render(); });
+  await p.waitForTimeout(200);
+  await p.click('#rows tr.lead td:nth-child(4)');    // plain text cell
+  await p.waitForTimeout(250);
+  ck('clicking anywhere on a row opens the record',
+     await p.evaluate(() => expanded === 'x1'), await p.evaluate(() => expanded));
+  await p.click('#rows tr.lead td:nth-child(4)');
+  await p.waitForTimeout(250);
+  ck('  ...and clicking again closes it', await p.evaluate(() => expanded === null));
+  await p.evaluate(() => { const sel = document.querySelector('#rows tr.lead select'); sel.click(); });
+  await p.waitForTimeout(200);
+  ck('  ...but a press on the status dropdown is a press on the dropdown',
+     await p.evaluate(() => expanded === null));
+
+  // --- the sweep counter counts what it says ------------------------------------
+  const sweepSrc = await p.evaluate(() => enrichAllFree.toString());
+  ck('the progress label names its phase and counts that phase\'s unit',
+     /SWEEP.phase.*SWEEP.done.*SWEEP.total/.test(sweepSrc.match(/label=.*?;/s)[0])
+     && /phase:'Public record'/.test(sweepSrc) && /Reading proxies/.test(sweepSrc),
+     (sweepSrc.match(/label=.*?;/s) || [])[0]);
+  ck('  ...and never sums leads with employers into one fake denominator',
+     !/pubTodo\.length\+ageTodo\.length/.test(sweepSrc));
+
+  // --- the watched sheet is the user\'s choice ----------------------------------
+  const asked = [];
+  await p.route('**/api/drive/find*', r => { asked.push(decodeURIComponent(r.request().url()));
+    return r.fulfill({ json: { files: [], searched: 'x' } }); });
+  ck('the Source card names the watched sheet and offers to change it',
+     await p.evaluate(() => /Watching “Wealth Management Lead Prospecting”/.test(
+       document.getElementById('sheetLine').textContent)
+       && /watch a different sheet/.test(document.getElementById('sheetLine').textContent)),
+     await p.evaluate(() => document.getElementById('sheetLine').textContent));
+  await p.evaluate(() => { state.settings.sourceSheet = 'Q4 Prospects'; render(); syncFromSheet(true); });
+  await p.waitForTimeout(500);
+  ck('a renamed watch is searched for by ITS name, not the default',
+     asked.some(u => /name=Q4 Prospects/.test(u)), asked.join(' | '));
+  ck('  ...and the card shows the new name',
+     await p.evaluate(() => /Watching “Q4 Prospects”/.test(
+       document.getElementById('sheetLine').textContent)));
+  await p.evaluate(() => { state.settings.sourceSheet =
+    'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit'; });
+  const watched = await p.evaluate(() => watchedSheet());
+  ck('a pasted Drive link is used directly, no name search at all',
+     watched.id === '1AbCdEfGhIjKlMnOpQrStUvWxYz012345' && !watched.name, JSON.stringify(watched));
+  await p.evaluate(() => { state.settings.sourceSheet = ''; });
+
+  // --- an open record shares the page instead of taking it over -----------------
+  await p.evaluate(() => { expanded = null; render(); });
+  await p.click('#rows tr.lead td:nth-child(4)');
+  await p.waitForTimeout(250);
+  const rec = await p.evaluate(() => {
+    const g = document.querySelector('tr.detail .detail-grid');
+    const st = getComputedStyle(g);
+    const heads = [...g.querySelectorAll('.dsec > h4:first-child')].map(h => h.textContent.trim());
+    return { overflowY: st.overflowY, maxHeight: st.maxHeight, heads,
+             anchor: !!document.getElementById('research-x1') };
+  });
+  ck('the open record scrolls inside itself instead of taking over the page',
+     rec.overflowY === 'auto' && rec.maxHeight !== 'none' && /vh|px/.test(rec.maxHeight),
+     JSON.stringify({ overflowY: rec.overflowY, maxHeight: rec.maxHeight }));
+  ck('  ...it opens on the score, with research after it and before CRM fields',
+     rec.heads[0] === 'Why this score'
+     && rec.heads.indexOf('Look this person up') > 0
+     && rec.heads.indexOf('Look this person up') < rec.heads.indexOf('CRM export fields'),
+     rec.heads.join(' | '));
+  ck('  ...and the Research button\'s scroll anchor still exists', rec.anchor);
+  await p.evaluate(() => {
+    const ov = document.querySelector('.overlay'); if (ov) ov.classList.add('open');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+  await p.waitForTimeout(150);
+  ck('Escape with a dialog open closes the dialog, not the record underneath',
+     await p.evaluate(() => expanded === 'x1' && !document.querySelector('.overlay.open')),
+     await p.evaluate(() => JSON.stringify({ expanded, overlayOpen: !!document.querySelector('.overlay.open') })));
+  await p.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+  await p.waitForTimeout(150);
+  ck('  ...and a second Escape closes the record itself',
+     await p.evaluate(() => expanded === null), await p.evaluate(() => expanded));
 
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);
