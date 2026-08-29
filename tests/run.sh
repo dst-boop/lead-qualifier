@@ -26,13 +26,23 @@ fi
 cleanup(){ [ -n "$STARTED" ] && kill "$STARTED" 2>/dev/null; }
 trap cleanup EXIT
 
+# A passing suite can still print a traceback last: wp-credits-test.py
+# deliberately drives the WhitePages rate-limit path, and the handled exception
+# is the final line on stdout. Reporting that as the suite's status makes a
+# green run look red. Prefer the summary line the suite actually printed.
+summary(){
+  line=$(echo "$1" | grep -i "pass" | tail -1)
+  [ -n "$line" ] || line=$(echo "$1" | tail -1)
+  echo "$line"
+}
+
 # Suites that assert and exit non-zero. These are the regression guard.
 SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js track-ui-test.js signals-ui-test.js plans-ui-test.js intl-build-test.js wealthfeed-test.js wp-record-ui-test.js recheck-test.js free-ui-test.js free-sweep-test.js export-columns-test.js upgrade-test.js hh-test.js v3-test.js age-search-test.js admin-ui-test.js newuser-test.js master-test.js owa-invite-test.js hostile-data-test.js"
 FAILED=""
 for s in $SUITES; do
   printf '%-20s ' "$s"
   if out=$(node "$s" 2>&1); then
-    echo "$(echo "$out" | tail -1)"
+    echo "$(summary "$out")"
   else
     echo "FAILED"
     echo "$out" | sed 's/^/    /'
@@ -44,7 +54,7 @@ done
 for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py team-test.py signals-test.py signals-api-test.py harvest-test.py plan-assets-test.py cache-test.py wp-record-test.py signals-coverage-test.py google-consent-test.py accounts-test.py wp-credits-test.py free-sources-test.py free-debug-test.py edgar-roster-test.py credits-test.py admin-test.py; do
   printf '%-20s ' "$s"
   if out=$(cd "$ROOT" && python3 "tests/$s" 2>&1); then
-    echo "$(echo "$out" | tail -1)"
+    echo "$(summary "$out")"
   else
     echo "FAILED"; echo "$out" | tail -20 | sed 's/^/    /'; FAILED="$FAILED $s"
   fi
