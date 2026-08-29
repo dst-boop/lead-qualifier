@@ -8,6 +8,10 @@
 # string, every outbound call goes to a localhost stub server the suite starts
 # itself, and NO_PROXY is set so nothing escapes to the network. That is why
 # this workflow needs no secrets and can safely run on any pull request.
+# Action majors are kept current deliberately: GitHub deprecated the Node 20
+# runtime, and every major below the ones pinned here still targets it. A
+# deprecated action keeps working for a while and then stops, which would take
+# the deploy gate down rather than a feature.
 name: tests
 
 on:
@@ -32,12 +36,12 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 3.13 because that is what the Dockerfile ships to Cloud Run. Testing on
       # a different interpreter than production runs would let a version
       # incompatibility through the one gate meant to catch it.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
@@ -50,7 +54,7 @@ jobs:
       - name: Byte-compile the app
         run: python -m compileall -q webapp
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -69,7 +73,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
