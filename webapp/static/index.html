@@ -2742,6 +2742,8 @@ function researchActions(L){
     out.push(['freeLookup','Public record','Political donations \u2014 home city, employer and occupation as they reported them \u2014 and SEC insider filings','free']);
   if(!L.site&&window.ME&&ME.features&&ME.features.site_reader&&(siteFromLead(L)||L.employer))
     out.push(['readSite','Employer\u2019s own site','Their About page often prints what no vendor sells: who owns it, founded when, years in business \u2014 every finding quoted','free']);
+  if(!L.attom&&window.ME&&ME.features&&ME.features.attom&&attomAddr(L))
+    out.push(['attomValue','Home value (Attom trial)','What their home is worth \u2014 automated valuation with a confidence score, plus deed owner, last sale and year built','free \u2014 trial']);
   if(!L.web&&L.lastName&&window.ME&&ME.features&&ME.features.web_research)
     out.push(['webResearch','Search the web (AI)','Searches name + employer + title the way you would by hand: location, age clues, spouse, socials, office phone, email pattern \u2014 quoted and linked, for you to accept or discard','free \u2014 AI tokens']);
   return out;
@@ -2843,6 +2845,29 @@ function webSection(L){
   b.push('<p class="hint" style="margin-top:3px">Found on the web \u2014 read a source before trusting a line. Accepting one is your call; nothing here was written onto the lead by the app.</p>');
   return b.join('');
 }
+/* The Attom answer, in the record. The deed is the corroboration check the
+   operator taught us: a surname on it ties the value to THIS person; a trust
+   or an LLC is a flag to read before leaning on the number. */
+function attomSection(L){
+  if(!L.attom)return '';
+  const A=L.attom;
+  const b=['<h4 style="margin-top:12px">Home \u2014 Attom (trial)</h4>'];
+  if(A.found===false){b.push(`<p class="hint">${esc(A.reason||'no property on file')} \u2014 ${esc(A.addr||'')}.</p>`);return b.join('');}
+  const money=v=>'$'+Math.round(v).toLocaleString();
+  if(A.avm)b.push(`<div class="sigrow hit"><span>Estimated value${A.score?' (confidence '+A.score+'/100)':''}</span><span class="pts">${money(A.avm)}${(A.low&&A.high)?' \u00b7 '+money(A.low)+'\u2013'+money(A.high):''}</span></div>`);
+  else if(A.market)b.push(`<div class="sigrow hit"><span>Market value (assessor)</span><span class="pts">${money(A.market)}</span></div>`);
+  else if(A.assessed)b.push(`<div class="sigrow hit"><span>Assessed value</span><span class="pts">${money(A.assessed)}</span></div>`);
+  if(A.sale)b.push(`<div class="sigrow"><span>Last sale${A.saleDate?' \u00b7 '+esc((''+A.saleDate).slice(0,10)):''}</span><span class="pts">${money(A.sale)}</span></div>`);
+  if(A.yearBuilt)b.push(`<div class="sigrow"><span>Built</span><span class="pts">${A.yearBuilt}</span></div>`);
+  if((A.owners||[]).length){
+    const sn=(L.lastName||'').trim().toLowerCase();
+    const match=sn&&A.owners.some(o=>o.toLowerCase().includes(sn));
+    b.push(`<div class="sigrow ${match?'hit':''}"><span>On the deed</span><span class="pts">${esc(A.owners.join(' \u00b7 '))}</span></div>`);
+    if(sn&&!match)b.push('<p class="hint" style="margin-top:2px;color:var(--tierB)">The deed does not carry their surname \u2014 a trust, an LLC, or the wrong door. Corroborate before leaning on the value.</p>');
+  }
+  b.push(`<p class="hint" style="margin-top:3px">${esc(A.addr||'')} \u2014 an automated estimate, not an appraisal. Trial data.</p>`);
+  return b.join('');
+}
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
   return `<tr class="detail"><td colspan="11"><div class="detail-grid">
@@ -2905,7 +2930,7 @@ function detailRow(L){
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
         <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
       </div>
-      ${siteSection(L)}${webSection(L)}
+      ${siteSection(L)}${webSection(L)}${attomSection(L)}
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
     </div>
@@ -4564,7 +4589,8 @@ function lifeInsights(leads){
   [['WhitePages household',L=>!!(L.hd&&!L.hd.rejected)],
    ['Number checked',L=>!!L.pv],
    ['Public records',L=>!!L.pub],
-   ['AI QC grade A/B',L=>!!(L.qc&&/^[AB]/.test(''+(L.qc.grade||'')))]
+   ['AI QC grade A/B',L=>!!(L.qc&&/^[AB]/.test(''+(L.qc.grade||'')))],
+   ['Attom home value',L=>!!(L.attom&&(L.attom.avm||L.attom.market||L.attom.assessed))]
   ].forEach(([name,f])=>{
     const yes=worked.filter(f),no=worked.filter(L=>!f(L));
     if(yes.length>=INS_MIN&&no.length>=INS_MIN)
@@ -4622,7 +4648,7 @@ document.getElementById('btnInsights').addEventListener('click',()=>{renderInsig
 document.getElementById('btnLifeData').addEventListener('click',()=>{
   const leads=state.leads;
   if(!leads.length){toast('No leads on this list.');return;}
-  const H=['Lead External ID','First Name','Last Name','Job Title','Employer','State','Status','Set','Tier','Score','Campaign','Age basis','Age','Signals fired','Phone check','Household data','Public records','SEC age','AI grade','Calls','Emails','Created','Last updated','Batch / source','Notes'];
+  const H=['Lead External ID','First Name','Last Name','Job Title','Employer','State','Status','Set','Tier','Score','Campaign','Age basis','Age','Signals fired','Phone check','Household data','Public records','SEC age','AI grade','Calls','Emails','Created','Last updated','Batch / source','Notes','Home value (Attom)'];
   const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=leads.map(L=>{
     const ab=ageBasis(L);
@@ -4634,7 +4660,8 @@ document.getElementById('btnLifeData').addEventListener('click',()=>{
       (L.activity||[]).filter(a=>a.k==='call').length,(L.activity||[]).filter(a=>a.k==='email').length,
       L.createdAt?new Date(L.createdAt).toISOString().slice(0,10):'',
       L.updatedAt?new Date(L.updatedAt).toISOString().slice(0,10):'',
-      L.batch||'',L.notes||''].map(q).join(',');
+      L.batch||'',L.notes||'',
+      (L.attom&&(L.attom.avm||L.attom.market||L.attom.assessed))||''].map(q).join(',');
   });
   dl(new Blob([[H.join(',')].concat(rows).join('\r\n')],{type:'text/csv'}),'life-data-'+new Date().toISOString().slice(0,10)+'.csv');
   toast('Life Data: '+leads.length+' leads exported.'+(activeList==='default'?'':' Tip: switch to All leads for the lifetime record.'));
@@ -5218,6 +5245,37 @@ window.useWebPhone=id=>{
   L.directPhone=ph.number;L.updatedAt=Date.now();scoreLead(L);
   logAct(id,'web','office phone '+ph.number+' added (web, you accepted)');
   save();render();
+};
+/* ---- Attom (TRIAL) ----
+   Ten days to learn whether a home value earns its place beside the plan-
+   balance proxy. Needs a street address, which is exactly what the household
+   enrich or an accepted web-research location provides \u2014 the sources feed
+   each other. The answer (a miss included) is recorded on the lead and
+   cached durably server-side, so nothing is asked twice; when the trial key
+   goes away the button vanishes and fetched values stay. */
+function attomAddr(L){
+  if(L.hd&&L.hd.street&&L.hd.city)return {street:L.hd.street,city:L.hd.city,state:L.hd.state||'',zip:L.hd.zip||''};
+  if(L.street&&L.city)return {street:L.street,city:L.city,state:L.state||'',zip:L.zip||''};
+  return null;
+}
+ACT_LABEL.attom='Home value';
+window.attomValue=async id=>{
+  const L=byId(id);if(!L)return;
+  const a=attomAddr(L);
+  if(!a){toast('No street address on file \u2014 enrich the household first.');return;}
+  toast('Pricing '+a.street+'\u2026');
+  try{
+    const d=await api('/api/attom',{street:a.street,city:a.city,state:a.state,zip:a.zip});
+    L.attom=d.found?{avm:d.avm||null,high:d.avm_high||null,low:d.avm_low||null,score:d.avm_score||null,
+      market:d.market_value||null,assessed:d.assessed_value||null,sale:d.sale_amount||null,
+      saleDate:d.sale_date||'',yearBuilt:d.year_built||null,owners:d.owners||[],addr:d.address||'',at:Date.now()}
+      :{found:false,reason:d.reason||'no property on file',addr:a.street+', '+a.city,at:Date.now()};
+    L.updatedAt=Date.now();
+    const v=L.attom.avm||L.attom.market||L.attom.assessed;
+    logAct(id,'attom',d.found?('home ~$'+Math.round(v||0).toLocaleString()+((L.attom.owners||[]).length?' \u00b7 deed: '+L.attom.owners.join(', '):'')):('no property \u2014 '+L.attom.reason));
+    save();render();
+    toast(d.found?('Home value: ~$'+Math.round(v||0).toLocaleString()+(d.cached?' (already on file \u2014 no new call)':'')):('Attom: '+L.attom.reason));
+  }catch(e){toast('Attom lookup failed: '+e.message);}
 };
 window.useCareerStart=(id,y)=>{
   const L=byId(id);if(!L||!(y>1900))return;

@@ -1359,6 +1359,10 @@ async def me(request: Request):
         # Per-lead web research through the Claude API's search tool — a
         # licensed API, never scraping, and never run as a sweep.
         "web_research": bool(ANTHROPIC_API_KEY),
+        # TRIAL: Attom property data. Lives and dies with the env var — when
+        # the 10-day trial key is removed, the buttons disappear and the
+        # already-fetched answers stay on their leads.
+        "attom": bool(ATTOM_API_KEY),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -4762,6 +4766,147 @@ async def harvest_site(body: SiteRequest, request: Request):
 
     out["findings"] = _clean_site_findings(found)
     return out
+
+
+# --- Attom property data (TRIAL) --------------------------------------------
+# A 10-day trial key, added to see whether a home value earns its place next
+# to the plan-balance proxy. Everything about this is built to be temporary:
+# one env var gates it, answers cache durably (sealed, like WhitePages — a
+# home value at a named address is PII), and if the trial lapses the buttons
+# vanish while fetched values stay on their leads. The evaluation itself is
+# the What's-converting panel: it reads Attom like any other enrichment and
+# reports whether valued leads convert better.
+ATTOM_API_KEY = os.environ.get("ATTOM_API_KEY", "")
+ATTOM_BASE = os.environ.get("ATTOM_BASE", "https://api.gateway.attomdata.com")
+ATTOM_TTL = 365 * 86400          # trial data does not go stale inside the trial
+
+_ATTOM_CACHE: dict = {}
+
+
+async def _attom_cached(key: str):
+    hit = _ATTOM_CACHE.get(key)
+    if hit and time.time() - hit[0] < ATTOM_TTL:
+        return True, hit[1]
+    doc = await _fs_get(FS_CACHE, "attom:" + hashlib.sha256(key.encode()).hexdigest())
+    if not doc or time.time() - float(doc.get("at") or 0) >= ATTOM_TTL:
+        return False, None
+    raw = _unseal(doc)
+    if raw is None:
+        return False, None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return False, None
+    _ATTOM_CACHE[key] = (float(doc["at"]), value)
+    return True, value
+
+
+async def _attom_remember(key: str, value) -> None:
+    _ATTOM_CACHE[key] = (time.time(), value)
+    doc = _seal(json.dumps(value))
+    doc["at"] = time.time()
+    await _fs_set(FS_CACHE, "attom:" + hashlib.sha256(key.encode()).hexdigest(), doc)
+
+
+class AttomRequest(BaseModel):
+    street: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
+
+
+def _attom_pick(js: dict) -> dict:
+    """The fields worth keeping from either property endpoint, normalised."""
+    props = js.get("property") or []
+    if not props:
+        return {}
+    p = props[0] or {}
+    avm = (p.get("avm") or {}).get("amount") or {}
+    assessment = p.get("assessment") or {}
+    market = (assessment.get("market") or {})
+    sale = p.get("sale") or {}
+    sale_amt = ((sale.get("amount") or {}).get("saleamt")
+                or (sale.get("amount") or {}).get("saleAmt"))
+    summary = p.get("summary") or {}
+    owner = p.get("owner") or {}
+    owners = []
+    for k in ("owner1", "owner2", "owner3", "owner4"):
+        o = owner.get(k) or {}
+        nm = " ".join(x for x in (o.get("firstnameandmi") or o.get("firstNameAndMi"),
+                                  o.get("lastname") or o.get("lastName")) if x).strip()
+        if nm:
+            owners.append(nm[:120])
+    out = {
+        "avm": avm.get("value"),
+        "avm_high": avm.get("high"), "avm_low": avm.get("low"),
+        "avm_score": avm.get("scr"),
+        "market_value": (market.get("mktttlvalue") or market.get("mktTtlValue")),
+        "assessed_value": ((assessment.get("assessed") or {}).get("assdttlvalue")
+                           or (assessment.get("assessed") or {}).get("assdTtlValue")),
+        "sale_amount": sale_amt,
+        "sale_date": (sale.get("salesearchdate") or sale.get("saleSearchDate")
+                      or sale.get("saleTransDate")),
+        "year_built": (summary.get("yearbuilt") or summary.get("yearBuilt")),
+        "owners": owners,
+    }
+    return {k: v for k, v in out.items() if v not in (None, "", [], 0)}
+
+
+@app.post("/api/attom")
+async def attom_property(body: AttomRequest, request: Request):
+    """One address, priced. AVM first (an estimate with a confidence score),
+    the expanded profile as fallback and for owner/sale/year-built. Both
+    answers — including "no property found" — are remembered durably, so the
+    trial's spend is never repeated on the same door."""
+    await _active_token(request)
+    if not ATTOM_API_KEY:
+        raise HTTPException(status_code=400, detail="ATTOM_API_KEY is not set — the trial feature is off.")
+    street = body.street.strip()
+    locality = ", ".join(x for x in (body.city.strip(),
+                                     " ".join(y for y in (body.state.strip(), body.zip.strip()) if y)) if x)
+    if not street or not locality:
+        raise HTTPException(status_code=400,
+                            detail="Attom needs a street address and a city/state — enrich the "
+                                   "household first, or accept a web-research location.")
+    key = ("attom|" + street + "|" + locality).lower()
+    found_cached, cached = await _attom_cached(key)
+    if found_cached:
+        return {**cached, "cached": True}
+
+    headers = {"apikey": ATTOM_API_KEY, "accept": "application/json"}
+    params = {"address1": street, "address2": locality}
+    picked, tried, err = {}, [], ""
+    async with httpx.AsyncClient(timeout=20) as cx:
+        for path in ("/propertyapi/v1.0.0/attomavm/detail",
+                     "/propertyapi/v1.0.0/property/expandedprofile"):
+            tried.append(path.rsplit("/", 1)[-1])
+            try:
+                r = await cx.get(ATTOM_BASE + path, params=params, headers=headers)
+                if r.status_code == 401:
+                    raise HTTPException(status_code=502,
+                                        detail="Attom rejected the key (401) — the trial may have ended.")
+                if r.status_code == 400:
+                    # Attom answers "no such property" as a 400 SuccessWithoutResult.
+                    continue
+                r.raise_for_status()
+                got = _attom_pick(r.json())
+                # AVM answers value; the profile fills what AVM lacks.
+                for k, v in got.items():
+                    picked.setdefault(k, v)
+                if picked.get("avm") and picked.get("owners"):
+                    break
+            except HTTPException:
+                raise
+            except Exception as e:                       # noqa: BLE001 — reported, not swallowed
+                err = f"{type(e).__name__}: {str(e)[:120]}"
+    if not picked:
+        answer = {"found": False,
+                  "reason": err or "No property on file at that address.", "tried": tried}
+        await _attom_remember(key, answer)
+        return answer
+    answer = {"found": True, "address": f"{street}, {locality}", **picked}
+    await _attom_remember(key, answer)
+    return answer
 
 
 class WebResearchRequest(BaseModel):
