@@ -87,3 +87,13 @@ per-user allowance check handed them the whole firm pool. **Rule:** every
 spender resolves to a named identity or the shared "unattributed" bucket —
 never to the firm ceiling; spend is counted server-side only, client
 self-reports refused. (ADR §35–36)
+
+## 2026-08 · ZoomInfo MCP responses arrive double-encoded
+
+Learned in the Age 59½ pipeline project: MCP tool responses can be JSON
+encoded inside JSON, wrapped in an `attributes` envelope. **Rule:** parse
+iteratively (`deepParse`) and flatten the wrapper before reading any field —
+a single `JSON.parse` silently yields strings where objects were expected.
+Also from the same account: `age` is a disallowed search field alongside
+`yearsOfExperience`, and "VP Level Exec" is the second exact-match
+managementLevel string.

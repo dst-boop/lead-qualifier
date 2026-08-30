@@ -113,12 +113,53 @@ Maximize useful data per lead and per dollar. Depth comes from exhausting paid s
 ## ZoomInfo API Rules (account-specific, learned the hard way)
 
 - Use **search_contacts** (NOT search_contacts_v2) whenever excludedRegions is needed — v2 doesn't support it on this account.
-- managementLevel value must be the string **"C Level Exec"** verbatim. Other spellings fail silently or return wrong results.
+- managementLevel values must be the exact strings **"C Level Exec"** / **"VP Level Exec"** verbatim. Other spellings fail silently or return wrong results.
 - Use **positionStartDateMax** as the pension-eligibility / tenure gate.
-- The **yearsOfExperience field is disallowed** on this account. Never include it in a query — the entitlement check rejects the whole enrich mid-batch, after credits are spent.
+- The **yearsOfExperience and age fields are disallowed** search/enrich fields on this plan. Never include them in a query — the entitlement check rejects the whole enrich mid-batch, after credits are spent.
+- ZoomInfo MCP responses can arrive **double-encoded**: parse iteratively (`deepParse`) and flatten the `attributes` wrapper before reading fields.
 - **Subsidiary deduplication is required.** Large employers appear under multiple entity names (e.g., RTX vs. Raytheon vs. Pratt & Whitney vs. Collins Aerospace). Dedupe by parent company before counting or exporting.
 - Default employer seed list (stored as config, not code): RTX, ExxonMobil, Chevron, Delta, Johnson & Johnson, Kaiser, AT&T, Boeing. This list will expand nationally — treat it as data.
 - When you discover a new account-specific quirk, add it to docs/LEARNINGS.md and propose the addition here.
+
+## Age 59½ Pipeline (lead-sale side of the business)
+
+A companion pipeline sources, qualifies, and routes Age 59½ rollover leads **for
+sale to financial advisors and insurance agents**; this app consumes its CSVs.
+*Status: the `pipeline/` engine and `.claude/skills/age595-pipeline/` skill are
+not yet checked into this repo — they live in the pipeline project and are
+copied in per its READMEINTEGRATION.md. The rules below are in force wherever
+pipeline output or its ZoomInfo flows are touched.*
+
+**Standing rules (from the pipeline's own CLAUDE.md):**
+
+- **Credit gate:** ZoomInfo searches are free; enrichment consumes bulk credits.
+  Always state the count and cost and get explicit approval before any
+  credit-consuming call. Default cap: 50 per run.
+- **Search broad, enrich narrow.** Rank first, enrich only priority records
+  (Tier-A HOLD first).
+- **Exclude Equitable employees** from all lead output.
+- **CT/MA exclusion is a per-buyer delivery preference**, applied at delivery —
+  keep those states in sourced inventory.
+- **DNC scrub (federal + NY) is a hard gate before anything is sellable**;
+  FINRA 3230 / TCPA apply to phone outreach. Until the DNC vendor is wired,
+  every row is UNSCRUBBED and nothing is sellable.
+- **Every age/asset figure is labeled CONFIRMED / INFERRED / UNKNOWN** — same
+  provenance discipline as the app's verified/inferred split.
+- **Tiered output standard:** every list build delivers a ranked A/B/C table
+  AND parseable JSON.
+- The app **re-scores on import** with its own rubric; pipeline Route /
+  Maturity / Age Basis columns ride along as extra CSV columns (the importer
+  currently ignores unknown columns — storing them is an open integration
+  item).
+
+**Key paths (in the pipeline project):** `pipeline/config/icp.json` (ICP
+filters, weights, gates, credit gate — its three open v3 routing decisions are
+nulls: ask, don't invent), `pipeline/data/nurture.json` (under-59½ tracked
+inventory with maturity dates — persist it; volume-mount on Railway),
+`pipeline/out/` (run deliverables; `emit-app-csv.js` converts to app CSV).
+
+**Lead data stays out of git.** This repository is public: run outputs, nurture
+inventory, and any file naming leads never get committed here.
 
 ## Compliance Constraints (non-negotiable)
 
