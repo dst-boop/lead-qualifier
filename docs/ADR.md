@@ -2500,3 +2500,35 @@ pointing the record at where they actually live is what turns the
 WhitePages name search from a miss into a hit. Misses are recorded
 (`L.site.reason`, `L.web.reason`) so a read that found nothing retires
 its button instead of inviting the same read twice.
+
+## 43. The Attom trial: temporary by construction
+
+"I got a free trial of Attom. There are 10 days to use it. Add it as a
+temporary feature to see if it's valuable."
+
+A home value is the wealth signal the operator kept reaching for by hand
+(the FastPeopleSearch step in §42), and Attom sells it as a licensed API:
+AVM with a confidence score, assessor market value, last sale, year built,
+and the deed. The trial build is shaped by its own impermanence:
+
+- **One env var is the whole feature.** `ATTOM_API_KEY` gates the flag,
+  the research row, and the route. When the trial lapses the buttons
+  vanish; values already fetched stay on their leads. A dead key surfaces
+  as "the trial may have ended", not a mystery 502.
+- **Trial budget is never spent twice.** Answers — misses included —
+  cache durably (sealed, like WhitePages: a value at a named address is
+  PII), and the recorded result retires the button.
+- **It slots into what exists.** The address comes from the WhitePages
+  household or an accepted web-research location — the sources feed each
+  other. The deed is the corroboration check: a surname on it ties the
+  value to this person; a trust or LLC draws a warning, not a conclusion.
+- **The evaluation is the point.** Attom joins the What's-converting
+  enrichment comparison — after ten days of use the panel says whether
+  valued leads convert better — and the Life Data export carries the
+  value out. It deliberately does NOT enter the score during the trial:
+  a signal earns weight with outcomes first.
+
+Setup: `gcloud run services update lead-qualifier --region us-east1
+--update-env-vars ATTOM_API_KEY=<the trial key>`. To end the trial,
+remove the var. If it earns its keep, the follow-ups are a score signal
+and bulk pricing behind a stated quota.

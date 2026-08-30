@@ -37,7 +37,7 @@ summary(){
 }
 
 # Suites that assert and exit non-zero. These are the regression guard.
-SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js track-ui-test.js signals-ui-test.js plans-ui-test.js intl-build-test.js wealthfeed-test.js wp-record-ui-test.js recheck-test.js free-ui-test.js free-sweep-test.js export-columns-test.js upgrade-test.js hh-test.js v3-test.js age-search-test.js admin-ui-test.js newuser-test.js master-test.js owa-invite-test.js hostile-data-test.js lifedata-test.js bulkwp-test.js resourceful-test.js"
+SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js track-ui-test.js signals-ui-test.js plans-ui-test.js intl-build-test.js wealthfeed-test.js wp-record-ui-test.js recheck-test.js free-ui-test.js free-sweep-test.js export-columns-test.js upgrade-test.js hh-test.js v3-test.js age-search-test.js admin-ui-test.js newuser-test.js master-test.js owa-invite-test.js hostile-data-test.js lifedata-test.js bulkwp-test.js resourceful-test.js attom-ui-test.js"
 FAILED=""
 for s in $SUITES; do
   printf '%-20s ' "$s"
@@ -51,7 +51,7 @@ for s in $SUITES; do
 done
 
 # Backend suites run from the repo root, each against its own stub server.
-for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py team-test.py signals-test.py signals-api-test.py harvest-test.py plan-assets-test.py cache-test.py wp-record-test.py signals-coverage-test.py google-consent-test.py accounts-test.py wp-credits-test.py free-sources-test.py free-debug-test.py edgar-roster-test.py credits-test.py admin-test.py warn-sync-test.py; do
+for s in zi-oauth-test.py edgar-test.py zi-mcp-test.py prospecting-test.py opportunities-test.py lists-test.py senders-test.py team-test.py signals-test.py signals-api-test.py harvest-test.py plan-assets-test.py cache-test.py wp-record-test.py signals-coverage-test.py google-consent-test.py accounts-test.py wp-credits-test.py free-sources-test.py free-debug-test.py edgar-roster-test.py credits-test.py admin-test.py attom-test.py warn-sync-test.py; do
   printf '%-20s ' "$s"
   if out=$(cd "$ROOT" && python3 "tests/$s" 2>&1); then
     echo "$(summary "$out")"
