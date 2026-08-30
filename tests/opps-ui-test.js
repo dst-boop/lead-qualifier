@@ -52,9 +52,8 @@ const OPPS={built_at:1756000000,items:[
   ck('button shown when feeds are configured', await shown('btnOpps'));
 
   // --- opening it ------------------------------------------------------------
-  // The five ways of getting leads in became two plus a menu; Find employers
-  // is one of the three inside it.
-  await p.click('#btnAdd');await p.waitForTimeout(250);
+  // "Adjust Source so a drop down is not needed": Find employers is a plain
+  // button on the card now, no menu in front of it.
   await p.click('#btnOpps');await p.waitForTimeout(500);
   ck('modal opens', await p.isVisible('#mOpps'));
   ck('it fetched without refresh', asked.length===1&&!/refresh/.test(asked[0]), asked[0]);

@@ -166,6 +166,27 @@
   #tbl th:last-child{background:#fbfcfa;z-index:2}
   tbody tr.lead:hover td:last-child{background:#f7f8f4}
   tbody tr.lead{cursor:pointer}
+  /* "Columns need to be sortable" — the header is the control, the select is
+     the state. "Easier to scroll left and right" — a scrollbar you can see,
+     a checkbox column pinned left, and drag-anywhere panning below. */
+  #tbl th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  #tbl th.sortable:hover{color:var(--ink)}
+  #tbl th.sortable::after{content:attr(data-dir);margin-left:4px;color:var(--brass)}
+  .selcol{width:30px;min-width:30px;text-align:center}
+  #tbl td.selcol,#tbl th.selcol{position:sticky;left:0;background:var(--panel);z-index:1;
+    box-shadow:10px 0 10px -10px rgba(5,29,75,.15)}
+  #tbl th.selcol{background:#fbfcfa;z-index:2}
+  tbody tr.lead:hover td.selcol{background:#f7f8f4}
+  section.tablewrap::-webkit-scrollbar{height:12px}
+  section.tablewrap::-webkit-scrollbar-thumb{background:#9aa7be;border-radius:6px}
+  section.tablewrap::-webkit-scrollbar-track{background:var(--line)}
+  section.tablewrap.panning,section.tablewrap.panning *{cursor:grabbing!important;user-select:none}
+  .bulkbar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;
+    display:flex;gap:12px;align-items:center;background:#0A2558;color:#DCE8EE;
+    border-radius:8px;padding:10px 16px;font-size:.85rem;
+    box-shadow:0 6px 24px rgba(5,29,75,.35)}
+  .bulkbar[hidden]{display:none}
+  .bulkbar .mbtn{margin:0}
   .mono{font-family:var(--font-mono);font-size:.8rem}
   .name{font-weight:600;white-space:nowrap}
   .subline{font-size:.75rem;color:var(--ink-faint)}
@@ -404,7 +425,6 @@
         <button id="btnDeleteList" class="danger">Delete this list</button>
       </div>
     </div>
-    <button class="tbtn" id="btnFreeAll" onclick="enrichAllFree()" title="Every free source, in one pass: political donations and SEC insider filings from the public record, and proxy-statement ages for officers of public companies. No credits, no lookups spent. WhitePages is not included &mdash; it spends credits, so it stays a per-lead button.">Enrich all (free)</button>
     <button class="tbtn" id="btnAdmin" style="display:none" title="Every advisor and every list in the firm \u2014 and the power to take any of them back">Admin</button>
     <button class="tbtn" id="btnTeam" title="Leaderboard and contests across your firm">Team</button>
     <button class="tbtn" id="btnExport">Export call list</button>
@@ -437,20 +457,14 @@
   <div class="stage" id="stSource">
     <div class="sthead"><span class="stnum">1</span><h2>Source</h2><span class="stcount" id="cSource">&mdash;</span></div>
     <p class="stsub" id="sSource">Where new prospects come from.</p>
-    <!-- Five buttons for one job — "get leads in" — put five decisions in front
-         of someone who has not made the first one yet. Two ways stay in the
-         open, and the rest sit behind one menu that says what each is for. -->
+    <!-- "Adjust Source so a drop down is not needed": every way in is a
+         visible button. Titles carry the sentence each menu item used to. -->
     <div class="stacts">
       <button class="pbtn primary" id="btnSync" title="Reads a Google Sheet named &ldquo;Wealth Management Lead Prospecting&rdquo; from your Drive and adds any new rows">Check my sheet</button>
       <label class="filelabel"><input type="file" id="csvFile" accept=".csv" hidden><button class="pbtn" id="btnCsv" data-t="Import a spreadsheet" onclick="document.getElementById('csvFile').click()">Import a file</button></label>
-      <div class="menuwrap">
-        <button class="pbtn" id="btnAdd" aria-haspopup="true" aria-expanded="false">Other ways &#9662;</button>
-        <div class="menu" id="addMenu" hidden>
-          <button id="btnPaste">Paste a list<small>Rows copied from a spreadsheet, or a CSV block Claude gave you</small></button>
-          <button id="btnBuildOpen">Search ZoomInfo<small>Build a fresh list from ZoomInfo&rsquo;s database using your own filters</small></button>
-          <button id="btnOpps" style="display:none">Find employers<small>Companies with a dated mass layoff, ranked by the size of the retirement plan people are leaving</small></button>
-        </div>
-      </div>
+      <button class="pbtn" id="btnPaste" title="Rows copied from a spreadsheet, or a CSV block Claude gave you">Paste a list</button>
+      <button class="pbtn" id="btnBuildOpen" title="Build a fresh list from ZoomInfo&rsquo;s database using your own filters">Search ZoomInfo</button>
+      <button class="pbtn" id="btnOpps" style="display:none" title="Companies with a dated mass layoff, ranked by the size of the retirement plan people are leaving">Find employers</button>
     </div>
     <p class="srcnote" id="srcNote"></p>
     <p class="hint" id="sheetLine" style="display:none;margin:2px 0 0"></p>
@@ -459,9 +473,11 @@
   <div class="stage" id="stEnrich">
     <div class="sthead"><span class="stnum">2</span><h2>Enrich</h2><span class="stcount" id="cEnrich">&mdash;</span></div>
     <p class="stsub" id="sEnrich">Fill in what is missing before anyone calls.</p>
+    <!-- Free and paid, side by side — cheapest first. Employer pricing is a
+         phase of the free sweep now, not its own decision. -->
     <div class="stacts">
-      <button class="pbtn primary" id="btnEnrichAll">Enrich these</button>
-      <button class="pbtn" id="btnPlans" title="Look up every employer's retirement plan in the DOL Form 5500 file — free, no credits, and puts an average balance on each lead">Price the employers (free)</button>
+      <button class="pbtn primary" id="btnFreeAll" onclick="enrichAllFree()" title="Every free source in one pass: political donations and SEC insider filings, proxy-statement ages for officers of public companies, and each employer&rsquo;s retirement-plan size from the DOL Form 5500 file. No credits, no lookups spent. WhitePages spends credits, so it stays per lead &mdash; tick leads to run it in bulk.">Enrich all (free)</button>
+      <button class="pbtn" id="btnEnrichAll">Enrich these</button>
       <button class="pbtn" id="btnRetryBlocked" style="display:none">Retry blocked (0)</button>
     </div>
     <p class="srcnote" id="enrNote"></p>
@@ -547,8 +563,14 @@
   </select>
   <select id="fSort">
     <option value="score">Sort: Score (high first)</option>
+    <option value="scoreAsc" hidden>Sort: Score (low first)</option>
     <option value="name">Sort: Name A&ndash;Z</option>
+    <option value="nameDesc" hidden>Sort: Name Z&ndash;A</option>
+    <option value="employer">Sort: Employer A&ndash;Z</option>
+    <option value="employerDesc" hidden>Sort: Employer Z&ndash;A</option>
+    <option value="status">Sort: Status</option>
     <option value="state">Sort: State</option>
+    <option value="stateDesc" hidden>Sort: State Z&ndash;A</option>
     <option value="updated">Sort: Recently worked</option>
     <option value="age">Sort: Age (oldest first)</option>
     <option value="ageAsc">Sort: Age (youngest first)</option>
@@ -568,11 +590,21 @@
   <p class="hint" id="rowCap" style="margin:0 0 6px"></p>
   <table id="tbl" hidden>
     <thead><tr>
-      <th>Tier / Score</th><th>Signals</th><th>Name</th><th>Title &middot; Employer</th>
-      <th>State</th><th>Business Phone</th><th>Mobile</th><th>Email</th><th>Status</th><th>Actions</th>
+      <th class="selcol"><input type="checkbox" id="selAll" title="Select everyone shown, for bulk actions"></th>
+      <th class="sortable" data-sort="score,scoreAsc">Tier / Score</th><th>Signals</th>
+      <th class="sortable" data-sort="name,nameDesc">Name</th>
+      <th class="sortable" data-sort="employer,employerDesc">Title &middot; Employer</th>
+      <th class="sortable" data-sort="state,stateDesc">State</th>
+      <th>Business Phone</th><th>Mobile</th><th>Email</th>
+      <th class="sortable" data-sort="status">Status</th><th>Actions</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
+  <div class="bulkbar" id="bulkBar" hidden>
+    <span id="bulkCount"></span>
+    <button class="mbtn save" id="bulkWp">Enrich with WhitePages</button>
+    <button class="mbtn" id="bulkClear">Clear</button>
+  </div>
   <div class="empty" id="empty">
     <h3 id="emptyH">No leads yet</h3>
     <p id="emptyP">Import a ZoomInfo contact export (CSV) to score and tier your list.<br>Column mapping is automatic &mdash; you can adjust it before importing.</p>
@@ -2483,7 +2515,14 @@ function filtered(){
     (il?isIntl(L):true)&&
     (!q||[L.firstName,L.lastName,L.employer,L.title,L.state].join(' ').toLowerCase().includes(q)));
   const s=document.getElementById('fSort').value;
+  const STATUS_ORD=['New','Called','Call Back','Not Interested','Has Advisor','Set'];
   out.sort((a,b)=>s==='name'?(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)
+    :s==='nameDesc'?(b.lastName+b.firstName).localeCompare(a.lastName+a.firstName)
+    :s==='employer'?((a.employer||'').localeCompare(b.employer||'')||b.score-a.score)
+    :s==='employerDesc'?((b.employer||'').localeCompare(a.employer||'')||b.score-a.score)
+    :s==='status'?(STATUS_ORD.indexOf(a.status||'New')-STATUS_ORD.indexOf(b.status||'New')||b.score-a.score)
+    :s==='scoreAsc'?(a.score-b.score)
+    :s==='stateDesc'?(b.state||'').localeCompare(a.state||'')
     :s==='state'?(a.state||'').localeCompare(b.state||'')
     :s==='updated'?b.updatedAt-a.updatedAt
     // Unknown ages sort last either way: they are not old and they are not
@@ -2641,6 +2680,7 @@ function render(){
     const cbDue=callbackDue(L);
     const inv=L.email?'' :'disabled title="No email on file"';
     return `<tr class="lead" data-id="${esc(L.id)}">
+      <td class="selcol"><input type="checkbox" class="selbox" data-id="${esc(L.id)}"${SEL.has(L.id)?' checked':''} title="Select for bulk actions"></td>
       <td><span class="tierchip ${L.tier}" title="${esc(L.tier==='X'?(L.exclReason||'Excluded'):(L.enriched===false?'Provisional — enrich to firm up':''))}">${L.tier==='X'?'EXCL':L.tier} ${L.tier==='X'?'':'· '+(L.enriched===false?'~':'')+L.score}</span>${
         // An excluded lead still carries the tier it would hold once it has a
         // mobile. Showing it is the whole point of the bucket — otherwise a
@@ -2716,7 +2756,7 @@ function researchPanel(L){
 }
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
-  return `<tr class="detail"><td colspan="10"><div class="detail-grid">
+  return `<tr class="detail"><td colspan="11"><div class="detail-grid">
     <div class="dsec"><h4>Why this score</h4>${sigs}
       ${L.qc?`<h4 style="margin-top:12px">AI quality control &mdash; grade ${L.qc.grade}</h4>
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
@@ -2814,6 +2854,101 @@ document.getElementById('rows').addEventListener('click',e=>{
   const tr=e.target.closest('tr.lead');
   if(tr&&tr.dataset.id)toggleDetail(tr.dataset.id);
 });
+
+/* ---- bulk selection: many leads, one WhitePages press ----
+   Both phases of the credit guardrail hold: the confirmation names the
+   worst-case lookup count before anything runs, and the server prices every
+   call it actually makes. Each lead goes through the same wpLookup as the
+   single button \u2014 cheapest first, recorded results respected \u2014 so a lead
+   with nothing left to buy is skipped and said so. Re-checks of already-
+   answered numbers stay per-lead on purpose: a deliberate re-spend, never
+   a bulk one. */
+const SEL=new Set();
+let BULK=null;
+function renderBulkBar(){
+  [...SEL].forEach(id=>{if(!byId(id))SEL.delete(id);});
+  const bar=document.getElementById('bulkBar');
+  if(!SEL.size){bar.hidden=true;return;}
+  const plans=[...SEL].map(id=>wpPlan(byId(id))).filter(pl=>pl&&pl[0]!=='recheck');
+  const maxLk=plans.reduce((t,pl)=>t+(pl.includes('home')?2:1),0);
+  bar.hidden=false;
+  if(!BULK)document.getElementById('bulkCount').textContent=
+    SEL.size+' selected \u00b7 '+plans.length+' with a WhitePages lookup left ('+maxLk+' lookup'+(maxLk===1?'':'s')+' max)';
+  document.getElementById('bulkWp').disabled=!plans.length&&!BULK;
+}
+document.getElementById('rows').addEventListener('change',e=>{
+  const cb=e.target.closest('.selbox');if(!cb)return;
+  if(cb.checked)SEL.add(cb.dataset.id);else SEL.delete(cb.dataset.id);
+  renderBulkBar();
+});
+document.getElementById('selAll').addEventListener('change',e=>{
+  filtered().slice(0,RENDER_CAP).forEach(L=>{if(e.target.checked)SEL.add(L.id);else SEL.delete(L.id);});
+  render();renderBulkBar();
+});
+document.getElementById('bulkClear').addEventListener('click',()=>{SEL.clear();render();renderBulkBar();});
+document.getElementById('bulkWp').addEventListener('click',async()=>{
+  if(BULK){BULK.stop=true;return;}
+  const ids=[...SEL].filter(id=>{const pl=wpPlan(byId(id));return pl&&pl[0]!=='recheck';});
+  if(!ids.length)return;
+  const maxLk=ids.reduce((t,id)=>t+(wpPlan(byId(id)).includes('home')?2:1),0);
+  const skipped=SEL.size-ids.length;
+  const wl=(typeof CREDITS!=='undefined'&&CREDITS&&CREDITS.whitepages)?` You have ${CREDITS.whitepages.yours_left??CREDITS.whitepages.left} of your monthly lookups left.`:'';
+  if(!await appConfirm(`Enrich ${ids.length} lead${ids.length>1?'s':''} with WhitePages \u2014 worst case ${maxLk} lookup${maxLk>1?'s':''}. Each lead's number is checked first and the name search runs only if that leaves the household empty${skipped?`; ${skipped} already answered ${skipped>1?'are':'is'} skipped`:''}.${wl}`,'Enrich selected'))return;
+  BULK={stop:false};
+  const btn=document.getElementById('bulkWp'),cnt=document.getElementById('bulkCount');
+  btn.textContent='Stop';
+  let done=0,failed=0;
+  for(const id of ids){
+    if(BULK.stop)break;
+    cnt.textContent=`WhitePages ${done}/${ids.length}\u2026 \u2014 Stop keeps the rest for later`;
+    try{await wpLookup(id);}catch(e){failed++;}
+    done++;
+  }
+  const stopped=BULK.stop;BULK=null;btn.textContent='Enrich with WhitePages';
+  toast(`Bulk WhitePages: ${done} of ${ids.length} looked up${failed?', '+failed+' failed':''}${stopped?' \u2014 stopped, the rest are untouched':''}.`);
+  SEL.clear();render();renderBulkBar();loadCredits();
+});
+
+/* ---- sortable headers: the header is the control, the select is the state.
+   Clicking a header sorts by it; clicking again flips direction where a
+   flip means something. The Sort select stays in step, so either control
+   tells the truth about the order on screen. */
+function syncSortHeads(){
+  const v=document.getElementById('fSort').value;
+  document.querySelectorAll('#tbl th.sortable').forEach(th=>{
+    const [a,b]=(th.dataset.sort||'').split(',');
+    th.dataset.dir=v===a?'\u25be':(b&&v===b)?'\u25b4':'';
+  });
+}
+document.querySelectorAll('#tbl th.sortable').forEach(th=>th.addEventListener('click',()=>{
+  const [a,b]=(th.dataset.sort||'').split(',');
+  const sel=document.getElementById('fSort');
+  sel.value=(sel.value===a&&b)?b:a;
+  syncSortHeads();render();
+}));
+document.getElementById('fSort').addEventListener('input',syncSortHeads);
+syncSortHeads();
+
+/* ---- drag to pan: the table is wider than any screen, and the scrollbar
+   lives at the bottom of a long page. Grab any empty spot on the table and
+   drag left or right. A drag past 6px is a pan, not a click, so it cannot
+   open a record by accident. */
+(function(){
+  const w=document.querySelector('section.tablewrap');if(!w)return;
+  let sx=0,sl=0,panning=false,moved=false;
+  w.addEventListener('pointerdown',e=>{
+    if(e.target.closest('button,a,select,input,label,textarea'))return;
+    panning=true;moved=false;sx=e.clientX;sl=w.scrollLeft;
+  });
+  w.addEventListener('pointermove',e=>{
+    if(!panning)return;
+    const dx=e.clientX-sx;
+    if(Math.abs(dx)>6){moved=true;w.classList.add('panning');w.scrollLeft=sl-dx;}
+  });
+  const end=()=>{panning=false;w.classList.remove('panning');setTimeout(()=>{moved=false;},0);};
+  w.addEventListener('pointerup',end);w.addEventListener('pointerleave',end);
+  w.addEventListener('click',e=>{if(moved){e.stopPropagation();e.preventDefault();}},true);
+})();
 window.toggleDetail=(id,focus)=>{
   expanded=(expanded===id?null:id);render();
   // Pressing Research opens the panel AT the research section rather than at
@@ -3634,14 +3769,13 @@ wireMenu('btnLists','listMenu');
    same file prices any employer, so a lead whose only other data is a job
    title gets a dollar figure attached to it for nothing. It is an order of
    magnitude and it is labelled as one — the filing is annual and lags. */
-async function loadPlans(){
-  const btn=document.getElementById('btnPlans');
+function plansSig(){return [...new Set(state.leads.map(L=>(L.employer||'').trim().toLowerCase()).filter(Boolean))].sort().join('|');}
+async function loadPlans(quiet){
   const names=[...new Set(state.leads.map(L=>(L.employer||'').trim()).filter(Boolean))];
-  if(!names.length){toast('No employers on this list yet.');return;}
-  btn.disabled=true;const was=btn.textContent;btn.textContent='Looking up plans…';
+  if(!names.length){if(!quiet)toast('No employers on this list yet.');return;}
   try{
     const d=await api('/api/plans',{employers:names},'POST');
-    if(d.note){toast(d.note);return;}
+    if(d.note){if(!quiet)toast(d.note);return;}
     let hit=0;
     state.leads.forEach(L=>{
       const p=d.plans[(L.employer||'').trim()];
@@ -3650,10 +3784,13 @@ async function loadPlans(){
               participants:p.participants||null,year:p.plan_year||''};
       hit++;
     });
+    // An unmatched employer is an answered question. Recording the asked set
+    // is what retires the pricing phase instead of re-asking every press.
+    state.settings.plansSig=plansSig();
     save();render();
-    toast(`Plan size found for ${hit} of ${state.leads.length} leads — ${d.matched} of ${d.asked} employers matched.`);
-  }catch(e){toast('Could not read the Form 5500 file: '+e.message);}
-  finally{btn.disabled=false;btn.textContent=was;}
+    if(!quiet)toast(`Plan size found for ${hit} of ${state.leads.length} leads — ${d.matched} of ${d.asked} employers matched.`);
+    return hit;
+  }catch(e){if(!quiet)toast('Could not read the Form 5500 file: '+e.message);else throw e;}
 }
 function planChip(L){
   if(!L.plan||!L.plan.avg)return '';
@@ -3743,7 +3880,6 @@ window.focusLead=id=>{
   filterTier='';expanded=id;render();
   document.querySelector('.tablewrap').scrollIntoView({behavior:'smooth',block:'start'});
 };
-document.getElementById('btnPlans').addEventListener('click',loadPlans);
 document.getElementById('btnSignals').addEventListener('click',()=>{openModal('mSignals');loadSignals(false);});
 document.getElementById('sigMark').addEventListener('click',()=>loadSignals(true));
 document.getElementById('sigMail').addEventListener('click',async()=>{
@@ -3988,7 +4124,6 @@ function wireMenu(btnId,menuId){
   document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
 }
 wireMenu('btnMore','moreMenu');
-wireMenu('btnAdd','addMenu');
 
 /* The composed search, whether or not there is a way to run it from here. The
    panel used to hide its own buttons when neither route was available, leaving
@@ -4756,7 +4891,9 @@ window.enrichAllFree=async()=>{
   const firms=[];const byFirm={};
   ageTodo.forEach(L=>{const k=L.employer.trim().toLowerCase();
     if(!byFirm[k]){byFirm[k]=[];firms.push(k);}byFirm[k].push(L);});
-  if(!pubTodo.length&&!ageTodo.length){
+  const priceLeft=state.leads.some(L=>(L.employer||'').trim()&&!L.plan)
+    &&plansSig()!==(state.settings.plansSig||'');
+  if(!pubTodo.length&&!ageTodo.length&&!priceLeft){
     toast((pubDone||state.leads.some(L=>L.edgar))
       ?'Everything free has already been read for this list \u2014 press \u2696 on a lead to re-check it.'
       :'No leads with names to enrich.');return;}
@@ -4768,6 +4905,9 @@ window.enrichAllFree=async()=>{
   if(ageTodo.length)bits.push(`Proxy-statement ages for ${ageTodo.length} lead${ageTodo.length>1?'s':''} across `+
     `${firms.length} employer${firms.length>1?'s':''}: one read per employer, not per lead, and only public `+
     `companies file at all. No credits.`);
+  const priceTodo=state.leads.some(L=>(L.employer||'').trim()&&!L.plan)
+    &&plansSig()!==(state.settings.plansSig||'');
+  if(priceTodo)bits.push(`Retirement-plan size for each employer from the DOL Form 5500 file \u2014 one read for the whole list, free.`);
   if(pubDone)bits.push(`${pubDone} already read ${pubDone>1?'are':'is'} skipped.`);
   bits.push(`WhitePages is not included \u2014 it spends lookup credits, so it stays a button you press per lead.`);
   if(demo&&pubTodo.length>40)bits.push(`Note: the shared demo FEC key allows about 40 donation lookups an hour, `+
@@ -4834,6 +4974,15 @@ window.enrichAllFree=async()=>{
   };
   await Promise.all(Array.from({length:Math.min(2,firms.length)},ageWorker));
 
+  // --- plan pricing, one Form 5500 read for the whole list --------------------
+  // "Price the employers should be added to the free Enrich button." Employer-
+  // level, zero credits, cached server-side per employer and plan year.
+  if(!SWEEP.stop&&priceTodo){
+    SWEEP.phase='Pricing employers';SWEEP.done=0;SWEEP.total=1;label();
+    try{const hit=await loadPlans(true);if(hit)found.priced=hit;}catch(e){found.errors++;}
+    SWEEP.done=1;label();
+  }
+
   const stopped=SWEEP.stop;SWEEP=null;
   if(btn)btn.textContent='Enrich all (free)';
   save();render();
@@ -4843,6 +4992,7 @@ window.enrichAllFree=async()=>{
     (found.firmsRead?' ('+found.firmsRead+' employer'+(found.firmsRead>1?'s':'')+' read)':''));
   if(found.retired)out.push(found.retired+' told the FEC they are retired');
   if(found.donors)out.push(found.donors+' donor'+(found.donors>1?'s':'')+' with home city on record');
+  if(found.priced)out.push(found.priced+' lead'+(found.priced>1?'s':'')+' priced from employer 401(k) filings');
   if(found.fecMissed)out.push(found.fecMissed+' donation lookup'+(found.fecMissed>1?'s':'')+' did not run (rate limit) \u2014 press it again later to fill '+(found.fecMissed>1?'them':'it'));
   if(found.errors)out.push(found.errors+' failed');
   toast((stopped?'Stopped. ':'Done. ')+(out.join(' \u00b7 ')||'Nothing on the free record for this list.'));

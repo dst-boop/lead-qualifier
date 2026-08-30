@@ -77,6 +77,7 @@ const ANSWERS = {
 
   const calls = [];
   await p.route('**/api/me', r => r.fulfill({ json: me() }));
+  await p.route('**/api/plans',r=>r.fulfill({json:{plans:{},asked:0,matched:0}}));
   await p.route('**/api/settings', r => r.fulfill({ json: { ok: true } }));
   await p.route('**/api/lists', r => r.fulfill({ json: { lists: [{ id: 'default', name: 'My leads', count: 6, role: 'owner', owner: '' }], settings: {} } }));
   await p.route('**/api/lists/*', r => r.request().method() === 'GET'
