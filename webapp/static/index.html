@@ -1374,7 +1374,10 @@ function leadAge(L){
   // of a filing date, the record prints the month it happened.
   const da=dobAge(L); if(da>0)return da;
   if(L.edgar&&L.edgar.age>0)return L.edgar.age;
-  return (L.hd&&L.hd.age)||null;
+  if(L.hd&&L.hd.age)return L.hd.age;
+  // An age a page printed for this person by name, accepted by the operator
+  // with the quote in front of them. Never written by the app on its own.
+  return (L.webAge&&L.webAge.age>0)?L.webAge.age:null;
 }
 /* The best age available including a worked-out one. Kept separate from
    leadAge() on purpose: leadAge() is what the score treats as a fact, and an
@@ -1405,6 +1408,7 @@ function ageSource(L){
   if(dobAge(L)>0)return 'date of birth on public record ('+dobLabel(L)+')';
   if(L.edgar&&L.edgar.age>0)return 'SEC proxy statement '+(L.edgar.asOf||'');
   if(L.hd&&L.hd.age)return 'public record';
+  if(L.webAge&&L.webAge.age>0)return (L.webAge.src==='site'?'printed on the company site':'printed on the web')+' \u2014 you accepted it';
   const inf=inferredAge(L);
   return inf?('inferred: '+inf.basis):'public record';
 }
@@ -1415,6 +1419,7 @@ function ageBasis(L){
   if(dobAge(L)>0)return {kind:'dob',label:'born '+dobLabel(L)};
   if(L.edgar&&L.edgar.age>0)return {kind:'filed',label:'SEC filing'};
   if(L.hd&&L.hd.age)return {kind:'record',label:'public record'};
+  if(L.webAge&&L.webAge.age>0)return {kind:'checked',label:(L.webAge.src==='site'?'company site':'web')+', accepted'};
   if(L.ageVerified)return {kind:'checked',label:'checked by hand'};
   const inf=inferredAge(L);
   if(inf)return {kind:'inferred',label:inf.basis};
@@ -2735,12 +2740,40 @@ function researchActions(L){
     out.push(['edgarAge','Age from the SEC','Their employer\u2019s proxy statement prints ages for officers and directors','free']);
   if(!L.pub&&L.lastName&&window.ME&&ME.signed_in)
     out.push(['freeLookup','Public record','Political donations \u2014 home city, employer and occupation as they reported them \u2014 and SEC insider filings','free']);
+  if(!L.site&&window.ME&&ME.features&&ME.features.site_reader&&(siteFromLead(L)||L.employer))
+    out.push(['readSite','Employer\u2019s own site','Their About page often prints what no vendor sells: who owns it, founded when, years in business \u2014 every finding quoted','free']);
+  if(!L.web&&L.lastName&&window.ME&&ME.features&&ME.features.web_research)
+    out.push(['webResearch','Search the web (AI)','Searches name + employer + title the way you would by hand: location, age clues, spouse, socials, office phone, email pattern \u2014 quoted and linked, for you to accept or discard','free \u2014 AI tokens']);
   return out;
 }
 function researchCount(L){return researchActions(L).length;}
+/* The operator's own two hands: prefilled searches they click themselves.
+   Manual, one lead at a time, on sites a person is welcome on \u2014 the app
+   never fetches these, it only saves the typing. */
+const FREEMAIL=new Set(['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com','msn.com','comcast.net','me.com','live.com','att.net','verizon.net','sbcglobal.net','proton.me','protonmail.com']);
+function siteFromLead(L){
+  for(const e of [L.email,L.personalEmail]){
+    const d=(''+(e||'')).split('@')[1];
+    if(d&&!FREEMAIL.has(d.toLowerCase()))return 'https://'+d.toLowerCase();
+  }
+  return (L.web&&L.web.found&&L.web.found.links&&L.web.found.links.company_site)||'';
+}
+function researchLinks(L){
+  const name=((L.firstName||'')+' '+(L.lastName||'')).trim();
+  if(!name)return '';
+  const a=(h,t)=>`<a target="_blank" rel="noopener" href="${esc(h)}">${t}</a>`;
+  const goog='https://www.google.com/search?q='+encodeURIComponent(`"${name}" "${(L.employer||'').trim()}" ${(L.title||'').trim()}`.replace(/""\s*/,'').trim());
+  const slug=name.toLowerCase().replace(/[^a-z\s-]/g,'').trim().replace(/\s+/g,'-');
+  const st=(L.state&&(''+L.state).length===2?L.state:((L.hd&&L.hd.state)||'')).toLowerCase();
+  const fps='https://www.fastpeoplesearch.com/name/'+slug+(st?'_'+st:'');
+  const site=siteFromLead(L);
+  const parts=[a(goog,'Google them'),a(fps,'FastPeopleSearch')];
+  if(site)parts.push(a(site,'company site'));
+  return '<p class="hint" style="margin-top:8px">Look yourself \u2014 opens in a new tab: '+parts.join(' \u00b7 ')+'</p>';
+}
 function researchPanel(L){
   const acts=researchActions(L);
-  if(!acts.length)return '<p class="hint">Every source this app can reach has already been asked about this lead.</p>';
+  if(!acts.length)return '<p class="hint">Every source this app can reach has already been asked about this lead.</p>'+researchLinks(L);
   const rows=acts.map(([fn,label,what,cost])=>{
     const call=`${fn}('${L.id}')`;
     const free=cost==='free';
@@ -2752,7 +2785,63 @@ function researchPanel(L){
   }).join('');
   // Only when one of these would actually spend it.
   const spends=acts.some(a=>/WhitePages/.test(a[3]));
-  return rows+(spends?wpLeftLine():'');
+  return rows+researchLinks(L)+(spends?wpLeftLine():'');
+}
+/* What the employer's own site said — every line with its quote, every accept
+   an operator's click. A surname match gates the accept buttons: a page that
+   prints an age for someone else must not put a number on this lead. */
+function siteSection(L){
+  if(!L.site)return '';
+  const f=L.site.found;
+  const b=['<h4 style="margin-top:12px">Their own site</h4>'];
+  if(!f){b.push(`<p class="hint">${esc(L.site.root||'')} \u2014 ${esc(L.site.reason||'nothing readable')}.</p>`);return b.join('');}
+  const sn=(L.lastName||'').trim().toLowerCase();
+  const mine=x=>sn&&(''+(x||'')).toLowerCase().includes(sn);
+  (f.owners||[]).forEach(o=>b.push(`<div class="sigrow ${mine(o.name)?'hit':''}"><span>${esc(o.name)}${o.title?' \u00b7 '+esc(o.title):''}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(o.quote)}\u201d</span></div>`));
+  if(f.year_founded)b.push(`<div class="sigrow hit"><span>Founded ${f.year_founded}${f.years_in_business?' \u00b7 '+f.years_in_business+' yrs in business':''}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(f.year_founded_quote||f.years_in_business_quote||'')}\u201d</span></div>`);
+  else if(f.years_in_business)b.push(`<div class="sigrow hit"><span>${f.years_in_business} yrs in business</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(f.years_in_business_quote||'')}\u201d</span></div>`);
+  (f.ages||[]).forEach(a=>{
+    b.push(`<div class="sigrow hit"><span>${esc(a.name)}, age ${a.age}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(a.quote)}\u201d</span></div>`);
+    if(mine(a.name)&&!(L.webAge&&L.webAge.age))b.push(`<div style="margin-top:2px"><button class="mbtn" onclick="acceptWebAge('${L.id}',${a.age},'site')">Use age ${a.age} \u2014 it names ${esc(a.name)}</button></div>`);
+  });
+  if(f.career_start_year&&!L.firstJobYear)b.push(`<p class="hint" style="margin-top:3px">\u201c${esc(f.career_start_quote||'')}\u201d <button class="mbtn" onclick="useCareerStart('${L.id}',${f.career_start_year})">Use ${f.career_start_year} as career start</button></p>`);
+  b.push(`<p class="hint" style="margin-top:3px">Read from ${esc((L.site.root||'').replace(/^https?:\/\//,''))} \u2014 their words, not a vendor\u2019s. Accepting a line is your call.</p>`);
+  return b.join('');
+}
+/* What the web search found — location first, because "the list usually
+   carries the employer's address" is the single most common reason a
+   WhitePages search misses. Conflicts are surfaced, never auto-resolved. */
+function webSection(L){
+  if(!L.web)return '';
+  const f=L.web.found;
+  const b=['<h4 style="margin-top:12px">Web research</h4>'];
+  if(!f){b.push(`<p class="hint">${esc(L.web.reason||'nothing tied to this name and employer')}.</p>`);return b.join('');}
+  if(f.summary)b.push(`<p class="hint">${esc(f.summary)}</p>`);
+  const src=u=>u?` <a target="_blank" rel="noopener" href="${esc(u)}">source</a>`:'';
+  if(f.location){
+    const place=[f.location.city,f.location.state].filter(Boolean).join(', ');
+    const conflict=L.state&&f.location.state&&L.state!==f.location.state;
+    b.push(`<div class="sigrow hit"><span>Located: ${esc(place)}${conflict?' \u2014 the list says '+esc(L.state):''}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(f.location.quote||'')}\u201d${src(f.location.url)}</span></div>`);
+    if((L.city||'')!==(f.location.city||'')||conflict)
+      b.push(`<div style="margin-top:2px"><button class="mbtn" onclick="useWebLocation('${L.id}')">${conflict?'Replace '+esc(L.state)+' with '+esc(place):'Use '+esc(place)}</button><span class="hint" style="margin-left:6px">Points the WhitePages search at where they actually live.</span></div>`);
+  }
+  const sn2=(L.lastName||'').trim().toLowerCase();
+  (f.ages||[]).forEach(a=>{
+    b.push(`<div class="sigrow hit"><span>${esc(a.name)}, age ${a.age}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(a.quote)}\u201d${src(a.url)}</span></div>`);
+    if(sn2&&(''+a.name).toLowerCase().includes(sn2)&&!(L.webAge&&L.webAge.age))
+      b.push(`<div style="margin-top:2px"><button class="mbtn" onclick="acceptWebAge('${L.id}',${a.age},'web')">Use age ${a.age}</button></div>`);
+  });
+  (f.age_hints||[]).forEach(h=>b.push(`<div class="sigrow"><span>Age clue: ${esc(h.hint)}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(h.quote)}\u201d${src(h.url)}</span></div>`));
+  if(f.spouse)b.push(`<div class="sigrow hit"><span>Spouse: ${esc(f.spouse.name)}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">\u201c${esc(f.spouse.quote||'')}\u201d${src(f.spouse.url)}</span></div>`);
+  if(f.office_phone){
+    b.push(`<div class="sigrow hit"><span>Office: ${esc(f.office_phone.number)}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">${src(f.office_phone.url)}</span></div>`);
+    if(!L.directPhone)b.push(`<div style="margin-top:2px"><button class="mbtn" onclick="useWebPhone('${L.id}')">Add as business phone</button></div>`);
+  }
+  if(f.email_pattern)b.push(`<div class="sigrow"><span>Email pattern: ${esc(f.email_pattern.pattern)}</span><span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">${src(f.email_pattern.url)}</span></div>`);
+  const lk=Object.entries(f.links||{});
+  if(lk.length)b.push('<p class="hint" style="margin-top:3px">Found: '+lk.map(([k,u])=>`<a target="_blank" rel="noopener" href="${esc(u)}">${esc(k.replace('_',' '))}</a>`).join(' \u00b7 ')+'</p>');
+  b.push('<p class="hint" style="margin-top:3px">Found on the web \u2014 read a source before trusting a line. Accepting one is your call; nothing here was written onto the lead by the app.</p>');
+  return b.join('');
 }
 function detailRow(L){
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
@@ -2816,6 +2905,7 @@ function detailRow(L){
         <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
         <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
       </div>
+      ${siteSection(L)}${webSection(L)}
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
     </div>
@@ -5042,6 +5132,99 @@ window.enrichHome=async id=>{
   }catch(e){toast('Enrich failed: '+e.message);}
 };
 ACT_LABEL.edgar='SEC filing';
+ACT_LABEL.site='Company site';
+ACT_LABEL.web='Web research';
+/* ---- the resourceful pair ----
+   "You need to be more resourceful when enriching... If I was doing this
+   manually: search google for name + employer + title; view their website."
+   readSite fetches the employer's own pages on the publisher's terms
+   (robots.txt, denylist, rate limit — webapp/harvest.py) and webResearch
+   runs the search through the Claude API's search tool, a licensed API.
+   Both record their answer — including a miss — and neither writes a fact
+   onto the lead by itself: findings carry their quote and source, and only
+   an operator's click accepts one. */
+window.readSite=async id=>{
+  const L=byId(id);if(!L)return;
+  let site=siteFromLead(L);
+  if(!site){
+    site=await appPrompt('What is the company\u2019s website? (Their email domain usually is it.)','https://');
+    if(!site||site==='https://')return;
+    if(!/^https?:\/\//.test(site))site='https://'+site;
+  }
+  toast('Reading '+site.replace(/^https?:\/\//,'')+'\u2026');
+  try{
+    const d=await api('/api/harvest/site',{website:site,company:L.employer||''});
+    if(!d.ok){
+      L.site={root:site,at:Date.now(),reason:d.reason||'nothing readable'};
+      L.updatedAt=Date.now();save();render();
+      toast('Site: '+(d.reason||'nothing readable there.'));return;
+    }
+    L.site={root:d.root,at:Date.now(),pages:(d.pages||[]).length,
+            found:d.findings||null,reason:d.findings?'':(d.note||'pages fetched but not read')};
+    L.updatedAt=Date.now();
+    const f=d.findings||{};
+    const bits=[];
+    if((f.owners||[]).length)bits.push((f.owners||[]).map(o=>o.name).join(', ')+' named');
+    if(f.year_founded)bits.push('founded '+f.year_founded);
+    if((f.ages||[]).length)bits.push('an age in print');
+    logAct(id,'site',(bits.join(' \u00b7 ')||'read, nothing usable')+' \u2014 '+(d.root||site));
+    save();render();
+    toast('Site read \u2014 '+(bits.join(' \u00b7 ')||'nothing quotable found')+'.');
+  }catch(e){toast('Site read failed: '+e.message);}
+};
+window.webResearch=async id=>{
+  const L=byId(id);if(!L)return;
+  toast('Searching the web for '+(L.firstName||'')+' '+(L.lastName||'')+'\u2026');
+  try{
+    const d=await api('/api/web-research',{first_name:L.firstName||'',last_name:L.lastName||'',
+      employer:L.employer||'',title:L.title||'',state:L.state||''});
+    const f=d.found||{};
+    const empty=!f.summary&&!f.location&&!(f.age_hints||[]).length&&!(f.ages||[]).length
+      &&!f.spouse&&!f.office_phone&&!Object.keys(f.links||{}).length;
+    L.web={at:Date.now(),searched:d.searched||'',found:empty?null:f,
+           reason:empty?'nothing tied to this name and employer':''};
+    L.updatedAt=Date.now();
+    const bits=[];
+    if(f.location)bits.push([f.location.city,f.location.state].filter(Boolean).join(', '));
+    if((f.ages||[]).length)bits.push('an age in print');
+    else if((f.age_hints||[]).length)bits.push((f.age_hints||[]).length+' age clue'+((f.age_hints||[]).length>1?'s':''));
+    if(f.spouse)bits.push('spouse named');
+    if(f.office_phone)bits.push('office number');
+    logAct(id,'web',(bits.join(' \u00b7 ')||'nothing found')+' \u2014 findings in the record');
+    save();render();
+    toast('Web research \u2014 '+(bits.join(' \u00b7 ')||'nothing tied to this person')+'.');
+  }catch(e){toast('Web research failed: '+e.message);}
+};
+window.acceptWebAge=(id,age,src)=>{
+  const L=byId(id);if(!L||!(age>0))return;
+  L.webAge={age:+age,src:src||'web',at:Date.now()};
+  L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,src==='site'?'site':'web','age '+age+' accepted \u2014 now '+L.tier+'\u00b7'+L.score);
+  save();render();
+};
+window.useWebLocation=id=>{
+  const L=byId(id);const loc=L&&L.web&&L.web.found&&L.web.found.location;
+  if(!loc)return;
+  L.city=loc.city||L.city;L.state=loc.state||L.state;
+  L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'web','location set to '+[loc.city,loc.state].filter(Boolean).join(', ')+' (web, you accepted)');
+  save();render();
+  toast('Location set \u2014 the WhitePages search will look there now.');
+};
+window.useWebPhone=id=>{
+  const L=byId(id);const ph=L&&L.web&&L.web.found&&L.web.found.office_phone;
+  if(!ph||!ph.number)return;
+  if(L.directPhone){toast('A business phone is already on file \u2014 not overwritten.');return;}
+  L.directPhone=ph.number;L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'web','office phone '+ph.number+' added (web, you accepted)');
+  save();render();
+};
+window.useCareerStart=(id,y)=>{
+  const L=byId(id);if(!L||!(y>1900))return;
+  L.firstJobYear=y;L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'site','career start '+y+' accepted \u2014 now '+L.tier+'\u00b7'+L.score);
+  save();render();
+};
 /* Age from the employer's latest proxy statement. Free and repeatable, unlike
    every other enrichment in this app — the cost of a miss is a wasted few
    seconds, so it is worth trying on any lead at a public company. */

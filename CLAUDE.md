@@ -99,6 +99,7 @@ Maximize useful data per lead and per dollar. Depth comes from exhausting paid s
 - Request the **maximum `outputFields`** available on our ZoomInfo tier in every enrichment call — a credit costs the same regardless of fields returned. Maintain the field list as config and audit it against the tier when the contract changes (see LEARNINGS: a disallowed field fails the whole call after the credit is spent).
 - Use ZoomInfo **corporate hierarchy** fields to resolve subsidiaries to parent companies at enrichment time (feeds the dedup rule below).
 - Capture ZoomInfo **intent signals / scoops** if available on the tier — store as timestamped timing signals.
+- **The employer's own site and the open web are sources** (free / token class): `/api/harvest/site` reads a private company's About pages on the publisher's terms (robots.txt, denylist, rate limit) and `/api/web-research` searches through the Claude API's search tool — a licensed API, never scraping. Both are per-lead and operator-initiated, never a sweep; every finding carries its quote and source URL, and nothing lands on a lead until the operator accepts it.
 - From Trestle, capture **line type (mobile/landline/VoIP), carrier, and address validation** — line type is both a contact-rate signal and a TCPA compliance input. Store it as a first-class field. A Trestle phone check also returns the **whole person record** — always read all of it; it often makes the person search unnecessary.
 
 **First-party signal loop:**
