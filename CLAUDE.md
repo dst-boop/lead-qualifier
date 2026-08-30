@@ -28,6 +28,7 @@ Stack:
 - **Integrations:** ZoomInfo (each user brings their own subscription), Trestle (WhitePages), Google OAuth (Drive/Gmail), Microsoft (see decision 6), Claude API, free federal sources (FEC, SEC EDGAR, DOL WARN feeds)
 - **DNS:** leads subdomain via CNAME; Google Workspace handles MX/SPF/DKIM on the root domain
 - **Tests:** `bash tests/run.sh` — ~58 suites, hermetic (no real credentials), run by CI (`.github/workflows/tests.yml`, check name `suite`) on every PR. Keep it green.
+- **Project documents:** everything not in this repo lives in the **"Lead Qualifier" shared Google Drive** — the watched sheet ("Wealth Management Lead Prospecting"), ZoomInfo exports and lead lists, the Age 59½ pipeline zips (including the `nurture.json` backup), and the Google Docs original of this file. Look there (Drive search, shared drives included) before declaring a referenced document missing. Lead-bearing files in that drive stay there — never into this public repo.
 
 ## Architecture Decisions (settled — reopen only with explicit approval)
 
