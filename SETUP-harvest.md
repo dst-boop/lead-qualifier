@@ -82,6 +82,66 @@ There is no frontier, no link discovery, no recursion. That is the difference
 between reading a page you were pointed at and operating a robot over someone
 else's site, and it is a limit in the code rather than a habit of the caller.
 
+## Reading a whole company site
+
+`POST /api/harvest/site` with `{"website": "acme.com"}` reads the pages of one
+company's own site that tend to say who runs it and how long it has run.
+
+**This is still not crawling, and the distinction is the point.** A crawler
+discovers: it parses a page, pulls out the links and follows them, so what it
+ends up fetching is decided by the site rather than by you. This does none of
+that. It tries a fixed list of conventional paths — `/about`, `/about-us`,
+`/our-team`, `/team`, `/leadership`, `/our-story`, `/history`, `/management` —
+on the one host you named, in that order, and stops. Nothing is parsed for
+links, nothing is queued, nothing recurses. The complete set of URLs it can
+ever request is knowable before it runs: it is that list.
+
+Every one of those requests goes through the same `fetch()` as the single-page
+route, so robots.txt, the terms denylist, the private-address refusal and the
+one-request-per-second-per-host rate all apply unchanged. A site whose
+robots.txt disallows `/team` simply yields nothing for `/team`.
+
+### Why this exists
+
+`SETUP-edgar.md` gets an exact age, free, for Section 16 officers and directors
+— and for nobody else. A list of local business owners is mostly **private**
+companies, which file no proxy statement, so the free age signal is missing for
+exactly the leads it would matter most for.
+
+A firm's own About page routinely states what no vendor sells: *"serving Long
+Island since 1987"*, *"founded by Frank Delgado"*, *"over 35 years in the
+trade"*. For an owner-operator that is the career-length evidence the scoring
+model otherwise has to do without.
+
+### What comes back
+
+With `ANTHROPIC_API_KEY` set, the pages are read and returned as findings:
+owners and their titles, year founded, years in business, any age printed for a
+named person, and a career start year.
+
+**Every value carries the sentence it came from, and a value without one is
+dropped before it reaches you.** The prompt asks for a quote behind each; the
+server enforces it, because a model ignoring that instruction once would
+otherwise put an unsourced age on screen looking exactly like a sourced one.
+Ages outside 18–100 and years outside 1800–now are discarded the same way.
+
+Without the key, the endpoint returns the page text and says it was not read.
+
+### Nothing lands on a lead by itself
+
+Findings come back for a person to accept or discard. Nothing is written onto a
+lead automatically — `docs/ADR.md` §17 on why a derived value that arrives
+looking like an observed one is worse than a blank. *"Founded 1987"* is
+evidence about a company; that its president is 60 is an inference, and the two
+should not end up in the same column by accident.
+
+### What it costs in time
+
+Eight paths at one request per second is roughly eight seconds per company, and
+the rate limit is per host, so unrelated companies do not queue behind each
+other. A few hundred sites is a background job, not a click — budget minutes,
+and note that most sites answer on the first or second path.
+
 ### Errors say which rule stopped you
 
 | `rule` | Meaning |

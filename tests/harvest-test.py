@@ -46,6 +46,28 @@ async def secret():
     return HTMLResponse("<p>should never be read</p>")
 
 
+@app.get("/about")
+async def about():
+    HITS.append("about")
+    return HTMLResponse("<html><head><title>About Cordova</title></head><body>"
+                        "<p>Cordova Industrial has served Long Island since 1987. "
+                        "Founded by Frank Delgado, still president today.</p></body></html>")
+
+
+@app.get("/our-team")
+async def our_team():
+    HITS.append("our-team")
+    return HTMLResponse("<html><head><title>Our Team</title></head><body>"
+                        "<p>Frank Delgado, President. Marie Okonjo, Operations.</p>"
+                        "</body></html>")
+
+
+@app.get("/private/secret2")
+async def secret2():
+    HITS.append("secret2")
+    return HTMLResponse("<p>should never be read</p>")
+
+
 @app.get("/missing")
 async def missing():
     return HTMLResponse("<p>gone</p>", status_code=404)
@@ -107,6 +129,20 @@ ck("refuses a data: url", bool(H.is_denied("data:text/html,<p>x")))
 ck("refuses nonsense", bool(H.is_denied("not a url")))
 ck("allows an ordinary company page", H.is_denied("https://www.boeing.com/company/leadership") is None)
 
+# --- site_root: a "Website" column is not a column of URLs ---------------------
+for raw, want in (("acme.com", "https://acme.com"),
+                  ("www.acme.com", "https://www.acme.com"),
+                  ("https://acme.com/about?x=1", "https://acme.com"),
+                  ("HTTP://ACME.COM", "http://acme.com")):
+    ck(f"site_root({raw!r})", H.site_root(raw) == want, H.site_root(raw))
+for junk in ("", "   ", "n/a", "5165551234", "not a url", "localhost"):
+    ck(f"site_root refuses {junk!r}", H.site_root(junk) is None, H.site_root(junk))
+
+ck("the paths actually tried include the leadership page",
+   "/leadership" in H.SITE_PATHS[:H.MAX_SITE_TRIES], H.SITE_PATHS[:H.MAX_SITE_TRIES])
+ck("  ...and the list is finite and knowable before it runs",
+   len(H.SITE_PATHS) < 20 and all(p.startswith("/") for p in H.SITE_PATHS))
+
 
 async def main():
     global n, bad
@@ -164,6 +200,47 @@ async def main():
            unreachable.get("ok") is False, unreachable)
         ck("  ...and it is the robots rule that refused, not the address guard",
            unreachable.get("rule") == "robots", unreachable.get("rule"))
+
+    # --- read_site: several pages of one site, still not a crawl -------------
+    async with httpx.AsyncClient() as cx:
+        H._last_hit.clear()
+        HITS.clear()
+        site = await H.read_site(cx, BASE, AGENT, max_pages=2, max_tries=6)
+        ck("a company site yields pages", site.get("ok") is True, site.get("reason"))
+        urls = [p["url"] for p in site["pages"]]
+        ck("  ...the about page among them", any(u.endswith("/about") for u in urls), urls)
+        ck("  ...stopping at max_pages", len(site["pages"]) == 2, urls)
+        ck("  ...and reporting the paths that came back empty",
+           any(t["rule"] == "status" for t in site["tried"]), site["tried"])
+
+        ck("no link on any page was followed",
+           all(any(u.endswith(p) for p in H.SITE_PATHS) for u in urls), urls)
+        ck("  ...and nothing outside the named host was requested",
+           all(u.startswith(BASE) for u in urls), urls)
+
+        HITS.clear()
+        H._last_hit.clear()
+        blocked = await H.read_site(cx, BASE, AGENT,
+                                    paths=("/private/secret2",), max_tries=1)
+        ck("robots.txt still refuses inside read_site", blocked.get("ok") is False, blocked)
+        ck("  ...and that page was never requested", "secret2" not in HITS, HITS)
+
+        denied = await H.read_site(cx, "https://www.linkedin.com", AGENT)
+        ck("the terms denylist still refuses a whole site",
+           denied.get("ok") is False and denied.get("rule") == "terms", denied.get("rule"))
+        ck("  ...before any request is made", denied["tried"] == [], denied["tried"])
+
+        junk = await H.read_site(cx, "n/a", AGENT)
+        ck("a junk website value is refused, not requested",
+           junk.get("ok") is False and junk["tried"] == [], junk)
+
+        H._last_hit.clear()
+        dupe = await H.read_site(cx, BASE, AGENT,
+                                 paths=("/about", "/about", "/our-team"), max_tries=3)
+        ck("the same page twice is kept once",
+           len(dupe["pages"]) == 2, [p["url"] for p in dupe["pages"]])
+        ck("  ...and the repeat is reported as a duplicate",
+           any(t["rule"] == "duplicate" for t in dupe["tried"]), dupe["tried"])
 
     print()
     print(f"FAILURES {bad} of {n}" if bad else f"all {n} checks passed")
