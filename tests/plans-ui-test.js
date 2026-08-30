@@ -52,12 +52,19 @@ const me=o=>({signed_in:true,provider:'google',name:'Dan',email:'dan@fpa.com',
                           null,{timeout:15000});
   await p.waitForTimeout(700);
 
-  ck('the button lives in Enrich, not Track',
-     await p.evaluate(()=>document.getElementById('stEnrich').contains(document.getElementById('btnPlans'))));
-  ck('  ...and says it is free', /free/.test(await p.textContent('#btnPlans')),
-     await p.textContent('#btnPlans'));
+  // "Price the employers should be added to the free Enrich button." No
+  // standalone button any more — pricing is a phase of the free sweep, and
+  // the sweep's own button says so.
+  ck('the standalone pricing button is gone',
+     await p.evaluate(()=>!document.getElementById('btnPlans')));
+  ck('  ...its job named on the free enrich button instead',
+     /Form 5500/.test(await p.getAttribute('#btnFreeAll','title')),
+     await p.getAttribute('#btnFreeAll','title'));
+  ck('  ...and the sweep runs it as its own phase',
+     await p.evaluate(()=>/Pricing employers/.test(enrichAllFree.toString())
+       &&/loadPlans\(true\)/.test(enrichAllFree.toString())));
 
-  await p.click('#btnPlans');await p.waitForTimeout(700);
+  await p.evaluate(()=>loadPlans());await p.waitForTimeout(700);
   ck('it asks about each distinct employer once, not each lead',
      asked.length===1&&asked[0].employers.length===3, JSON.stringify(asked[0]||{}));
   ck('  ...listing the employers on the list',
@@ -86,12 +93,12 @@ const me=o=>({signed_in:true,provider:'google',name:'Dan',email:'dan@fpa.com',
   // --- degrading -----------------------------------------------------------
   reply={plans:{},note:'FORM5500_URL is not set — see SETUP-prospecting.md.'};
   await p.evaluate(()=>{state.leads.forEach(L=>delete L.plan);save();render();});
-  await p.click('#btnPlans');await p.waitForTimeout(700);
+  await p.evaluate(()=>loadPlans());await p.waitForTimeout(700);
   ck('an unconfigured source says so',
      /FORM5500_URL is not set/.test(await p.textContent('#toast')), await p.textContent('#toast'));
   ck('  ...and invents no figures',
      await p.evaluate(()=>state.leads.every(L=>!L.plan)));
-  ck('  ...leaving the button usable', await p.evaluate(()=>!document.getElementById('btnPlans').disabled));
+  ck('  ...leaving the free-enrich button usable', await p.evaluate(()=>!document.getElementById('btnFreeAll').disabled));
 
   ck('no page errors', errs.length===0, errs.slice(0,2).join(' | '));
   console.log(fail?`\nFAILURES: ${fail} of ${n}`:`\nall ${n} checks passed`);

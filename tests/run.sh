@@ -37,7 +37,7 @@ summary(){
 }
 
 # Suites that assert and exit non-zero. These are the regression guard.
-SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js track-ui-test.js signals-ui-test.js plans-ui-test.js intl-build-test.js wealthfeed-test.js wp-record-ui-test.js recheck-test.js free-ui-test.js free-sweep-test.js export-columns-test.js upgrade-test.js hh-test.js v3-test.js age-search-test.js admin-ui-test.js newuser-test.js master-test.js owa-invite-test.js hostile-data-test.js lifedata-test.js"
+SUITES="score-test.js mobile-test.js isolation-test.js zi-ui-test.js automap-test.js recipe-test.js edgar-ui-test.js zi-mcp-ui-test.js opps-ui-test.js research-prompt-test.js scs-test.js pipeline-test.js lists-ui-test.js track-ui-test.js signals-ui-test.js plans-ui-test.js intl-build-test.js wealthfeed-test.js wp-record-ui-test.js recheck-test.js free-ui-test.js free-sweep-test.js export-columns-test.js upgrade-test.js hh-test.js v3-test.js age-search-test.js admin-ui-test.js newuser-test.js master-test.js owa-invite-test.js hostile-data-test.js lifedata-test.js bulkwp-test.js"
 FAILED=""
 for s in $SUITES; do
   printf '%-20s ' "$s"

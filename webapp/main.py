@@ -2520,11 +2520,11 @@ def _source_counties() -> set:
     return {prospecting.norm_county(c) for c in SOURCE_COUNTIES.split(",") if c.strip()}
 
 
-def _warn_feeds() -> list:
-    return _warn_feeds_checked()[0]
+async def _warn_feeds(drive_token: str = "") -> list:
+    return (await _warn_feeds_checked(drive_token))[0]
 
 
-def _warn_feeds_checked() -> tuple:
+async def _warn_feeds_checked(drive_token: str = "") -> tuple:
     """(feeds, complaint). A complaint means the setting is wrong, not empty.
 
     Three silences used to look identical: nothing set, JSON that will not
@@ -2534,13 +2534,26 @@ def _warn_feeds_checked() -> tuple:
     it looks configured from the outside and reports no layoffs from the
     inside.
     """
-    if not WARN_FEEDS.strip():
+    raw = WARN_FEEDS.strip()
+    if not raw:
         return [], ""
+    # The value may also be a single URL (or Drive link) to a JSON file holding
+    # the list. One token, no commas — immune to gcloud's env-var splitting,
+    # which is exactly the mistake that shredded this variable in the field.
+    # tools/warn_sync.py publishes precisely that file (warn_feeds.json).
+    if raw.startswith(("http://", "https://", "drive:")) or _DRIVE_ID.search(raw):
+        try:
+            raw = await _get(raw, drive_token=drive_token)
+        except Exception as e:
+            return [], (f"WARN_FEEDS points at {WARN_FEEDS.strip()[:80]} but fetching it "
+                        f"failed ({type(e).__name__}: {str(e)[:120]}).")
     try:
-        feeds = json.loads(WARN_FEEDS)
+        feeds = json.loads(raw)
     except ValueError as e:
         return [], (f"WARN_FEEDS is set but is not valid JSON ({e}). It must be a list "
-                    f'like [{{"id":"nj","state":"NJ","format":"csv","url":"https://..."}}].')
+                    f'like [{{"id":"nj","state":"NJ","format":"csv","url":"https://..."}}] '
+                    f"— or one URL to a JSON file holding that list, which survives "
+                    f"gcloud's comma-splitting because it has no commas in it.")
     if not isinstance(feeds, list):
         return [], ("WARN_FEEDS parsed as "
                     f"{type(feeds).__name__}, but it must be a list of feed objects.")
@@ -2636,7 +2649,7 @@ async def _load_warn(drive_token: str = "", fresh: bool = False) -> dict:
         if got is not None:
             return {**got, "cached": True}
     events, report = [], []
-    for feed in _warn_feeds():
+    for feed in await _warn_feeds(drive_token):
         fid = feed.get("id") or feed.get("state") or feed["url"][:40]
         try:
             if (feed.get("format") or "csv").lower() == "json":
@@ -2747,7 +2760,7 @@ async def sources_probe(request: Request, which: str = "all"):
     out = {"states": sorted(_source_states()), "counties": sorted(_source_counties()),
            "min_workers": SOURCE_MIN_WORKERS}
     if which in ("all", "warn"):
-        feeds = _warn_feeds()
+        feeds = await _warn_feeds(await _drive_token_for(request))
         out["warn"] = {"configured": len(feeds)}
         if feeds:
             got = await _load_warn(await _drive_token_for(request), fresh=True)
@@ -2788,7 +2801,7 @@ async def sources_refresh(request: Request):
     warn = await _load_warn(tok, fresh=True)
     if not warn["events"]:
         return {"stored": 0, "feeds": warn["feeds"],
-                "note": (_warn_feeds_checked()[1]
+                "note": ((await _warn_feeds_checked(tok))[1]
                          or "No WARN events. Set WARN_FEEDS, then check /api/sources/probe.")}
     try:
         plans = await _load_plans(tok, fresh=True)
@@ -2822,7 +2835,7 @@ async def opportunities(request: Request, refresh: bool = False):
         # nothing is configured yet, or feeds ran and found nothing. Pointing
         # a user at a markdown file answers neither, and it was the first
         # thing a new account saw here.
-        _feeds, complaint = _warn_feeds_checked()
+        _feeds, complaint = await _warn_feeds_checked()
         if complaint:
             # Configured, and configured wrongly. Naming that is the difference
             # between a five-minute fix and a week of believing there are no

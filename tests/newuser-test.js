@@ -112,9 +112,18 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
           mobilePhone: '(973) 555-0142', email: 'a@m.com', status: 'New', activity: [] }] } })
     : r.fulfill({ json: { ok: true, lists: [{ id: 'default', name: 'My leads', count: 1, role: 'owner', owner: '' }] } }));
   await load();
-  const src = await p.evaluate(() => [...document.querySelectorAll('#stSource .stacts > *')]
-    .filter(e => e.offsetParent !== null).length);
-  ck('the Source stage offers three things, not five', src === 3, src);
+  // "Adjust Source so a drop down is not needed" — every way in is a visible
+  // button now, each explaining itself in its title, and no menu hides any.
+  const src = await p.evaluate(() => ({
+    n: [...document.querySelectorAll('#stSource .stacts > *')].filter(e => e.offsetParent !== null).length,
+    dropdown: !!document.getElementById('btnAdd'),
+    paste: !!document.getElementById('btnPaste') && !document.getElementById('btnPaste').closest('.menu'),
+    build: !!document.getElementById('btnBuildOpen') && !document.getElementById('btnBuildOpen').closest('.menu'),
+    titled: ['btnPaste', 'btnBuildOpen'].every(id => (document.getElementById(id).title || '').length > 20),
+  }));
+  ck('the Source stage has no dropdown — every way in is a visible button',
+     !src.dropdown && src.paste && src.build && src.n === 5, JSON.stringify(src));
+  ck('  ...each explaining itself in its title', src.titled);
   // The actions cell only — the phone number is also a button, but it is the
   // number itself, not chrome.
   const row = await p.evaluate(() => {
@@ -181,7 +190,7 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   for (const w of [1280, 980]) {
     await p.setViewportSize({ width: w, height: 900 });
     await p.waitForTimeout(200);
-    for (const [btn, menu] of [['btnAdd', 'addMenu'], ['btnMore', 'moreMenu'], ['btnLists', 'listMenu']]) {
+    for (const [btn, menu] of [['btnMore', 'moreMenu'], ['btnLists', 'listMenu']]) {
       await p.click('#' + btn); await p.waitForTimeout(150);
       const box = await p.evaluate(id => {
         const m = document.getElementById(id), r = m.getBoundingClientRect();

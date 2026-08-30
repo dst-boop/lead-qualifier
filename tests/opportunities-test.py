@@ -5,7 +5,7 @@ probe reports what came back rather than what was hoped for, that a broken feed
 degrades instead of taking the whole refresh down, and that a signed-out visitor
 cannot pull the list.
 """
-import io, json, os, sys, threading, time, zipfile
+import asyncio, io, json, os, sys, threading, time, zipfile
 
 os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
 for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
@@ -41,6 +41,13 @@ HITS = []
 async def warn():
     HITS.append("warn")
     return PlainTextResponse(WARN_CSV)
+
+
+@stub.get("/warn_feeds.json")
+async def warn_feeds_json():
+    HITS.append("feeds-url")
+    return PlainTextResponse(json.dumps(
+        [{"id": "nj", "state": "NJ", "format": "csv", "url": STUB + "/warn.csv"}]))
 
 
 @stub.get("/missing.csv")
@@ -204,7 +211,7 @@ for bad, want in [("not json at all", "not valid JSON"),
                   ('{"id":"nj"}', "must be a list"),
                   ('[{"id":"nj","state":"NJ"}]', 'none of them carries a "url"')]:
     main.WARN_FEEDS = bad
-    feeds, complaint = main._warn_feeds_checked()
+    feeds, complaint = asyncio.run(main._warn_feeds_checked())
     ck(f"a WARN_FEEDS that {want[:28]} is named, not called empty",
        feeds == [] and want in complaint, complaint[:110])
     r = c.get("/api/opportunities", params={"refresh": "true"})
@@ -213,9 +220,20 @@ for bad, want in [("not json at all", "not valid JSON"),
        r.json().get("note", "")[:110])
 main.WARN_FEEDS = '[{"id":"nj","state":"NJ","format":"csv","url":"' + STUB + '/warn.csv"}]'
 ck("a well-formed setting produces no complaint",
-   main._warn_feeds_checked() == ([{"id": "nj", "state": "NJ", "format": "csv",
-                                    "url": STUB + "/warn.csv"}], ""),
-   main._warn_feeds_checked()[1])
+   asyncio.run(main._warn_feeds_checked()) == ([{"id": "nj", "state": "NJ", "format": "csv",
+                                                 "url": STUB + "/warn.csv"}], ""),
+   asyncio.run(main._warn_feeds_checked())[1])
+# The URL form: one token, no commas, immune to gcloud's env-var splitting.
+main.WARN_FEEDS = STUB + "/warn_feeds.json"
+feeds_u, complaint_u = asyncio.run(main._warn_feeds_checked())
+ck("WARN_FEEDS may be one URL to a JSON file holding the feed list",
+   feeds_u == [{"id": "nj", "state": "NJ", "format": "csv",
+                "url": STUB + "/warn.csv"}] and complaint_u == "",
+   complaint_u or str(feeds_u)[:80])
+main.WARN_FEEDS = STUB + "/warn_feeds_missing.json"
+feeds_m, complaint_m = asyncio.run(main._warn_feeds_checked())
+ck("  ...and a URL that cannot be fetched is named, not called empty",
+   feeds_m == [] and "fetching it failed" in complaint_m, complaint_m[:100])
 main.WARN_FEEDS = ""          # back to the unconfigured precondition below
 r = c.post("/api/sources/refresh")
 ck("  ...and refresh refuses to overwrite with nothing",

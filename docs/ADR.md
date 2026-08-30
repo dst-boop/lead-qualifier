@@ -2417,3 +2417,41 @@ sharpest for operators who work from All leads. The panel says which list
 it read. Cross-list outcome sync is the next step if campaign-list work
 becomes the norm; a server-side insights endpoint replaces the in-page
 computation when lists outgrow the page.
+
+## 41. The interface test
+
+Six findings from working the app against a real 342-lead list, shipped as
+one pass.
+
+**Enrich holds both of its buttons.** "Enrich all (free)" lived in the
+header while the Enrich stage showed the paid button — the free path was
+homeless. Both now sit on the Enrich card, free first. And "Price the
+employers" stopped being its own decision: it is a phase of the free sweep
+("Pricing employers"), with its own confirmation line, its own progress
+label, and a recorded answer — the asked-employer set is remembered
+(`plansSig`), so an unmatched employer is an answered question, not a
+button that re-asks on every press.
+
+**Money in motion, root-caused at last.** The gcloud comma-splitting kept
+eating the JSON. `WARN_FEEDS` now also accepts a single URL (or Drive
+link) to a JSON file holding the feed list — one token, no commas, nothing
+for gcloud to shred. `tools/warn_sync.py` publishes exactly that file, and
+its workflow was triggered so the `warn-data` branch exists to point at.
+
+**Source has no dropdown.** "Adjust Source so a drop down is not needed":
+Paste a list, Search ZoomInfo, and Find employers are plain buttons on the
+card, each carrying its old menu sentence as a title.
+
+**The table is workable.** Column headers sort — click for one order,
+click again to flip — with the Sort select kept in step so either control
+tells the truth. A visible horizontal scrollbar, a checkbox column pinned
+left, the Actions column already pinned right, and drag-anywhere panning
+(a drag past 6px is a pan, not a click, so it cannot open a record).
+
+**Bulk WhitePages.** Tick leads (or select-all) and one press enriches
+them. Both guardrail phases survive the plural: the bar prices the worst
+case before asking, the confirmation names count, cost, skips, and the
+allowance, and each lead runs through the same wpLookup as the single
+button — number first, name search only on a miss, answered leads
+skipped. Re-checks stay per-lead by design: a deliberate re-spend is
+never a bulk one. Stop keeps the rest for later.
