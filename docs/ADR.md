@@ -2379,3 +2379,41 @@ Money in motion showed *"WARN_FEEDS is set but is not valid JSON"*. The
 cause was our own setup doc — gcloud splits `--set-env-vars` on commas, so
 the documented command shredded the JSON at every comma. The doc now leads
 with the `^|^` delimiter syntax.
+
+## 40. Life Data, and the loop that closes
+
+"The 'Life Data' sheet should contain all leads (current, updated, former,
+and future)... the app MUST continuously analyze to better grade, enrich,
+source, and identify the highest quality leads."
+
+**Where Life Data lives.** The master list already is the lifetime store —
+every lead lands on "All leads" at the moment it enters any list, it cannot
+be deleted as a list, and archived lists merge back into it. That is the
+Life Data record, and it stays in Firestore rather than a Google Sheet for
+three reasons: the app's Google scope is deliberately `drive.readonly`
+(§ PII rules — a sheet write would mean widening consent for every linked
+account), Firestore is deny-by-default where a Drive sheet is one sharing
+mistake from public, and a row-per-lead sheet sync fails the batch-safe
+test at national scale. The "Life Data export" button emits the lifetime
+CSV — identity, grade, signals fired, enrichment provenance, outcome,
+activity — for the operator to archive or paste into a sheet of their own.
+
+**The loop.** Statuses were already outcome data; nothing read them back.
+"What's converting" (More menu) now computes, fresh on every open, from the
+list on screen: set-rate by tier (is the rubric separating quality?),
+per-signal lift (set-rate when a signal fired vs when it did not), whether
+each paid enrichment's leads convert better than the unenriched, and which
+employers convert. Honesty guards throughout: a rate only appears with at
+least five leads on each side of the comparison, under fifteen worked leads
+the panel says "not enough outcomes" instead of charting noise, and every
+recommendation — lower this weight, source toward that signal, pull that
+employer (with the Equitable pre-approval warning attached) — is a
+suggestion the operator applies in ICP settings, never a silent retune.
+Provenance discipline applies to the analysis itself.
+
+**Known gap, stated not hidden:** a lead worked on a campaign list does not
+sync its status back to its master-list copy, so the lifetime picture is
+sharpest for operators who work from All leads. The panel says which list
+it read. Cross-list outcome sync is the next step if campaign-list work
+becomes the norm; a server-side insights endpoint replaces the in-page
+computation when lists outgrow the page.
