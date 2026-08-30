@@ -1,0 +1,93 @@
+# Scrape WARN notices for every covered state and publish them as CSV.
+#
+# Why this does not touch main: pushing to main is the deploy. A job that
+# committed data on a schedule would redeploy Cloud Run several times a week to
+# ship nothing, and would put the app's release history at the mercy of forty
+# state websites. The CSVs go to a `warn-data` branch instead, which nothing
+# deploys from and which the app reads over plain HTTPS.
+#
+# warn-scraper is installed here rather than added to requirements.txt, for the
+# same reason: it is a build-time tool for this job, not a dependency of the
+# service, and it has no business in the image Cloud Run runs.
+
+name: warn-sync
+
+on:
+  schedule:
+    # Daily, early UTC. WARN notices arrive continuously and states publish on
+    # their own cadence, so more often than daily is noise and less is stale.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      states:
+        description: "Comma-separated codes, or 'all'"
+        default: "all"
+
+concurrency:
+  group: warn-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write          # needed to push the data branch, and only that
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the scraper
+        run: pip install warn-scraper
+
+      - name: Scrape every covered state
+        id: scrape
+        run: |
+          python -m tools.warn_sync \
+            --out "$RUNNER_TEMP/warn" \
+            --states "${{ inputs.states || 'all' }}" \
+            --base-url "https://raw.githubusercontent.com/${{ github.repository }}/warn-data" \
+            | tee "$RUNNER_TEMP/report.txt"
+
+      - name: Publish to the warn-data branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The branch may not exist on the first run, so create it empty
+          # rather than branching off main -- it carries data, not code, and
+          # sharing history with the app would only make both harder to read.
+          if git ls-remote --exit-code --heads origin warn-data >/dev/null 2>&1; then
+            git fetch origin warn-data --depth 1
+            git worktree add "$RUNNER_TEMP/pub" origin/warn-data
+            git -C "$RUNNER_TEMP/pub" checkout -B warn-data
+          else
+            git worktree add --orphan -b warn-data "$RUNNER_TEMP/pub"
+          fi
+
+          # Replace rather than merge: a state that stopped being scraped
+          # should disappear, not linger as a file the app keeps fetching.
+          find "$RUNNER_TEMP/pub" -maxdepth 1 -name '*.csv' -delete
+          cp "$RUNNER_TEMP"/warn/*.csv "$RUNNER_TEMP/pub/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/warn/warn_feeds.json" "$RUNNER_TEMP/pub/"
+          cp "$RUNNER_TEMP/report.txt" "$RUNNER_TEMP/pub/README.txt"
+
+          cd "$RUNNER_TEMP/pub"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no change since the last run"
+            exit 0
+          fi
+          git commit -m "WARN data $(date -u +%Y-%m-%d)"
+          git push origin warn-data
+
+      - name: Report
+        if: always()
+        run: cat "$RUNNER_TEMP/report.txt" || echo "the scrape step produced no report"

@@ -72,6 +72,88 @@ gcloud run services update lead-qualifier --region us-east1 \
   --update-env-vars '^|^WARN_FEEDS=[{"id":"nj","state":"NJ","format":"csv","url":"https://…"}]'
 ```
 
+## Every state, not just the ones that publish a CSV
+
+`WARN_FEEDS` reads CSV and JSON. That is the whole reason the country is hard:
+a large share of states publish WARN as an HTML table or a PDF, and no amount
+of configuration reaches those. Finding the URL is not the problem — parsing
+what is behind it is.
+
+`tools/warn_sync.py` solves that by not solving it. It runs
+[`warn-scraper`](https://pypi.org/project/warn-scraper/) (Big Local News, at
+Stanford), which has a per-state module for each of those sites and writes
+every one out as CSV, and then publishes the result as static files the app
+reads over plain HTTPS. The messy part stays where people who watch those
+sites for a living already maintain it.
+
+```bash
+pip install warn-scraper
+python -m tools.warn_sync --list          # what is covered today
+python -m tools.warn_sync --out data/warn \
+    --base-url https://raw.githubusercontent.com/OWNER/REPO/warn-data
+```
+
+It writes one `<state>.csv` per jurisdiction plus `warn_feeds.json`, which holds
+exactly the value to set as `WARN_FEEDS` — paste it in with the `^|^` prefix
+above.
+
+### Coverage, and what is not covered
+
+As of the current release, **41 jurisdictions: 40 states and DC.**
+
+```
+AK AL AZ CA CO CT DC DE FL GA HI IA ID IL IN KS KY LA MD ME MI MO MT NE
+NJ NM NY OH OK OR PA RI SC SD TN TX UT VA VT WA WI
+```
+
+**Ten states have no scraper at all:** AR, MA, MN, MS, NC, ND, NH, NV, WV, WY.
+Those are not partially covered or stale — they produce nothing, and the report
+says so on every run rather than letting a silent gap read as "no layoffs
+there." If one of them matters to you, the fix is a scraper module upstream or
+a hand-configured feed entry alongside the generated ones; `WARN_FEEDS` is a
+plain list, so the two mix.
+
+The state list is read from the installed package, not hard-coded here, so a
+release that adds a state is picked up by upgrading the dependency.
+
+### A failed state costs that state and nothing else
+
+Forty state websites means something is broken most weeks — a redesign, an
+expired certificate, a 503. `sync()` catches per state, so one failure loses
+that state's file and leaves the rest published. The run only exits non-zero
+when *every* state failed, which means the run itself is broken rather than a
+website. A state that produced an empty file is counted as failed, not
+published as an empty feed, because an empty CSV looks exactly like a quiet
+month.
+
+The report names each failure and its reason. Failed states are left alone
+rather than retried, which is how you get blocked.
+
+### The files are deliberately not normalised
+
+Each state's CSV keeps that state's own column names. `webapp/prospecting.py`
+already matches columns by alias, per feed — that is what the alias table is
+for — and collapsing forty schemas into one here would mean maintaining a
+second mapping that could silently disagree with the first. Run the probe after
+adding feeds; it reports the columns it actually matched.
+
+### The scheduled run publishes to a data branch, never to `main`
+
+`.github/workflows/warn-sync.yml` runs this daily and commits to a **`warn-data`
+branch**. That is not tidiness. **Pushing to `main` is the deploy** — a job that
+committed data on a schedule would redeploy Cloud Run several times a week to
+ship nothing, and would put the app's release history at the mercy of forty
+state websites. Nothing deploys from `warn-data`; the app just fetches from it.
+
+For the same reason `warn-scraper` is installed *in the workflow* and is not in
+`requirements.txt`. It is a build-time tool for this job, not a dependency of
+the service, and it has no business in the image Cloud Run runs.
+
+The workflow replaces the CSVs rather than merging them, so a state that stops
+being scraped disappears instead of lingering as a stale file the app keeps
+fetching. It needs `contents: write` and nothing else, and it skips the commit
+entirely when nothing changed.
+
 ## Working one metro rather than a whole state
 
 `SOURCE_STATES=NY` is too coarse for an advisor who covers Long Island. It
