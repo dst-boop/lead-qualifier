@@ -24,8 +24,15 @@ than a matter of who is using it.
 
 What this module does NOT do: crawl. It fetches a URL a person named, once.
 There is no frontier, no link-following and no discovery. That is a deliberate
-limit — the difference between reading a page you were pointed at and operating
+limit -- the difference between reading a page you were pointed at and operating
 a robot over someone else's site.
+
+read_site() reads several pages of one company site and does not change that.
+It tries a fixed list of conventional paths on the single host it was given;
+it never parses a page for links, never queues what it finds and never
+recurses, so the set of URLs it can request is knowable before it runs. Every
+one of them still goes through fetch(), and so through robots.txt, the terms
+denylist and the rate limit.
 """
 import asyncio
 import re
@@ -177,6 +184,108 @@ async def fetch(client, url: str, agent: str) -> dict:
     text = strip_html(body.decode(r.encoding or "utf-8", "replace"))
     return {"ok": True, "url": str(r.url), "title": _title(body), "text": text,
             "chars": len(text), "truncated": len(r.content) > MAX_BYTES}
+
+
+# ---------------------------------------------------------------- whole site
+
+# Reading one company's site still is not crawling, and the difference is worth
+# stating precisely because it is the whole basis on which this is defensible.
+# A crawler discovers: it parses a page, extracts links, and follows them, so
+# what it eventually fetches is decided by the site rather than by you. This
+# does none of that. It tries a fixed list of conventional paths on the one host
+# you named, in a fixed order, and stops. Nothing is parsed for links, nothing
+# is queued, nothing recurses, and the set of URLs it can ever request is
+# knowable before it runs -- it is this list.
+#
+# Every request still goes through fetch(), so robots.txt, the terms denylist,
+# the private-address refusal and the one-per-second-per-host rate all apply
+# unchanged. A site that disallows /about simply yields nothing for /about.
+# Ordered by how often the page both exists and says who runs the place, not
+# alphabetically: only the first MAX_SITE_TRIES are ever attempted, so a
+# valuable path sitting past that cut is a path that never runs.
+SITE_PATHS = (
+    "/about", "/about-us", "/our-team", "/team", "/leadership",
+    "/our-story", "/history", "/management",
+    "/staff", "/who-we-are", "/company", "/about.html", "/our-history",
+    "/meet-the-team", "/",
+)
+
+MAX_SITE_PAGES = 4          # how many pages that actually return text to keep
+MAX_SITE_TRIES = 8          # how many paths to attempt before giving up
+
+
+def site_root(website: str) -> Optional[str]:
+    """Normalise whatever is in a 'Website' column into scheme://host.
+
+    Vendor exports carry these as bare domains as often as URLs, and a bare
+    domain parsed as a URL has no hostname at all -- it lands in the path -- so
+    a missing scheme has to be supplied before anything else can be decided
+    about it.
+    """
+    raw = (website or "").strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = "https://" + raw.lstrip("/")
+    try:
+        u = urlparse(raw)
+        host = u.hostname or ""
+    except ValueError:
+        return None
+    # A "website" column holds plenty that is not one -- "n/a", a phone number,
+    # a company name with a space in it. Requiring a dot and rejecting
+    # whitespace turns those into None here rather than a doomed request later.
+    if not host or " " in host or "." not in host:
+        return None
+    return f"{(u.scheme or 'https').lower()}://{u.netloc.lower()}"
+
+
+async def read_site(client, website: str, agent: str, *,
+                    paths=SITE_PATHS, max_pages: int = MAX_SITE_PAGES,
+                    max_tries: int = MAX_SITE_TRIES) -> dict:
+    """The pages of one company site that carry who-runs-it information.
+
+    Returns every page that came back, plus a refusal note for the ones that
+    did not, so a site that yielded nothing can be told apart from a site that
+    refused -- "robots.txt disallows /team" and "there is no /team" are
+    different facts about a lead, and only one is worth retrying.
+    """
+    root = site_root(website)
+    if not root:
+        return {"ok": False, "reason": "That is not a website address.",
+                "rule": "terms", "pages": [], "tried": []}
+
+    denied = is_denied(root)
+    if denied:
+        return {"ok": False, "reason": denied, "rule": "terms",
+                "pages": [], "tried": []}
+
+    pages, tried = [], []
+    for path in paths[:max_tries]:
+        if len(pages) >= max_pages:
+            break
+        url = root + path
+        got = await fetch(client, url, agent)
+        if got.get("ok"):
+            # A site that answers 200 for everything -- a soft-404 SPA -- would
+            # otherwise return the same shell four times over.
+            if any(p["text"] == got["text"] for p in pages):
+                tried.append({"url": url, "rule": "duplicate",
+                              "reason": "Same page as one already read."})
+                continue
+            pages.append({"url": got["url"], "title": got.get("title", ""),
+                          "text": got["text"], "chars": got.get("chars", 0)})
+        else:
+            tried.append({"url": url, "rule": got.get("rule", ""),
+                          "reason": got.get("reason", "")})
+            # A host that refuses on terms, or whose robots.txt cannot be read,
+            # refuses identically for every other path. Asking eight times is
+            # the behaviour the rate limit exists to prevent.
+            if got.get("rule") in ("terms", "robots") and not pages:
+                break
+
+    return {"ok": bool(pages), "root": root, "pages": pages, "tried": tried,
+            "reason": "" if pages else "No readable page found on that site."}
 
 
 def _title(body: bytes) -> str:

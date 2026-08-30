@@ -4646,6 +4646,146 @@ async def harvest_page(body: HarvestRequest, request: Request):
     return got
 
 
+class SiteRequest(BaseModel):
+    website: str
+    company: str = ""
+    extract: bool = True
+
+
+@app.post("/api/harvest/site")
+async def harvest_site(body: SiteRequest, request: Request):
+    """Read one company's own site for who runs it and how long it has run.
+
+    Aimed at the population a proxy statement cannot answer for: the owner of a
+    private company. EDGAR prints an age for Section 16 officers and nobody
+    else, and most lists of local business owners are private companies, so the
+    free age signal is unavailable for exactly the leads it would matter most
+    for. A firm's own About page frequently states what no vendor sells --
+    "founded by Frank Delgado in 1987", "serving Long Island for over 35 years".
+
+    Still not a crawler: a fixed list of conventional paths on the one host
+    given, each through the same fetch() that honours robots.txt, the terms
+    denylist and the rate limit. See webapp/harvest.py.
+
+    Nothing here is written onto a lead. It returns findings with the sentence
+    each came from and the page it was on, for a person to accept or discard --
+    ADR 17 on why a derived value arriving dressed as an observed one is worse
+    than a blank.
+    """
+    await _active_token(request)
+    if not HARVEST_USER_AGENT:
+        raise HTTPException(
+            status_code=400,
+            detail="HARVEST_USER_AGENT is not set. Fetching a page without identifying "
+                   "who is asking is exactly what this app will not do — see "
+                   "SETUP-harvest.md.")
+
+    async with httpx.AsyncClient() as cx:
+        got = await harvest.read_site(cx, (body.website or "").strip(), HARVEST_USER_AGENT)
+
+    if not got.get("ok"):
+        return {"ok": False, "reason": got.get("reason") or "Nothing readable on that site.",
+                "rule": got.get("rule", ""), "root": got.get("root", ""),
+                "pages": [], "tried": got.get("tried", []), "findings": None}
+
+    pages = [{"url": p["url"], "title": p["title"], "chars": p["chars"]}
+             for p in got["pages"]]
+    out = {"ok": True, "root": got["root"], "pages": pages,
+           "tried": got.get("tried", []), "findings": None}
+    if not body.extract or not ANTHROPIC_API_KEY:
+        # The text is returned unread when there is no key, so the feature
+        # degrades to "fetched it, here it is" rather than failing.
+        out["text"] = "\n\n".join(
+            f"--- {p['url']} ---\n{p['text']}" for p in got["pages"])[:40_000]
+        if not ANTHROPIC_API_KEY and body.extract:
+            out["note"] = "ANTHROPIC_API_KEY is not set, so the pages were not read."
+        return out
+
+    doc = "\n\n".join(f"--- {p['url']} ---\n{p['text']}" for p in got["pages"])[:120_000]
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = (
+        "You are reading the public website of a company, to learn who owns or runs "
+        "it and how long it has operated. Report only what the pages actually say.\n\n"
+        f"Company: {body.company or got['root']}\n\n"
+        "Reply with one JSON object and nothing else:\n"
+        '{"owners": [{"name": "<as printed>", "title": "<as printed or null>", '
+        '"quote": "<the sentence saying it, max 200 chars>"}], '
+        '"year_founded": <integer or null>, "year_founded_quote": "<sentence or null>", '
+        '"years_in_business": <integer or null>, "years_in_business_quote": "<sentence or null>", '
+        '"ages": [{"name": "<person>", "age": <integer>, "quote": "<sentence>"}], '
+        '"career_start_year": <integer or null>, "career_start_quote": "<sentence or null>"}\n\n'
+        "Rules. Every value needs a quote from the page it came from; a value you "
+        "cannot quote is one you inferred, and it does not belong here. Do not "
+        "estimate an age from a founding year, a career length or a photograph — "
+        "report age only where the page prints a number of years old for a named "
+        "person. 'Serving Long Island since 1987' is year_founded, not an age. "
+        "'Over 35 years in the industry' is years_in_business. Return empty lists "
+        "and nulls rather than guesses: this feeds a call list, and a wrong owner "
+        "or a wrong age is worse than a blank.\n\nPAGES:\n" + doc
+    )
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:200]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:200]}")
+
+    raw = "".join(b.text for b in msg.content if b.type == "text")
+    a, z = raw.find("{"), raw.rfind("}")
+    if a == -1 or z == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON object.")
+    try:
+        found = json.loads(raw[a:z + 1])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+
+    out["findings"] = _clean_site_findings(found)
+    return out
+
+
+def _clean_site_findings(f: dict) -> dict:
+    """Drop anything unquoted or out of range before it reaches the caller.
+
+    The prompt asks for a quote behind every value; this enforces it, because a
+    model that ignores that instruction once would otherwise put an unsourced
+    age on screen looking exactly like a sourced one.
+    """
+    now = time.gmtime().tm_year
+
+    def year(v):
+        return v if isinstance(v, int) and 1800 <= v <= now else None
+
+    owners = [{"name": str(o.get("name"))[:120],
+               "title": (str(o["title"])[:120] if o.get("title") else None),
+               "quote": str(o.get("quote"))[:200]}
+              for o in (f.get("owners") or [])
+              if isinstance(o, dict) and o.get("name") and o.get("quote")]
+
+    ages = [{"name": str(a.get("name"))[:120], "age": a.get("age"),
+             "quote": str(a.get("quote"))[:200]}
+            for a in (f.get("ages") or [])
+            if isinstance(a, dict) and a.get("quote")
+            and isinstance(a.get("age"), int) and 18 <= a["age"] <= 100]
+
+    yf, yq = year(f.get("year_founded")), f.get("year_founded_quote")
+    yib = f.get("years_in_business")
+    yibq = f.get("years_in_business_quote")
+    cs, csq = year(f.get("career_start_year")), f.get("career_start_quote")
+    return {
+        "owners": owners[:12],
+        "ages": ages[:12],
+        "year_founded": yf if yq else None,
+        "year_founded_quote": str(yq)[:200] if (yf and yq) else None,
+        "years_in_business": (yib if (isinstance(yib, int) and 0 < yib <= 150 and yibq) else None),
+        "years_in_business_quote": str(yibq)[:200] if (yibq and isinstance(yib, int)) else None,
+        "career_start_year": cs if csq else None,
+        "career_start_quote": str(csq)[:200] if (cs and csq) else None,
+    }
+
+
 # ------------------------- money-in-motion signals -------------------------
 # The rest of the app finds people. This watches the ones already found and
 # says when something makes their retirement money movable. Everything here is
