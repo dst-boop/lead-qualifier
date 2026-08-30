@@ -1,0 +1,63 @@
+[
+  {
+    "id": "fx-001", "firstName": "Robert", "lastName": "Caldwell",
+    "jobTitle": "Chief Financial Officer", "managementLevel": "C Level Exec",
+    "companyName": "Meridian Health Systems", "companyEmployees": 8200,
+    "state": "NY", "monthsSinceJobChange": 22,
+    "priorJobs": [{"years": 9}, {"years": 7}, {"years": 6}],
+    "estimatedSalary": 340000, "totalCareerYears": 34,
+    "dob": "1964-11-02"
+  },
+  {
+    "id": "fx-002", "firstName": "Susan", "lastName": "Ortega",
+    "jobTitle": "SVP Operations", "managementLevel": "VP Level Exec",
+    "companyName": "Halstead Industries", "companyEmployees": 1400,
+    "state": "NJ", "monthsSinceJobChange": 14,
+    "priorJobs": [{"years": 8}, {"years": 11}],
+    "estimatedSalary": 225000, "totalCareerYears": 31,
+    "dob": "1969-03-15"
+  },
+  {
+    "id": "fx-003", "firstName": "Marcus", "lastName": "Lee",
+    "jobTitle": "VP Marketing", "managementLevel": "VP Level Exec",
+    "companyName": "BrightPath Media", "companyEmployees": 300,
+    "state": "FL", "monthsSinceJobChange": 8,
+    "priorJobs": [{"years": 2}, {"years": 1.5}, {"years": 2}, {"years": 1}, {"years": 2.5}],
+    "estimatedSalary": 180000, "totalCareerYears": 12,
+    "collegeGradYear": 2010
+  },
+  {
+    "id": "fx-004", "firstName": "Diane", "lastName": "Whitfield",
+    "jobTitle": "Deputy Director", "managementLevel": "VP Level Exec",
+    "companyName": "State of New York - Dept of Transportation", "companyEmployees": 9000,
+    "state": "NY", "monthsSinceJobChange": 30,
+    "priorJobs": [{"years": 12}, {"years": 10}],
+    "estimatedSalary": 155000, "totalCareerYears": 33,
+    "collegeGradYear": 1988
+  },
+  {
+    "id": "fx-005", "firstName": "James", "lastName": "Brennan",
+    "jobTitle": "Managing Partner", "managementLevel": "C Level Exec",
+    "companyName": "Brennan & Associates Law", "companyEmployees": 45,
+    "state": "CT", "monthsSinceJobChange": 40,
+    "priorJobs": [{"years": 15}, {"years": 8}],
+    "estimatedSalary": 400000, "totalCareerYears": 35,
+    "collegeGradYear": 1986
+  },
+  {
+    "id": "fx-006", "firstName": "Patricia", "lastName": "Nunez",
+    "jobTitle": "President", "managementLevel": "C Level Exec",
+    "companyName": "Coastal Logistics Group", "companyEmployees": 2100,
+    "state": "PA", "monthsSinceJobChange": 18,
+    "priorJobs": [{"years": 10}, {"years": 9}],
+    "estimatedSalary": 290000, "totalCareerYears": 33,
+    "collegeGradYear": 1990
+  },
+  {
+    "id": "fx-007", "firstName": "Alan", "lastName": "Fisk",
+    "jobTitle": "Chief Technology Officer", "managementLevel": "C Level Exec",
+    "companyName": "Vertex Manufacturing", "companyEmployees": 3800,
+    "state": "OH", "monthsSinceJobChange": 26,
+    "priorJobs": [{"years": 12}, {"years": 9}]
+  }
+]

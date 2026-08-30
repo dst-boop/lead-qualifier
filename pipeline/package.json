@@ -1,0 +1,1 @@
+{"name":"age595-pipeline","version":"1.0.0","main":"pipeline.js","scripts":{"start":"node pipeline.js","dry":"DRY_RUN=true node pipeline.js"}}

@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 tests/node_modules
 tests/*.png
+# Age 59-1/2 pipeline runtime state — lead data never gets committed (public repo)
+pipeline/out/
+pipeline/runs/
+pipeline/data/nurture.json

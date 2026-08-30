@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "business": "Age 59.5 Qualified Rollover Leads",
+
+  "search_filters": {
+    "locationSearchType": "Person",
+    "country": "United States",
+    "managementLevel": ["C Level Exec", "VP Level Exec"],
+    "title_keywords_additive": ["Owner", "Founder", "Partner", "President", "Principal", "Chief", "Head of", "Managing Director", "Physician", "Doctor", "Attorney", "Lawyer", "Counsel"],
+    "positionStartDateMax_note": "Age is NOT searchable. Career-start proxy: contacts whose earliest position predates 2006, or college grad year <= 1992 (grad 1992 => born ~1970 => 56 in 2026).",
+    "collegeGradYearMax": 1992
+  },
+
+  "qualification_gates": {
+    "gate_1_location": "US person-location (search country filter) — hard fail",
+    "gate_2_seniority": "Current OR prior senior title — hard fail",
+    "gate_3_age_floor": "Estimated age >= 55 OR retired — hard fail",
+    "gate_4_assets": "Inferred rollover assets >= $250,000 — hard fail below threshold",
+    "gate_5_dnc": "Federal + NY DNC scrub before any delivery — hard fail"
+  },
+
+  "scoring_weights": {
+    "months_since_job_change": 0.35,
+    "prior_jobs_count": 0.20,
+    "employer_size": 0.15,
+    "salary_benchmark": 0.15,
+    "seniority": 0.15
+  },
+
+  "scoring_notes": {
+    "months_since_job_change": "12-48 months since change = peak orphaned-401(k) window. <12 too fresh, >48 decays.",
+    "prior_jobs_count": "Job-hopping (many stints <3yr) is NEGATIVE — non-vested, small balances. 2-4 long-tenure prior roles is ideal.",
+    "downscores": ["government", "military", "lifelong single employer (no orphan to roll)"]
+  },
+
+  "tiers": { "A": 80, "B": 60, "C": 40, "X_below": 40 },
+
+  "age_basis_levels": ["CONFIRMED", "INFERRED", "UNKNOWN"],
+
+  "routing": {
+    "age_59_5_or_over": "SELL — deliverable inventory",
+    "age_55_to_59_49": "NURTURE — tracked with maturity_date = DOB + 59.5y; auto-promote to SELL at maturity",
+    "nurture_release_lead_days": 90,
+    "sell_nurture_before_maturity": null,
+    "delivery_exclusivity": null,
+    "bad_data_replacement_guarantee": null,
+    "_note": "Three nulls above = open v3 decisions. Pipeline runs without them; delivery module reads them when set."
+  },
+
+  "credit_gate": {
+    "enrichment_requires_approval": true,
+    "max_enrich_per_run_when_approved": 50,
+    "rule": "Search broad (free), enrich narrow (credits). Never auto-enrich."
+  }
+}
