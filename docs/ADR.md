@@ -2455,3 +2455,48 @@ allowance, and each lead runs through the same wpLookup as the single
 button — number first, name search only on a miss, answered leads
 skipped. Re-checks stay per-lead by design: a deliberate re-spend is
 never a bulk one. Stop keeps the rest for later.
+
+## 42. Resourceful: the Tim Shaughnessy case
+
+"Record has no contact info or location. The research and look up buttons
+do nothing. If I was doing this manually: search google for Tim
+Shaughnessy + Preferred Construction + Business Owner." One search gave
+the operator Knoxville, the spouse, "over two decades", an Instagram; the
+company's own site gave the office number and the email pattern; a
+people-search site confirmed age 68. The app offered none of it.
+
+Three additions, in cost order:
+
+**The operator's own two hands, saved the typing.** Every research panel
+now ends with prefilled links — Google (name + employer + title),
+FastPeopleSearch (slugged name + state), and the company site when the
+lead's email domain reveals one. The app never fetches these; the
+operator clicks them. Manual, one lead at a time, on pages a person is
+welcome on.
+
+**The employer's own site, read on the publisher's terms.** The
+`/api/harvest/site` route existed (merged in #84) with robots.txt, a
+denylist and a rate limit — and no UI. It is now a research row whose
+website comes from the lead's email domain (freemail excluded) or an
+operator prompt. Findings render in the record with their quotes: owners,
+founded year, years in business, a printed age, a career start.
+
+**The web, searched through a licensed API.** `/api/web-research` runs
+the operator's own Google move through the Claude API's search tool —
+inside the CLAUDE.md boundary because it is a licensed API, not
+scraping. It returns location, age hints (as wording, never computed),
+printed ages, spouse, office phone, email pattern and social links —
+every value quoted and sourced, enforced server-side by
+`_clean_web_findings`, which drops anything unquoted. Token cost, Tier 3
+class, per-lead and operator-initiated; deliberately NOT in the free
+sweep, because a search per lead across a whole list is a spend nobody
+asked for.
+
+**Nothing writes itself.** Findings are offers. An age is accepted only
+by a click, only when the page names the lead's surname, and it enters
+`leadAge` as `webAge` with its basis printed ("company site, accepted").
+Location acceptance names a conflict before replacing anything — and
+pointing the record at where they actually live is what turns the
+WhitePages name search from a miss into a hit. Misses are recorded
+(`L.site.reason`, `L.web.reason`) so a read that found nothing retires
+its button instead of inviting the same read twice.

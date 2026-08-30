@@ -1354,6 +1354,11 @@ async def me(request: Request):
         "fec_personal_key": FEC_API_KEY != "DEMO_KEY",
         "zi_mcp": bool(ANTHROPIC_API_KEY),
         "opportunities": bool(WARN_FEEDS.strip()),
+        # A private company's About page, read on the publisher's terms.
+        "site_reader": bool(HARVEST_USER_AGENT),
+        # Per-lead web research through the Claude API's search tool — a
+        # licensed API, never scraping, and never run as a sweep.
+        "web_research": bool(ANTHROPIC_API_KEY),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
@@ -4757,6 +4762,142 @@ async def harvest_site(body: SiteRequest, request: Request):
 
     out["findings"] = _clean_site_findings(found)
     return out
+
+
+class WebResearchRequest(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    employer: str = ""
+    title: str = ""
+    state: str = ""
+
+
+@app.post("/api/web-research")
+async def web_research(body: WebResearchRequest, request: Request):
+    """One lead, searched the way a person would.
+
+    "If I was doing this manually... Search google for Tim Shaughnessy +
+    Preferred Construction + Business Owner." This does that search through
+    the Claude API's web-search tool — a licensed API, so the boundary in
+    CLAUDE.md holds — and returns only what pages actually say, each finding
+    carrying its quote and its source URL. Nothing lands on the lead from
+    here: the client shows findings for the operator to accept one by one,
+    the same discipline as the site reader and for the same reason (ADR 17).
+
+    Per-lead and operator-initiated only. This is a token cost (Tier 3
+    class); it is deliberately NOT part of the free sweep, because a search
+    per lead across a 342-lead list is a real spend nobody asked for.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=400, detail="ANTHROPIC_API_KEY is not set on this service.")
+    name = f"{body.first_name} {body.last_name}".strip()
+    if not body.last_name.strip():
+        raise HTTPException(status_code=400, detail="Web research needs at least a last name.")
+    q = " ".join(x for x in (
+        f'"{name}"',
+        f'"{body.employer.strip()}"' if body.employer.strip() else "",
+        body.title.strip(), body.state.strip()) if x)
+    # The dynamic-filter search tool ships on the current model generation;
+    # older models keep the basic variant.
+    new_gen = any(k in CLAUDE_MODEL for k in ("opus-5", "sonnet-5", "fable", "4-6", "4-7", "4-8"))
+    tool_type = "web_search_20260209" if new_gen else "web_search_20250305"
+    prompt = (
+        "You are researching one sales lead the way a careful person would, "
+        f"to fill in what a data vendor could not. Search the web for: {q}\n\n"
+        "Report ONLY what pages actually say about THIS person at THIS employer. "
+        "If you cannot tie a page to both the name and the employer, it is a "
+        "namesake and does not belong in the answer. Reply with one JSON object "
+        "and nothing else:\n"
+        '{"summary": "<2 sentences on who this appears to be, or null>", '
+        '"location": {"city": "<city or null>", "state": "<2-letter state or null>", '
+        '"quote": "<sentence saying it>", "url": "<page>"}, '
+        '"age_hints": [{"hint": "<what the page says, e.g. over two decades at the helm>", '
+        '"quote": "<sentence>", "url": "<page>"}], '
+        '"ages": [{"name": "<person>", "age": <integer>, "quote": "<sentence printing the age>", "url": "<page>"}], '
+        '"spouse": {"name": "<name or null>", "quote": "<sentence>", "url": "<page>"}, '
+        '"office_phone": {"number": "<as printed or null>", "quote": "<context>", "url": "<page>"}, '
+        '"email_pattern": {"pattern": "<e.g. first@domain.com or null>", "quote": "<what showed it>", "url": "<page>"}, '
+        '"links": {"company_site": "<url or null>", "linkedin": "<url or null>", '
+        '"instagram": "<url or null>", "facebook": "<url or null>"}}\n\n'
+        "Rules. Every value needs a quote and the URL it came from; a value you "
+        "cannot quote is one you inferred, and it does not belong here. Do not "
+        "compute an age from a founding year or a photograph — age_hints carries "
+        "the raw wording instead, and ages[] only what a page prints as a number "
+        "for a named person. Return nulls and empty lists rather than guesses: "
+        "this feeds a call list, and a wrong person is worse than a blank."
+    )
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=2000,
+            tools=[{"type": tool_type, "name": "web_search", "max_uses": 4}],
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:200]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:200]}")
+    raw = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+    a, z = raw.find("{"), raw.rfind("}")
+    if a == -1 or z == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON object.")
+    try:
+        found = json.loads(raw[a:z + 1])
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+    return {"ok": True, "searched": q, "found": _clean_web_findings(found)}
+
+
+def _clean_web_findings(f: dict) -> dict:
+    """Drop anything unquoted before it reaches a screen, same as the site
+    reader and for the same reason: an unsourced value dressed as a sourced
+    one is worse than a blank."""
+    def txt(v, n=200):
+        return str(v)[:n] if v else None
+
+    def quoted(d, *fields):
+        if not isinstance(d, dict) or not d.get("quote") or not d.get("url"):
+            return None
+        if not any(d.get(x) for x in fields):
+            return None
+        return d
+
+    loc = quoted(f.get("location"), "city", "state")
+    if loc:
+        st = txt(loc.get("state"), 2)
+        loc = {"city": txt(loc.get("city"), 80),
+               "state": st.upper() if st and len(st) == 2 and st.isalpha() else None,
+               "quote": txt(loc.get("quote")), "url": txt(loc.get("url"), 300)}
+        if not (loc["city"] or loc["state"]):
+            loc = None
+    hints = [{"hint": txt(h.get("hint"), 120), "quote": txt(h.get("quote")), "url": txt(h.get("url"), 300)}
+             for h in (f.get("age_hints") or [])
+             if isinstance(h, dict) and h.get("hint") and h.get("quote") and h.get("url")][:5]
+    ages = [{"name": txt(a.get("name"), 120), "age": a.get("age"),
+             "quote": txt(a.get("quote")), "url": txt(a.get("url"), 300)}
+            for a in (f.get("ages") or [])
+            if isinstance(a, dict) and a.get("name") and a.get("quote") and a.get("url")
+            and isinstance(a.get("age"), int) and 18 <= a["age"] <= 100][:3]
+    spouse = quoted(f.get("spouse"), "name")
+    if spouse:
+        spouse = {"name": txt(spouse.get("name"), 120), "quote": txt(spouse.get("quote")),
+                  "url": txt(spouse.get("url"), 300)}
+    phone = quoted(f.get("office_phone"), "number")
+    if phone:
+        digits = re.sub(r"\D", "", str(phone.get("number") or ""))
+        phone = ({"number": txt(phone.get("number"), 30), "quote": txt(phone.get("quote")),
+                  "url": txt(phone.get("url"), 300)} if len(digits) >= 10 else None)
+    pat = quoted(f.get("email_pattern"), "pattern")
+    if pat:
+        pat = {"pattern": txt(pat.get("pattern"), 80), "quote": txt(pat.get("quote")),
+               "url": txt(pat.get("url"), 300)}
+    links = {k: txt(v, 300) for k, v in (f.get("links") or {}).items()
+             if k in ("company_site", "linkedin", "instagram", "facebook")
+             and isinstance(v, str) and v.startswith("http")}
+    return {"summary": txt(f.get("summary"), 400), "location": loc, "age_hints": hints,
+            "ages": ages, "spouse": spouse, "office_phone": phone,
+            "email_pattern": pat, "links": links}
 
 
 def _clean_site_findings(f: dict) -> dict:
