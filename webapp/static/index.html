@@ -416,6 +416,8 @@
         <button id="btnTemplate">CSV template &amp; research prompt<small>Download a blank CSV with the column names the importer recognises, plus a prompt for a research tool</small></button>
         <button id="btnShareList">Share this list&hellip;<small>Give a colleague view or edit access to the leads you are looking at now</small></button>
         <button id="btnRecipe">Search recipe<small>The ZoomInfo filters behind this list, ready to copy or run again</small></button>
+        <button id="btnInsights">What&rsquo;s converting<small>The app grades itself: which signals, tiers, employers and enrichment steps actually turn into set appointments &mdash; and what to change</small></button>
+        <button id="btnLifeData">Life Data export<small>Every lead with its grade, signals fired, enrichment provenance, outcome and activity &mdash; the lifetime record as one CSV</small></button>
         <button id="btnDrive" style="display:none">Import another sheet&hellip;<small>One-time import from any Google Sheet in your Drive. To change which sheet is watched, use &ldquo;watch a different sheet&rdquo; on the Source card</small></button>
         <button id="btnQC" style="display:none">AI quality control<small>Have Claude grade each lead and flag the ones the score got wrong</small></button>
         <button id="btnAssign" style="display:none">Auto-assign to advisors<small>Split this list evenly between the advisors named in scoring rules</small></button>
@@ -736,6 +738,15 @@
   <div id="covBody"></div>
   <div id="covBudget"></div>
   <div class="mfoot"><button class="mbtn save" onclick="closeModal('mCoverage')">Close</button></div>
+</div></div>
+
+<!-- What's converting: the loop that closes. The rubric predicts; the phone
+     decides; this panel reads the decisions back into the grading. -->
+<div class="overlay" id="mInsights"><div class="modal" style="max-width:640px">
+  <h2>What&rsquo;s converting</h2>
+  <p class="hint">Computed fresh from the list on screen every time this opens. &ldquo;Worked&rdquo; means any status past New; &ldquo;set&rdquo; means the appointment happened. A rate only shows where the sample is big enough to mean something.</p>
+  <div id="insBody"></div>
+  <div class="mfoot"><button class="mbtn save" onclick="closeModal('mInsights')">Close</button></div>
 </div></div>
 
 <!-- Drive picker -->
@@ -4295,6 +4306,113 @@ function renderBudgets(){
 document.getElementById('btnCoverage').addEventListener('click',async()=>{
   renderCoverage();openModal('mCoverage');
   await loadCredits();renderBudgets();
+});
+
+/* ---- What's converting: the learning loop ----
+   Every status past New is a graded lead that met reality, and Set is the
+   outcome the whole app exists to produce. Signals, tiers, employers and
+   paid enrichment each get asked the same question: did the leads you
+   marked convert more often than the ones you didn't? Small samples stay
+   silent — a rate computed on four calls is noise wearing a percent sign —
+   and the output is suggestions, never silent retuning: targeting lives in
+   ICP settings and stays the operator's. */
+const SIGNAL_NAMES={V:'Long tenure at employer',R:'Recent move + second role',A:'Age in window',T:'Decision-maker level',C:'Email + mobile on file',E:'Senior career length'};
+const INS_MIN=5;
+function lifeInsights(leads){
+  const worked=leads.filter(L=>L.status&&L.status!=='New');
+  const won=L=>L.status==='Set';
+  const rate=a=>a.length?a.filter(won).length/a.length:0;
+  const pct=x=>Math.round(100*x)+'%';
+  const out={n:leads.length,worked:worked.length,wonN:worked.filter(won).length,
+             tiers:[],signals:[],enrich:[],employers:[],suggest:[]};
+  ['A','B','C'].forEach(t=>{const g=worked.filter(L=>L.tier===t);
+    if(g.length>=INS_MIN)out.tiers.push({t,n:g.length,rate:rate(g)});});
+  Object.keys(SIGNAL_NAMES).forEach(k=>{
+    const has=worked.filter(L=>(L.signals||[]).some(x=>x.k===k));
+    const hit=has.filter(L=>(L.signals||[]).some(x=>x.k===k&&x.hit));
+    const miss=has.filter(L=>!(L.signals||[]).some(x=>x.k===k&&x.hit));
+    if(hit.length>=INS_MIN&&miss.length>=INS_MIN)
+      out.signals.push({k,name:SIGNAL_NAMES[k],hitN:hit.length,missN:miss.length,
+                        hitRate:rate(hit),missRate:rate(miss),lift:rate(hit)-rate(miss)});
+  });
+  out.signals.sort((a,b)=>b.lift-a.lift);
+  [['WhitePages household',L=>!!(L.hd&&!L.hd.rejected)],
+   ['Number checked',L=>!!L.pv],
+   ['Public records',L=>!!L.pub],
+   ['AI QC grade A/B',L=>!!(L.qc&&/^[AB]/.test(''+(L.qc.grade||'')))]
+  ].forEach(([name,f])=>{
+    const yes=worked.filter(f),no=worked.filter(L=>!f(L));
+    if(yes.length>=INS_MIN&&no.length>=INS_MIN)
+      out.enrich.push({name,yesN:yes.length,noN:no.length,yesRate:rate(yes),noRate:rate(no)});
+  });
+  const byEmp={};worked.forEach(L=>{const e=(L.employer||'').trim();if(e)(byEmp[e]=byEmp[e]||[]).push(L);});
+  Object.entries(byEmp).filter(([,g])=>g.length>=4)
+    .map(([e,g])=>({e,n:g.length,rate:rate(g)}))
+    .sort((a,b)=>b.rate-a.rate).slice(0,6).forEach(x=>out.employers.push(x));
+  out.signals.forEach(x=>{
+    if(x.lift<=-0.1)out.suggest.push(x.name+' converts WORSE when it fires ('+pct(x.hitRate)+' vs '+pct(x.missRate)+') — its weight may be rewarding the wrong thing. Consider lowering it in ICP settings.');
+  });
+  const best=out.signals[0];
+  if(best&&best.lift>=0.1)out.suggest.push(best.name+' is the strongest predictor here ('+pct(best.hitRate)+' set vs '+pct(best.missRate)+' without) — source and enrich toward it first.');
+  out.enrich.forEach(e=>{
+    if(e.yesRate-e.noRate>=0.1)out.suggest.push('Leads with '+e.name+' set at '+pct(e.yesRate)+' vs '+pct(e.noRate)+' without — that spend is earning its cost.');
+  });
+  const be=out.employers[0];
+  if(be&&be.rate>=0.25)out.suggest.push(be.e+' converts at '+pct(be.rate)+' ('+be.n+' worked) — worth a dedicated pull. A single-employer campaign needs Equitable pre-approval before launch.');
+  const tA=out.tiers.find(x=>x.t==='A'),tC=out.tiers.find(x=>x.t==='C');
+  if(tA&&tC&&tC.rate>=tA.rate)out.suggest.push('Tier C is converting as well as Tier A on this list — the rubric is not separating quality here yet. The signal rows say which weights to revisit.');
+  return out;
+}
+function renderInsights(){
+  const I=lifeInsights(state.leads);
+  const pct=x=>Math.round(100*x)+'%';
+  const b=[];
+  if(activeList!=='default')b.push('<p class="hint" style="color:var(--tierB)">This reads the list on screen. Switch to <strong>All leads</strong> for the lifetime picture.</p>');
+  b.push('<div class="sigrow"><span>Leads &middot; worked &middot; set</span><span class="pts">'+I.n+' &middot; '+I.worked+' &middot; '+I.wonN+'</span></div>');
+  if(I.worked<15){
+    b.push('<p class="hint" style="margin-top:8px">Only '+I.worked+' lead'+(I.worked===1?' has':'s have')+' been worked past New — not enough outcomes to grade the grader honestly. Keep setting statuses as you call (Set, Not Interested, Has Advisor); this panel sharpens with every one.</p>');
+  }else{
+    if(I.tiers.length){b.push('<h4 style="margin-top:12px">Set rate by tier</h4>');
+      I.tiers.forEach(t=>b.push('<div class="sigrow hit"><span>Tier '+t.t+'</span><span class="pts">'+pct(t.rate)+' of '+t.n+'</span></div>'));}
+    if(I.signals.length){b.push('<h4 style="margin-top:12px">Signal lift &mdash; set rate when it fired vs when it did not</h4>');
+      I.signals.forEach(x=>b.push('<div class="sigrow '+(x.lift>0?'hit':x.lift<0?'neg':'')+'"><span>'+esc(x.name)+'</span><span class="pts">'+pct(x.hitRate)+' vs '+pct(x.missRate)+'</span></div>'));}
+    if(I.enrich.length){b.push('<h4 style="margin-top:12px">Did the enrichment spend help?</h4>');
+      I.enrich.forEach(e=>b.push('<div class="sigrow '+(e.yesRate>e.noRate?'hit':'')+'"><span>'+esc(e.name)+'</span><span class="pts">'+pct(e.yesRate)+' vs '+pct(e.noRate)+'</span></div>'));}
+    if(I.employers.length){b.push('<h4 style="margin-top:12px">Employers that convert</h4>');
+      I.employers.forEach(x=>b.push('<div class="sigrow hit"><span>'+esc(x.e)+'</span><span class="pts">'+pct(x.rate)+' of '+x.n+'</span></div>'));}
+  }
+  if(I.suggest.length){b.push('<h4 style="margin-top:12px">What to change</h4>');
+    I.suggest.forEach(x=>b.push('<p class="hint" style="margin-top:4px">&bull; '+esc(x)+'</p>'));
+    b.push('<p class="hint" style="margin-top:8px">Suggestions, never silent changes — targeting lives in ICP settings and stays yours.</p>');}
+  document.getElementById('insBody').innerHTML=b.join('');
+}
+document.getElementById('btnInsights').addEventListener('click',()=>{renderInsights();openModal('mInsights');});
+
+/* ---- Life Data: the lifetime record ----
+   One CSV of everything the app knows about every lead — identity, grade,
+   what fired, what was bought, what happened. Current, updated, former and
+   future leads all land on the master list, so run it there. Firestore
+   stays the store of record (deny-by-default, purge path); this file is
+   the archive copy — it is lead data, handle it like the rest. */
+document.getElementById('btnLifeData').addEventListener('click',()=>{
+  const leads=state.leads;
+  if(!leads.length){toast('No leads on this list.');return;}
+  const H=['Lead External ID','First Name','Last Name','Job Title','Employer','State','Status','Set','Tier','Score','Campaign','Age basis','Age','Signals fired','Phone check','Household data','Public records','SEC age','AI grade','Calls','Emails','Created','Last updated','Batch / source','Notes'];
+  const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const rows=leads.map(L=>{
+    const ab=ageBasis(L);
+    return [L.contactId||L.id,L.firstName,L.lastName,L.title,L.employer,L.state,L.status||'New',
+      L.status==='Set'?'yes':'',L.tier,L.score,leadCampaign(L)==='scs'?'SCS':'Rollover',
+      ab.label||'',leadAge(L)||'',(L.signals||[]).filter(x=>x.hit).map(x=>x.label).join('; '),
+      L.pv?L.pv.label:'',L.hd?(L.hd.rejected?'no record':'yes'):'',L.pub?'yes':'',
+      (L.edgar&&L.edgar.age)?L.edgar.age:'',L.qc?L.qc.grade:'',
+      (L.activity||[]).filter(a=>a.k==='call').length,(L.activity||[]).filter(a=>a.k==='email').length,
+      L.createdAt?new Date(L.createdAt).toISOString().slice(0,10):'',
+      L.updatedAt?new Date(L.updatedAt).toISOString().slice(0,10):'',
+      L.batch||'',L.notes||''].map(q).join(',');
+  });
+  dl(new Blob([[H.join(',')].concat(rows).join('\r\n')],{type:'text/csv'}),'life-data-'+new Date().toISOString().slice(0,10)+'.csv');
+  toast('Life Data: '+leads.length+' leads exported.'+(activeList==='default'?'':' Tip: switch to All leads for the lifetime record.'));
 });
 /* After an import, say so when a signal has almost nothing to work with. */
 function coverageWarn(){
