@@ -127,7 +127,7 @@ A companion pipeline sources, qualifies, and routes Age 59½ rollover leads **fo
 sale to financial advisors and insurance agents**; this app consumes its CSVs.
 The `pipeline/` engine and `.claude/skills/age595-pipeline/` skill are checked
 in; say "Prepare today's lead list" to run the workflow. Smoke test:
-`cd pipeline && DRY_RUN=true node pipeline.js` (expect 2 SELL, 2 NURTURE,
+`cd pipeline && DRY_RUN=true node pipeline.js` (expect 3 SELL, 2 NURTURE,
 1 HOLD, 1 DQ from fixtures). The rules below are in force wherever pipeline
 output or its ZoomInfo flows are touched.
 
@@ -139,8 +139,6 @@ output or its ZoomInfo flows are touched.
 - **Search broad, enrich narrow.** Rank first, enrich only priority records
   (Tier-A HOLD first).
 - **Exclude Equitable employees** from all lead output.
-- **CT/MA exclusion is a per-buyer delivery preference**, applied at delivery —
-  keep those states in sourced inventory.
 - **DNC scrub (federal + NY) is a hard gate before anything is sellable**;
   FINRA 3230 / TCPA apply to phone outreach. Until the DNC vendor is wired,
   every row is UNSCRUBBED and nothing is sellable.

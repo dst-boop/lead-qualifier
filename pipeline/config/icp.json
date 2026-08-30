@@ -5,8 +5,6 @@
   "search_filters": {
     "locationSearchType": "Person",
     "country": "United States",
-    "excluded_states": ["Connecticut", "Massachusetts"],
-    "excluded_states_note": "Dan's default preference, NOT universal. Sourcing keeps CT/MA (bigger inventory); exclusion applied per-buyer at delivery via buyer profile.",
     "managementLevel": ["C Level Exec", "VP Level Exec"],
     "title_keywords_additive": ["Owner", "Founder", "Partner", "President", "Principal", "Chief", "Head of", "Managing Director", "Physician", "Doctor", "Attorney", "Lawyer", "Counsel"],
     "positionStartDateMax_note": "Age is NOT searchable. Career-start proxy: contacts whose earliest position predates 2006, or college grad year <= 1992 (grad 1992 => born ~1970 => 56 in 2026).",
@@ -14,7 +12,7 @@
   },
 
   "qualification_gates": {
-    "gate_1_location": "US person-location, not CT/MA — hard fail",
+    "gate_1_location": "US person-location (search country filter) — hard fail",
     "gate_2_seniority": "Current OR prior senior title — hard fail",
     "gate_3_age_floor": "Estimated age >= 55 OR retired — hard fail",
     "gate_4_assets": "Inferred rollover assets >= $250,000 — hard fail below threshold",

@@ -11,7 +11,7 @@ Generates qualified rollover leads: senior execs (55–65 or retired) who change
 
 1. **Credit gate.** Searches are free and unlimited. `enrich_contacts`, `account_research`, `contact_research` consume bulk credits. NEVER call a credit-consuming tool without telling the user the record count and getting explicit approval in this conversation. Cap any approved batch at `config/icp.json → credit_gate.max_enrich_per_run_when_approved`.
 2. **Enum precision.** `managementLevelList` must be exactly `"C Level Exec"` / `"VP Level Exec"`. Wrong strings silently return garbage.
-3. **Exclusions.** Never include Equitable employees (companyName contains "equitable"). CT/MA exclusion is applied per-buyer at delivery, not at sourcing — Dan's own book excludes them; other buyers may not.
+3. **Exclusions.** Never include Equitable employees (companyName contains "equitable").
 4. **Disallowed fields.** `yearsOfExperience` and age are not searchable on this plan — do not pass them; the search will 400. Age comes only from enrichment (grad year, job history) or manual LinkedIn verify.
 5. **DNC.** No lead is sellable until DNC-scrubbed (federal + NY). Output marks everything UNSCRUBBED until the vendor is wired in `pipeline/src/deliver.js → dncScrub()`.
 6. **Data status.** Every age and asset figure carries CONFIRMED / INFERRED / UNKNOWN. Never present inferred data as confirmed.

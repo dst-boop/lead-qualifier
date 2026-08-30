@@ -7,7 +7,7 @@
 // Dry run:       DRY_RUN=true node pipeline.js   (uses fixture data, no GTM CLI needed)
 
 const cfg = require("./config/icp.json");
-const { searchContacts, enrichContact, passesLocationGate } = require("./src/search.js");
+const { searchContacts, enrichContact } = require("./src/search.js");
 const { scoreLead } = require("./src/score.js");
 const nurture = require("./src/nurture.js");
 const { deliver } = require("./src/deliver.js");
@@ -33,12 +33,8 @@ async function main() {
     console.log(`Sourced ${raw.length} contacts (search only — 0 credits)`);
   }
 
-  // ---- GATE 1: location ----
-  const located = raw.filter(passesLocationGate);
-  console.log(`After CT/MA exclusion: ${located.length}`);
-
   // ---- QUALIFY (free) ----
-  const scored = located.map(scoreLead);
+  const scored = raw.map(scoreLead);
 
   // ---- CREDIT GATE: enrichment only with explicit approval ----
   if (process.env.ENRICH_APPROVED === "true" && process.env.DRY_RUN !== "true") {

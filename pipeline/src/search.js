@@ -47,10 +47,4 @@ function enrichContact(id) {
   return flatten(gtmJSON(["contacts", "enrich", "--id", String(id)]))[0] ?? null;
 }
 
-const EXCLUDED_STATES = new Set(["CT", "Connecticut", "MA", "Massachusetts"]);
-function passesLocationGate(c) {
-  const st = c.state ?? c.personState ?? c.location?.state ?? "";
-  return !EXCLUDED_STATES.has(st);
-}
-
-module.exports = { searchContacts, enrichContact, passesLocationGate, deepParse, flatten };
+module.exports = { searchContacts, enrichContact, deepParse, flatten };

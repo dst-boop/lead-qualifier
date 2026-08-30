@@ -108,7 +108,7 @@ function scoreLead(c) {
 
   // Hard gates
   const gates = {
-    location: true, // enforced upstream in search.js
+    location: true, // US-only comes from the search country filter
     seniority: signals.seniority >= 60,
     age_floor: ageInfo.basis === "UNKNOWN" ? null : ageInfo.age >= 55 || c.retired === true,
     assets: assets.passes,

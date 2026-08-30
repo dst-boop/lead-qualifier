@@ -21,7 +21,7 @@ The credit gate is structural: enrichment code path is unreachable without `ENRI
 | HOLD_UNKNOWN_AGE | passes gates but `age_basis = UNKNOWN` — enrichment/LinkedIn-verify candidates |
 | DISQUALIFIED | any hard-gate failure (location, seniority, age floor <55, assets <$250k) |
 
-Hard gates: US person-location excluding CT/MA · senior title (current or prior) · age ≥ 55 or retired · inferred assets ≥ $250k · DNC scrub.
+Hard gates: US person-location · senior title (current or prior) · age ≥ 55 or retired · inferred assets ≥ $250k · DNC scrub.
 
 ## Railway deployment
 
