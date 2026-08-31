@@ -234,6 +234,12 @@ main.WARN_FEEDS = STUB + "/warn_feeds_missing.json"
 feeds_m, complaint_m = asyncio.run(main._warn_feeds_checked())
 ck("  ...and a URL that cannot be fetched is named, not called empty",
    feeds_m == [] and "fetching it failed" in complaint_m, complaint_m[:100])
+# --- the build identifies itself ---------------------------------------------
+os.environ["K_REVISION"] = "lead-qualifier-00042-abc"
+ck("the running revision is in /api/me, ending the is-it-deployed guessing game",
+   c.get("/api/me").json()["features"]["revision"] == "lead-qualifier-00042-abc")
+os.environ.pop("K_REVISION", None)
+
 # --- the feed source saved in the app: no gcloud anywhere in the loop --------
 main.WARN_FEEDS = ""
 main._FEEDS_CFG.update(at=0.0, value=None)
