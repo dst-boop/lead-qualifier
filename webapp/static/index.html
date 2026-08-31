@@ -741,6 +741,19 @@
     <th>Employer</th><th>Where</th><th>Date</th><th style="text-align:right">Leaving</th>
     <th style="text-align:right">Avg balance</th><th style="text-align:right">In motion</th><th></th>
   </tr></thead><tbody id="oppsRows"></tbody></table>
+  <!-- The gcloud escape hatch's escape hatch: after three attempts at
+       quoting JSON into an env var, the feed source became a setting an
+       admin saves here. A URL (or a pasted JSON list), stored server-side;
+       the env var stays as the fallback for deployments that prefer it. -->
+  <div id="oppsCfg" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+    <p class="hint"><b>Where the feed list lives.</b> Saved in the app for the whole firm &mdash; no gcloud, no quoting. The built-in feed is this app&rsquo;s own daily scrape of 41 states&rsquo; WARN notices.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="oppsFeedUrl" type="text" placeholder="https://&hellip;/warn_feeds.json &mdash; or paste the JSON list itself" style="flex:1;min-width:280px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:.8rem">
+      <button class="mbtn" id="btnFeedsBuiltin">Use the built-in 41-state feed</button>
+      <button class="mbtn save" id="btnFeedsSave">Save</button>
+    </div>
+    <p class="hint" id="oppsCfgNote" style="margin-top:4px"></p>
+  </div>
   <div class="mfoot" style="justify-content:space-between">
     <button class="mbtn" id="btnOppsRefresh">Refresh from source</button>
     <button class="mbtn save" onclick="closeModal('mOpps')">Close</button>
@@ -3726,8 +3739,31 @@ async function loadOpps(refresh){
   try{renderOpps(await api('/api/opportunities'+(refresh?'?refresh=true':''),null,'GET'));}
   catch(e){document.getElementById('oppsMeta').textContent='Could not load: '+e.message;}
 }
-document.getElementById('btnOpps').addEventListener('click',()=>{openModal('mOpps');loadOpps(false);});
+document.getElementById('btnOpps').addEventListener('click',()=>{
+  document.getElementById('oppsCfg').style.display=(window.ME&&ME.is_admin)?'':'none';
+  openModal('mOpps');loadOpps(false);
+});
 document.getElementById('btnOppsRefresh').addEventListener('click',()=>loadOpps(true));
+/* The feed source, saved in the app. Validated server-side before it is
+   stored — a broken value is refused with the reason, never saved. */
+const WARN_BUILTIN='https://raw.githubusercontent.com/dst-boop/lead-qualifier/warn-data/warn_feeds.json';
+async function saveFeeds(value){
+  const note=document.getElementById('oppsCfgNote');
+  note.textContent=value?'Checking that source\u2026':'Clearing\u2026';
+  try{
+    const d=await api('/api/sources/feeds',{value:value});
+    note.textContent=d.cleared?'Cleared \u2014 the WARN_FEEDS env var (if any) applies again.'
+      :d.feeds+' feed'+(d.feeds===1?'':'s')+' recognised and saved. Fetching notices\u2026';
+    if(window.ME&&ME.features)ME.features.opportunities=!d.cleared||ME.features.opportunities;
+    loadOpps(true);
+  }catch(e){note.textContent=e.message;}
+}
+document.getElementById('btnFeedsBuiltin').addEventListener('click',()=>{
+  document.getElementById('oppsFeedUrl').value=WARN_BUILTIN;saveFeeds(WARN_BUILTIN);
+});
+document.getElementById('btnFeedsSave').addEventListener('click',()=>{
+  saveFeeds(document.getElementById('oppsFeedUrl').value.trim());
+});
 document.getElementById('btnTemplate').addEventListener('click',openTemplate);
 document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
 document.getElementById('btnCopyPrompt').addEventListener('click',copyResearchPrompt);

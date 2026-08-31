@@ -1353,7 +1353,7 @@ async def me(request: Request):
         # demo key allows 40 FEC lookups an hour across everyone using it.
         "fec_personal_key": FEC_API_KEY != "DEMO_KEY",
         "zi_mcp": bool(ANTHROPIC_API_KEY),
-        "opportunities": bool(WARN_FEEDS.strip()),
+        "opportunities": bool((await _warn_feeds_value())[0].strip()),
         # A private company's About page, read on the publisher's terms.
         "site_reader": bool(HARVEST_USER_AGENT),
         # Per-lead web research through the Claude API's search tool — a
@@ -2529,6 +2529,66 @@ def _source_counties() -> set:
     return {prospecting.norm_county(c) for c in SOURCE_COUNTIES.split(",") if c.strip()}
 
 
+# The feed source an admin saved in the app wins over the env var. Config is
+# data (CLAUDE.md principle 3), and three shredded gcloud attempts on this one
+# variable earned it a settings field: a URL or a JSON list, saved in
+# Firestore, no shell quoting anywhere in the loop.
+_FEEDS_CFG = {"at": 0.0, "value": None}
+_MEM_FEEDS: dict = {}                     # local-dev fallback, like every _MEM_*
+
+
+async def _warn_feeds_value() -> tuple:
+    """(value, source_label). Cached a minute so /api/me stays cheap."""
+    now = time.time()
+    if _FEEDS_CFG["value"] is None or now - _FEEDS_CFG["at"] > 60:
+        doc = await _fs_get(FS_STATE, "warn_feeds") or _MEM_FEEDS.get("v") or {}
+        _FEEDS_CFG.update(at=now, value=(doc.get("value") or "").strip())
+    if _FEEDS_CFG["value"]:
+        return _FEEDS_CFG["value"], "The feed source saved in the app"
+    return WARN_FEEDS, "WARN_FEEDS"
+
+
+class FeedsCfg(BaseModel):
+    value: str = ""
+
+
+@app.post("/api/sources/feeds")
+async def set_feeds(body: FeedsCfg, request: Request, email: str = Depends(signed_in)):
+    """Save the WARN feed source in the app — a URL to a JSON list, or the
+    list itself. Validated before it is stored, because storing a broken
+    value would only move the diagnostic, not the problem. Admin-only: the
+    feed list is firm-wide configuration. An empty value clears the stored
+    one and the env var applies again."""
+    if not _is_admin(email):
+        raise HTTPException(status_code=403, detail="Only an admin can set the firm's feed source.")
+    value = (body.value or "").strip()
+    count = 0
+    if value:
+        try:
+            raw = value
+            if not raw.lstrip().startswith("["):
+                raw = await _get(value, drive_token="")
+            feeds = json.loads(raw)
+            good = [f for f in feeds if isinstance(f, dict) and f.get("url")] \
+                if isinstance(feeds, list) else []
+            if not good:
+                raise ValueError("no feed objects carrying a url in it")
+            count = len(good)
+        except HTTPException as e:
+            raise HTTPException(status_code=400,
+                                detail=f"That did not yield a usable feed list "
+                                       f"({str(e.detail)[:140]}). Nothing was saved.")
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"That did not yield a usable feed list "
+                                       f"({type(e).__name__}: {str(e)[:140]}). Nothing was saved.")
+    doc = {"value": value, "by": email, "at": time.time()}
+    if not await _fs_set(FS_STATE, "warn_feeds", doc):
+        _MEM_FEEDS["v"] = doc
+    _FEEDS_CFG.update(at=0.0, value=None)
+    return {"ok": True, "feeds": count, "cleared": not value}
+
+
 async def _warn_feeds(drive_token: str = "") -> list:
     return (await _warn_feeds_checked(drive_token))[0]
 
@@ -2543,7 +2603,8 @@ async def _warn_feeds_checked(drive_token: str = "") -> tuple:
     it looks configured from the outside and reports no layoffs from the
     inside.
     """
-    raw = WARN_FEEDS.strip()
+    raw, src = await _warn_feeds_value()
+    raw = raw.strip()
     if not raw:
         return [], ""
     # The value may also be a single URL (or Drive link) to a JSON file holding
@@ -2554,21 +2615,21 @@ async def _warn_feeds_checked(drive_token: str = "") -> tuple:
         try:
             raw = await _get(raw, drive_token=drive_token)
         except Exception as e:
-            return [], (f"WARN_FEEDS points at {WARN_FEEDS.strip()[:80]} but fetching it "
+            return [], (f"{src} points at {raw[:80]} but fetching it "
                         f"failed ({type(e).__name__}: {str(e)[:120]}).")
     try:
         feeds = json.loads(raw)
     except ValueError as e:
-        return [], (f"WARN_FEEDS is set but is not valid JSON ({e}). It must be a list "
+        return [], (f"{src} is set but is not valid JSON ({e}). It must be a list "
                     f'like [{{"id":"nj","state":"NJ","format":"csv","url":"https://..."}}] '
                     f"— or one URL to a JSON file holding that list, which survives "
                     f"gcloud's comma-splitting because it has no commas in it.")
     if not isinstance(feeds, list):
-        return [], ("WARN_FEEDS parsed as "
+        return [], (f"{src} parsed as "
                     f"{type(feeds).__name__}, but it must be a list of feed objects.")
     good = [f for f in feeds if isinstance(f, dict) and f.get("url")]
     if feeds and not good:
-        return [], (f"WARN_FEEDS has {len(feeds)} entr"
+        return [], (f"{src} has {len(feeds)} entr"
                     f"{'y' if len(feeds) == 1 else 'ies'} but none of them carries a "
                     f'"url", so there is nothing to fetch.')
     return good, ""
@@ -2652,7 +2713,7 @@ def _cache_put(key: str, value):
 
 async def _load_warn(drive_token: str = "", fresh: bool = False) -> dict:
     """Every configured WARN feed, normalised. Reports per-feed what happened."""
-    key = "warn|" + WARN_FEEDS
+    key = "warn|" + (await _warn_feeds_value())[0]
     if not fresh:
         got = _cache_get(key, WARN_TTL)
         if got is not None:
@@ -2850,7 +2911,7 @@ async def opportunities(request: Request, refresh: bool = False):
             # between a five-minute fix and a week of believing there are no
             # layoffs anywhere.
             note = complaint + " Nothing else in the app depends on this."
-        elif not WARN_FEEDS.strip():
+        elif not (await _warn_feeds_value())[0].strip():
             note = ("This needs at least one state's layoff-notice feed, which an admin "
                     "sets once for the whole firm (WARN_FEEDS). Nothing else in the app "
                     "depends on it — sourcing, enrichment and scoring all work without it.")
@@ -2867,7 +2928,8 @@ async def opportunities(request: Request, refresh: bool = False):
                                          for f in broke[:3])
                          + " — a feed that fails is a gap, not an all-clear.")
         return {"built_at": int(time.time()), "count": 0, "matched": 0, "items": [],
-                "feeds": warn["feeds"], "configured": bool(WARN_FEEDS.strip()),
+                "feeds": warn["feeds"],
+                "configured": bool((await _warn_feeds_value())[0].strip()),
                 "note": note}
     try:
         plans = (await _load_plans(await _drive_token_for(request), fresh=refresh)).get("plans") or {}
@@ -5128,14 +5190,15 @@ async def get_signals(body: SignalsRequest, request: Request, email: str = Depen
 
     warn_index, warn_note = {}, ""
     warn_ran = False
-    if not WARN_FEEDS.strip():
+    _feeds_val = (await _warn_feeds_value())[0].strip()
+    if not _feeds_val:
         # This used to say nothing at all, so the panel reported that every lead
         # had been "checked against the WARN feeds" on a deployment with no WARN
         # feeds configured. Zero events then reads as "nothing is happening"
         # when it means "nothing was looked at".
-        warn_note = ("WARN_FEEDS is not set, so mass-separation notices are not "
-                     "checked. See SETUP-signals.md.")
-    if WARN_FEEDS.strip():
+        warn_note = ("No WARN feed source is set, so mass-separation notices are not "
+                     "checked. An admin can set it in Money in motion.")
+    if _feeds_val:
         try:
             got = await _load_warn(await _drive_token_for(request))
             plans = {}
