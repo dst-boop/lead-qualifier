@@ -69,10 +69,10 @@ main.WARN_FEEDS = ""
 main.EDGAR_USER_AGENT = ""
 d = sig(NO_AGE)
 notes = " ".join(d.get("notes") or [])
-ck("with no WARN feeds configured, the response says so", "WARN_FEEDS is not set" in notes, notes)
+ck("with no WARN feeds configured, the response says so", "No WARN feed source is set" in notes, notes)
 # EDGAR always announced itself; WARN never did. That asymmetry is the bug.
 ck("  ...as EDGAR already did", "EDGAR_USER_AGENT is not set" in notes, notes)
-ck("  ...and points at the setup doc", "SETUP-signals.md" in notes, notes)
+ck("  ...and points at the setup doc", "Money in motion" in notes, notes)
 
 cov = d.get("coverage") or {}
 ck("coverage reports that WARN did not run", cov.get("warn") is False, cov)

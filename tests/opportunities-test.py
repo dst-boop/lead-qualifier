@@ -234,7 +234,47 @@ main.WARN_FEEDS = STUB + "/warn_feeds_missing.json"
 feeds_m, complaint_m = asyncio.run(main._warn_feeds_checked())
 ck("  ...and a URL that cannot be fetched is named, not called empty",
    feeds_m == [] and "fetching it failed" in complaint_m, complaint_m[:100])
+# --- the feed source saved in the app: no gcloud anywhere in the loop --------
+main.WARN_FEEDS = ""
+main._FEEDS_CFG.update(at=0.0, value=None)
+# signed_in resolves a password account locally; a google session would try a
+# real userinfo call. Flip the stub session for this block, restore after.
+main._MEM_SESSIONS["s1"]["provider"] = "password"
+main._MEM_SESSIONS["s1"]["account_email"] = "ana@fpa.com"     # signed in, not admin
+r = c.post("/api/sources/feeds", json={"value": STUB + "/warn_feeds.json"})
+ck("a non-admin cannot set the firm's feed source",
+   r.status_code == 403 and "admin" in r.json()["detail"], r.json())
+main._MEM_SESSIONS["s1"]["account_email"] = "dan@fpa.com"
+main._ADMINS.add("dan@fpa.com")
+r = c.post("/api/sources/feeds", json={"value": STUB + "/warn_feeds_missing.json"})
+ck("a source that cannot be fetched is refused, with nothing saved",
+   r.status_code == 400 and "Nothing was saved" in r.json()["detail"], r.json())
+r = c.post("/api/sources/feeds", json={"value": STUB + "/warn_feeds.json"})
+ck("a good URL saves, reporting what it recognised",
+   r.status_code == 200 and r.json()["feeds"] == 1, r.json())
+feeds_s, complaint_s = asyncio.run(main._warn_feeds_checked())
+ck("  ...and with the env var empty, the stored source now drives the feeds",
+   feeds_s and feeds_s[0]["id"] == "nj" and complaint_s == "", complaint_s or feeds_s)
+ck("  ...lighting the feature flag without any env var",
+   c.get("/api/me").json()["features"]["opportunities"] is True)
+r = c.post("/api/sources/feeds", json={"value": '[{"id":"ny","state":"NY","format":"csv","url":"' + STUB + '/warn.csv"}]'})
+ck("pasting the JSON list itself works too", r.status_code == 200 and r.json()["feeds"] == 1, r.json())
+# A value that later goes bad is named as the app's, not the env var's.
+main._MEM_FEEDS["v"] = {"value": "not json ["}
+main._FEEDS_CFG.update(at=0.0, value=None)
+_f, complaint_b = asyncio.run(main._warn_feeds_checked())
+ck("a broken stored value names its source as the app, not WARN_FEEDS",
+   "saved in the app" in complaint_b and "WARN_FEEDS" not in complaint_b, complaint_b[:100])
+r = c.post("/api/sources/feeds", json={"value": ""})
+ck("clearing hands control back to the env var",
+   r.status_code == 200 and r.json()["cleared"] is True
+   and asyncio.run(main._warn_feeds_value())[1] == "WARN_FEEDS", r.json())
+main._MEM_SESSIONS["s1"]["provider"] = "google"
+main._MEM_SESSIONS["s1"].pop("account_email", None)
+main._ADMINS.discard("dan@fpa.com")
+
 main.WARN_FEEDS = ""          # back to the unconfigured precondition below
+main._FEEDS_CFG.update(at=0.0, value=None)
 r = c.post("/api/sources/refresh")
 ck("  ...and refresh refuses to overwrite with nothing",
    r.json()["stored"] == 0 and "WARN_FEEDS" in r.json().get("note", ""), r.json().get("note"))

@@ -2548,3 +2548,19 @@ button's name is a promise, and a token spend per lead does not belong
 under it. A small honesty fix rode along: emptying the selection now
 unticks the select-all header box, so its next press selects instead of
 silently deselecting nothing.
+
+## 45. The feed source becomes a setting
+
+Three times the WARN_FEEDS env var was set through gcloud, and three times
+gcloud's comma-splitting shredded it — the URL form (§41) fixed the format
+but still left a shell between the operator and a working panel. Config is
+data (principle 3), and this one earned the promotion: Money in motion now
+carries an admin-only field where the feed source is saved in the app — a
+URL, or the pasted JSON list itself — stored server-side, validated by
+actually fetching and parsing it BEFORE it is stored, so a broken value is
+refused with the reason rather than saved and diagnosed later. One button
+fills in the built-in feed: this app's own daily 41-state scrape on the
+warn-data branch. The env var stays as the fallback for deployments that
+prefer it, diagnostics name which source is in effect ("WARN_FEEDS" vs
+"the feed source saved in the app"), and clearing the field hands control
+back to the env var. No gcloud anywhere in the loop.
