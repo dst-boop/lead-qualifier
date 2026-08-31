@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
 
 const feat = o => ({ whitepages: true, ai_qc: false, server_state: true, drive: false,
                      zoominfo: false, edgar: false, zi_mcp: false, opportunities: false,
-                     free_sources: true, ...o });
+                     free_sources: true, web_research: true, ...o });
 const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'ana@x.com',
                    providers: { google: true }, features: feat(), storage: 'firestore',
                    credits: { month: '2026-08',
@@ -22,7 +22,7 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
 
-  let verifies = 0, enriches = 0;
+  let verifies = 0, enriches = 0, searches = 0;
   await p.route('**/api/me', r => r.fulfill({ json: me() }));
   await p.route('**/api/settings', r => r.fulfill({ json: { ok: true } }));
   await p.route('**/api/credits', r => r.fulfill({ json: { month: '2026-08',
@@ -31,6 +31,10 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
     return r.fulfill({ json: { valid: true, line_type: 'Mobile', name_match: true,
       record: { found: true, age: 61, home_city: 'Rye', home_state: 'NY', mobiles: ['9145550101'],
                 read: 99 } } }); });
+  await p.route('**/api/web-research', r => { searches++;
+    return r.fulfill({ json: { ok: true, searched: 'x', found: {
+      summary: 'Found.', location: null, age_hints: [], ages: [], spouse: null,
+      office_phone: null, email_pattern: null, links: {} } } }); });
   await p.route('**/api/enrich', r => { enriches++;
     return r.fulfill({ json: { found: true, age: 62, home_city: 'Nyack', home_state: 'NY',
                                mobiles: ['8455550102'], read: 99, matched_by: 'name' } }); });
@@ -47,7 +51,8 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
         { id: 'c', firstName: 'Cara', lastName: 'Xu', title: 'SVP', employer: 'Delta', state: 'GA',
           mobilePhone: '(404) 555-0103', email: 'c@x.com', status: 'New', activity: [],
           pv: { label: 'Mobile · name ✓', ok: true, field: 'mobilePhone' },
-          hd: { age: 60, city: 'Atlanta', state: 'GA', mobiles: [], read: 99 } },
+          hd: { age: 60, city: 'Atlanta', state: 'GA', mobiles: [], read: 99 },
+          web: { at: 1, found: null, reason: 'nothing tied to this name and employer' } },
         // d: checked before the app read whole records — a re-check, which is
         // a deliberate per-lead re-spend and must NOT be swept into bulk.
         { id: 'd', firstName: 'Dev', lastName: 'Waters', title: 'EVP', employer: 'Chevron', state: 'TX',
@@ -101,6 +106,32 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
      await p.evaluate(() => !state.leads.find(x => x.id === 'd').hd));
   ck('afterwards the selection clears and the bar goes away',
      await p.evaluate(() => document.getElementById('bulkBar').hidden === true));
+
+  // --- bulk web research: "search google like I did", at selection scale ------
+  await p.click('#selAll'); await p.waitForTimeout(250);
+  const bar2 = await p.evaluate(() => document.getElementById('bulkCount').textContent);
+  ck('the bar counts who is still unresearched on the web',
+     /3 unresearched on the web/.test(bar2), bar2);
+  await p.click('#bulkWeb'); await p.waitForTimeout(300);
+  const q2 = await p.evaluate(() => document.getElementById('cfMsg').textContent);
+  ck('the confirmation names the count and the cost as tokens, not credits',
+     /Research 3 leads on the web/.test(q2) && /AI tokens, not lookup credits/.test(q2), q2.slice(0, 110));
+  ck('  ...and says who is skipped', /1 already researched is skipped/.test(q2), q2.slice(-90));
+  await p.evaluate(() => cfDone(false)); await p.waitForTimeout(200);
+  ck('saying no searches nothing', searches === 0);
+  await p.click('#bulkWeb'); await p.waitForTimeout(300);
+  await p.evaluate(() => cfDone(true));
+  await p.waitForTimeout(1500);
+  ck('saying yes searches exactly the unresearched three', searches === 3, searches);
+  ck('  ...and every one now carries a recorded answer', await p.evaluate(() =>
+     ['a', 'b', 'd'].every(id => !!byId(id).web)));
+  ck('  ...so a re-run has nothing to bill', await p.evaluate(() =>
+     ['a', 'b', 'c', 'd'].every(id => !researchActions(byId(id)).some(x => x[0] === 'webResearch'))));
+  ck('without the feature the button hides', await p.evaluate(() => {
+     const was = ME.features.web_research; ME.features.web_research = false;
+     SEL.add('a'); renderBulkBar();
+     const hidden = document.getElementById('bulkWeb').style.display === 'none';
+     ME.features.web_research = was; SEL.clear(); renderBulkBar(); return hidden; }));
 
   // --- sortable headers -------------------------------------------------------
   await p.click('#tbl th.sortable[data-sort="name,nameDesc"]'); await p.waitForTimeout(250);

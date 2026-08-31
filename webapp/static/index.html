@@ -603,6 +603,7 @@
   <div class="bulkbar" id="bulkBar" hidden>
     <span id="bulkCount"></span>
     <button class="mbtn save" id="bulkWp">Enrich with WhitePages</button>
+    <button class="mbtn save" id="bulkWeb">Research on the web</button>
     <button class="mbtn" id="bulkClear">Clear</button>
   </div>
   <div class="empty" id="empty">
@@ -2983,13 +2984,21 @@ let BULK=null;
 function renderBulkBar(){
   [...SEL].forEach(id=>{if(!byId(id))SEL.delete(id);});
   const bar=document.getElementById('bulkBar');
-  if(!SEL.size){bar.hidden=true;return;}
+  // The header box tells the truth: an emptied selection unticks it, so the
+  // next press selects rather than silently deselecting nothing.
+  if(!SEL.size){document.getElementById('selAll').checked=false;bar.hidden=true;return;}
   const plans=[...SEL].map(id=>wpPlan(byId(id))).filter(pl=>pl&&pl[0]!=='recheck');
   const maxLk=plans.reduce((t,pl)=>t+(pl.includes('home')?2:1),0);
+  const webN=(window.ME&&ME.features&&ME.features.web_research)
+    ?[...SEL].filter(id=>{const L=byId(id);return L&&!L.web&&L.lastName;}).length:0;
   bar.hidden=false;
   if(!BULK)document.getElementById('bulkCount').textContent=
-    SEL.size+' selected \u00b7 '+plans.length+' with a WhitePages lookup left ('+maxLk+' lookup'+(maxLk===1?'':'s')+' max)';
-  document.getElementById('bulkWp').disabled=!plans.length&&!BULK;
+    SEL.size+' selected \u00b7 '+plans.length+' with a WhitePages lookup left ('+maxLk+' lookup'+(maxLk===1?'':'s')+' max)'
+    +(webN?' \u00b7 '+webN+' unresearched on the web':'');
+  document.getElementById('bulkWp').disabled=(!plans.length&&!(BULK&&BULK.kind==='wp'))||(BULK&&BULK.kind!=='wp');
+  const wb=document.getElementById('bulkWeb');
+  wb.style.display=(window.ME&&ME.features&&ME.features.web_research)?'':'none';
+  wb.disabled=(!webN&&!(BULK&&BULK.kind==='web'))||(BULK&&BULK.kind!=='web');
 }
 document.getElementById('rows').addEventListener('change',e=>{
   const cb=e.target.closest('.selbox');if(!cb)return;
@@ -3002,14 +3011,14 @@ document.getElementById('selAll').addEventListener('change',e=>{
 });
 document.getElementById('bulkClear').addEventListener('click',()=>{SEL.clear();render();renderBulkBar();});
 document.getElementById('bulkWp').addEventListener('click',async()=>{
-  if(BULK){BULK.stop=true;return;}
+  if(BULK){if(BULK.kind==='wp')BULK.stop=true;return;}
   const ids=[...SEL].filter(id=>{const pl=wpPlan(byId(id));return pl&&pl[0]!=='recheck';});
   if(!ids.length)return;
   const maxLk=ids.reduce((t,id)=>t+(wpPlan(byId(id)).includes('home')?2:1),0);
   const skipped=SEL.size-ids.length;
   const wl=(typeof CREDITS!=='undefined'&&CREDITS&&CREDITS.whitepages)?` You have ${CREDITS.whitepages.yours_left??CREDITS.whitepages.left} of your monthly lookups left.`:'';
   if(!await appConfirm(`Enrich ${ids.length} lead${ids.length>1?'s':''} with WhitePages \u2014 worst case ${maxLk} lookup${maxLk>1?'s':''}. Each lead's number is checked first and the name search runs only if that leaves the household empty${skipped?`; ${skipped} already answered ${skipped>1?'are':'is'} skipped`:''}.${wl}`,'Enrich selected'))return;
-  BULK={stop:false};
+  BULK={stop:false,kind:'wp'};renderBulkBar();
   const btn=document.getElementById('bulkWp'),cnt=document.getElementById('bulkCount');
   btn.textContent='Stop';
   let done=0,failed=0;
@@ -3022,6 +3031,32 @@ document.getElementById('bulkWp').addEventListener('click',async()=>{
   const stopped=BULK.stop;BULK=null;btn.textContent='Enrich with WhitePages';
   toast(`Bulk WhitePages: ${done} of ${ids.length} looked up${failed?', '+failed+' failed':''}${stopped?' \u2014 stopped, the rest are untouched':''}.`);
   SEL.clear();render();renderBulkBar();loadCredits();
+});
+/* "The app needs to also search google like I did when enriching leads."
+   The same per-lead web research, run across a selection: pick the leads
+   (filters + select-all target exactly who needs it), see the count, say
+   yes once. Tokens, not credits \u2014 the confirmation says so \u2014 and it never
+   re-searches a lead whose answer is recorded. Serial on purpose: one
+   search at a time is kind to the API and keeps Stop meaningful. */
+document.getElementById('bulkWeb').addEventListener('click',async()=>{
+  if(BULK){if(BULK.kind==='web')BULK.stop=true;return;}
+  const ids=[...SEL].filter(id=>{const L=byId(id);return L&&!L.web&&L.lastName;});
+  if(!ids.length)return;
+  const skipped=SEL.size-ids.length;
+  if(!await appConfirm(`Research ${ids.length} lead${ids.length>1?'s':''} on the web \u2014 the same search you would run by hand (name + employer + title), one per lead. This costs AI tokens, not lookup credits${skipped?`; ${skipped} already researched ${skipped>1?'are':'is'} skipped`:''}. Findings land in each record for you to accept or discard.`,'Research selected'))return;
+  BULK={stop:false,kind:'web'};renderBulkBar();
+  const btn=document.getElementById('bulkWeb'),cnt=document.getElementById('bulkCount');
+  btn.textContent='Stop';
+  let done=0,failed=0;
+  for(const id of ids){
+    if(BULK.stop)break;
+    cnt.textContent=`Web research ${done}/${ids.length}\u2026 \u2014 Stop keeps the rest for later`;
+    try{await webResearch(id);}catch(e){failed++;}
+    done++;
+  }
+  const stopped=BULK.stop;BULK=null;btn.textContent='Research on the web';
+  toast(`Bulk web research: ${done} of ${ids.length} searched${failed?', '+failed+' failed':''}${stopped?' \u2014 stopped, the rest are untouched':''}. Open a record to accept what was found.`);
+  SEL.clear();render();renderBulkBar();
 });
 
 /* ---- sortable headers: the header is the control, the select is the state.
