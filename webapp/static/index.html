@@ -783,6 +783,7 @@
   <p class="hint">What each signal has to work with. A signal starved of input scores zero on every lead, which looks like a bad list rather than a missing column.</p>
   <div id="covBody"></div>
   <div id="covBudget"></div>
+  <p class="hint" id="covRev" style="margin-top:8px"></p>
   <div class="mfoot"><button class="mbtn save" onclick="closeModal('mCoverage')">Close</button></div>
 </div></div>
 
@@ -4625,7 +4626,10 @@ function renderBudgets(){
     +`</p>`+rows.join('');
 }
 document.getElementById('btnCoverage').addEventListener('click',async()=>{
-  renderCoverage();openModal('mCoverage');
+  renderCoverage();
+  const rv=document.getElementById('covRev');
+  if(rv)rv.textContent='Running build: '+((window.ME&&ME.features&&ME.features.revision)||'unknown')+' \u2014 if a change you merged is missing, this names the deployment that is actually answering.';
+  openModal('mCoverage');
   await loadCredits();renderBudgets();
 });
 

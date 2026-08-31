@@ -1363,6 +1363,10 @@ async def me(request: Request):
         # the 10-day trial key is removed, the buttons disappear and the
         # already-fetched answers stay on their leads.
         "attom": bool(ATTOM_API_KEY),
+        # Which build is answering. Cloud Run stamps K_REVISION on every
+        # deployment; surfacing it ends the "is my deploy current" guessing
+        # game that has now eaten three debugging rounds.
+        "revision": os.environ.get("K_REVISION", "local"),
         "drive": False,          # set per-session below when Google is signed in
     }
     encryption = encryption_backend()
