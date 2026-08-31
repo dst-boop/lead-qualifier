@@ -2532,3 +2532,19 @@ Setup: `gcloud run services update lead-qualifier --region us-east1
 --update-env-vars ATTOM_API_KEY=<the trial key>`. To end the trial,
 remove the var. If it earns its keep, the follow-ups are a score signal
 and bulk pricing behind a stated quota.
+
+## 44. Web research at enrichment scale
+
+"The app needs to also search google like I did when enriching leads."
+§42 built the search; this puts it where enriching happens. The selection
+checkboxes gain a second bulk action, "Research on the web": tick the
+leads (filters and select-all target exactly who needs it), see the count
+— the bar now says how many are still unresearched — and confirm once.
+The confirmation names the cost as AI tokens, not lookup credits, and who
+gets skipped; each lead runs the same recorded, quoted, accept-by-click
+webResearch as the single button, serially, with Stop keeping the rest
+for later. Deliberately still not a phase of "Enrich all (free)": that
+button's name is a promise, and a token spend per lead does not belong
+under it. A small honesty fix rode along: emptying the selection now
+unticks the select-all header box, so its next press selects instead of
+silently deselecting nothing.
