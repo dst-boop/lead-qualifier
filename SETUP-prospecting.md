@@ -40,7 +40,7 @@ secret — these are public URLs — so plain env vars, no Secret Manager.
 | Variable | Meaning |
 |---|---|
 | `WARN_FEEDS` | JSON array of feeds (below). **The feature is hidden until this is set.** |
-| `FORM5500_URL` | The DOL Form 5500 dataset. A `.zip` is unpacked in memory. A **Google Drive link or file id** also works. |
+| `FORM5500_URL` | The DOL Form 5500 dataset — and optionally the **5500-SF** (short form) alongside it, separated by a comma or space (use `^|^` if comma). A `.zip` is unpacked in memory. **Google Drive links or file ids** also work. The SF carries its assets inline and is where small plans file — the business-owner population — so including it prices employers Schedule H never will. |
 | `FORM5500_SCHEDULE_URLS` | Schedule H and Schedule I, comma-separated. **Required for any dollar figure** — see below. |
 | `FORM5500_CSV_IN_ZIP` | Substring identifying which CSV inside the zip to read. Default `f_5500`. |
 | `SOURCE_STATES` | Comma-separated states to keep, e.g. `NY,NJ,CT,PA`. Empty keeps all. |

@@ -336,7 +336,7 @@ PLAN_ALIASES = {
              "spons name", "sponsor"],
     "plan_name": ["plan name", "plan name 1", "type plan name"],
     "state": ["spons dfe mail us state", "sponsor state", "spons state", "state",
-              "spons dfe loc us state"],
+              "spons dfe loc us state", "spons us state"],
     "participants": ["tot partcp boy cnt", "tot active partcp cnt", "total participants",
                      "tot partcp cnt", "participants"],
     # Present on Schedule H/I, not on f_5500. Left here because a deployment
@@ -346,7 +346,8 @@ PLAN_ALIASES = {
                "small tot assets eoy amt"],
     # The key both schedules join back on.
     "ack_id": ["ack id"],
-    "plan_year": ["form tax prd", "plan year begin date", "form plan year begin date"],
+    "plan_year": ["form tax prd", "tax prd", "plan year begin date",
+                  "form plan year begin date"],
     "plan_type": ["type pension bnft code", "type welfare bnft code", "pension code"],
 }
 
