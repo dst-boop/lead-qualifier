@@ -310,6 +310,12 @@
   .overlay{position:fixed;inset:0;background:rgba(20,28,38,.55);display:none;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
   .overlay.open{display:flex}
   .modal{background:var(--panel);border-radius:8px;max-width:720px;width:100%;padding:22px 24px;border-top:4px solid var(--brass);max-height:90vh;overflow:auto}
+  /* Every modal closes from the top corner too — Esc and a backdrop click
+     already work, but a long table should never make Close a scroll away.
+     Sticky, so the × stays put while the modal scrolls under it. */
+  .mclose-wrap{position:sticky;top:0;height:0;display:flex;justify-content:flex-end;z-index:6}
+  .mclose{width:28px;height:28px;margin:-10px -12px 0 0;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink-faint);font-size:1.1rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(5,29,75,.15)}
+  .mclose:hover{color:var(--ink);border-color:var(--brass)}
   .modal h2{font-family:var(--font-disp);font-size:1.15rem;margin-bottom:14px}
   .modal h3{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--brass);margin:16px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
   .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -753,6 +759,13 @@
       <button class="mbtn save" id="btnFeedsSave">Save</button>
     </div>
     <p class="hint" id="oppsCfgNote" style="margin-top:4px"></p>
+    <p class="hint" style="margin-top:10px"><b>Where the Form 5500 files live.</b> Links to the DOL files, saved the same way &mdash; the regular Form 5500 and the 5500-SF together in the first box (separated by a space; the SF is where business owners file), Schedule H&nbsp;/&nbsp;I in the second. Google Drive links work. The files are read and checked before anything is saved.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="f5500Main" type="text" placeholder="Form 5500 + 5500-SF links, separated by a space" style="flex:1 1 100%;min-width:280px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:.8rem">
+      <input id="f5500Sched" type="text" placeholder="Schedule H / I links (optional &mdash; the SF prices itself)" style="flex:1;min-width:280px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:.8rem">
+      <button class="mbtn save" id="btnF5500Save">Save</button>
+    </div>
+    <p class="hint" id="f5500Note" style="margin-top:4px"></p>
   </div>
   <div class="mfoot" style="justify-content:space-between">
     <button class="mbtn" id="btnOppsRefresh">Refresh from source</button>
@@ -3765,6 +3778,30 @@ document.getElementById('btnFeedsBuiltin').addEventListener('click',()=>{
 document.getElementById('btnFeedsSave').addEventListener('click',()=>{
   saveFeeds(document.getElementById('oppsFeedUrl').value.trim());
 });
+/* The 5500 source, saved the same way: the server reads and parses the files
+   before storing anything, so a typo'd link is refused with the reason. */
+async function saveF5500(){
+  const note=document.getElementById('f5500Note');
+  const url=document.getElementById('f5500Main').value.trim();
+  const sched=document.getElementById('f5500Sched').value.trim();
+  note.textContent=url?'Reading the files — a full DOL year is big, this can take a minute…':'Clearing…';
+  try{
+    const d=await api('/api/sources/form5500',{url:url,schedules:sched});
+    if(d.cleared){note.textContent='Cleared — the FORM5500_URL env var (if any) applies again.';}
+    else{
+      // The regular 5500 file never carries assets — that is what the
+      // schedule join is for — so "assets" is only worth flagging when
+      // nothing got priced at all.
+      const un=(d.unmapped||[]).filter(f=>f!=='assets'||!d.priced);
+      note.textContent=d.employers.toLocaleString()+' employers read, '+d.priced.toLocaleString()
+        +' priced. Saved.'
+        +(un.length?' Columns not recognised: '+un.join(', ')+' — tell Claude, it is a missing alias.':'')
+        +(d.note?' '+d.note:'');
+    }
+    loadOpps(true);
+  }catch(e){note.textContent=e.message;}
+}
+document.getElementById('btnF5500Save').addEventListener('click',saveF5500);
 document.getElementById('btnTemplate').addEventListener('click',openTemplate);
 document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
 document.getElementById('btnCopyPrompt').addEventListener('click',copyResearchPrompt);
@@ -3861,6 +3898,15 @@ document.getElementById('btnSaveSettings').addEventListener('click',async()=>{
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+/* One × per modal, injected rather than hand-written fifteen times. It rides
+   sticky at the top-right so a long list never puts Close below the fold. */
+document.querySelectorAll('.overlay .modal').forEach(m=>{
+  const w=document.createElement('div');w.className='mclose-wrap';
+  const x=document.createElement('button');x.className='mclose';x.type='button';
+  x.innerHTML='&times;';x.title='Close (Esc works too)';x.setAttribute('aria-label','Close');
+  x.addEventListener('click',()=>m.closest('.overlay').classList.remove('open'));
+  w.appendChild(x);m.insertBefore(w,m.firstChild);
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
 let _qT=null;
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(_qT);_qT=setTimeout(render,160);});
@@ -5416,7 +5462,9 @@ document.getElementById('btnAssign').addEventListener('click',()=>{
 });
 // boot() needs to know whether the user is signed in before it decides
 // between server state and the browser copy, so loadMe() has to finish first.
-(async()=>{await loadMe();await boot();})();
+/* __booted flips only after server state is merged — the honest "ready"
+   signal for tests, which otherwise wait on network silence and flake. */
+(async()=>{await loadMe();await boot();window.__booted=true;})();
 </script>
 </body>
 </html>

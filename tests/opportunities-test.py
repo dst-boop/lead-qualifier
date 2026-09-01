@@ -275,6 +275,33 @@ r = c.post("/api/sources/feeds", json={"value": ""})
 ck("clearing hands control back to the env var",
    r.status_code == 200 and r.json()["cleared"] is True
    and asyncio.run(main._warn_feeds_value())[1] == "WARN_FEEDS", r.json())
+
+# --- the 5500 source saved in the app: same rule, for the same reason --------
+main._MEM_SESSIONS["s1"]["account_email"] = "ana@fpa.com"     # signed in, not admin
+r = c.post("/api/sources/form5500", json={"url": STUB + "/f5500.zip"})
+ck("a non-admin cannot set the firm's 5500 source",
+   r.status_code == 403 and "admin" in r.json()["detail"], r.json())
+main._MEM_SESSIONS["s1"]["account_email"] = "dan@fpa.com"
+r = c.post("/api/sources/form5500", json={"url": STUB + "/missing.csv"})
+ck("a dead 5500 link is refused, with nothing saved",
+   r.status_code == 400 and "Nothing was saved" in r.json()["detail"], r.json())
+r = c.post("/api/sources/form5500", json={"url": "", "schedules": STUB + "/f5500.zip"})
+ck("schedules without a main file are refused",
+   r.status_code == 400 and "Nothing was saved" in r.json()["detail"], r.json())
+r = c.post("/api/sources/form5500", json={"url": STUB + "/f5500.zip"})
+ck("a good link saves, reporting what it read and priced",
+   r.status_code == 200 and r.json()["employers"] == 2 and r.json()["priced"] == 2, r.json())
+main.FORM5500_URL = STUB + "/missing.csv"          # env var now points at a dead file
+got = asyncio.run(main._load_plans())
+ck("  ...and the stored source drives the loader, ignoring the env var",
+   len(got["plans"]) == 2, got.get("note"))
+ck("  ...served warm from the validation read, not fetched twice",
+   got.get("cached") is True)
+r = c.post("/api/sources/form5500", json={"url": ""})
+ck("clearing the 5500 source hands control back to the env vars",
+   r.status_code == 200 and r.json()["cleared"] is True
+   and asyncio.run(main._form5500_value())[2] == "FORM5500_URL", r.json())
+main.FORM5500_URL = STUB + "/f5500.zip"
 main._MEM_SESSIONS["s1"]["provider"] = "google"
 main._MEM_SESSIONS["s1"].pop("account_email", None)
 main._ADMINS.discard("dan@fpa.com")

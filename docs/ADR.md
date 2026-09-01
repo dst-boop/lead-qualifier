@@ -2564,3 +2564,23 @@ warn-data branch. The env var stays as the fallback for deployments that
 prefer it, diagnostics name which source is in effect ("WARN_FEEDS" vs
 "the feed source saved in the app"), and clearing the field hands control
 back to the env var. No gcloud anywhere in the loop.
+
+## 46. The 5500 source joins it, and modals close from the top
+
+**2026-09.** The operator's first question after the multi-file 5500 loader
+shipped: "Is this the right place for the 5500 urls?" It was not — the same
+comma-in-an-env-var trap (`^|^`) that earned WARN_FEEDS a settings field
+applies to FORM5500_URL doubled, since the two-file form is exactly the case
+with a comma in it. So the Form 5500 source became the second field in the
+same Money-in-motion settings block: main files (regular + SF) in one box,
+Schedule H/I in the other, saved atomically — never a stored main file joined
+against env-var schedules. Validation is the real read: the files are fetched
+and parsed before anything is stored, the response names employers read and
+priced, and the parse warms the cache so the panel is instantly current.
+`_load_plans` resolves stored-over-env at call time through
+`_form5500_value()`, mirroring `_warn_feeds_value()`.
+
+Same session: every modal now carries an injected sticky × at the top right
+(`.mclose`, added once in JS rather than hand-written per modal), because a
+long WARN table put the only visible Close below the fold. Esc and the
+backdrop click always worked; the fix is a control you can see.

@@ -124,6 +124,44 @@ const OPPS={built_at:1756000000,items:[
      await p.textContent('#oppsMeta'));
   ck('the modal is still usable', await p.isVisible('#mOpps'));
 
+  // --- the admin source settings: the 5500 files, saved in the app ----------
+  status=200;body=OPPS;
+  who=me({is_admin:true});
+  const cfgAsked=[];
+  await p.route('**/api/sources/form5500',r=>{cfgAsked.push(JSON.parse(r.request().postData()));
+    return r.fulfill({json:{ok:true,cleared:false,employers:67608,priced:23140,
+                            unmapped:['assets'],note:''}});});
+  await load();
+  await p.click('#btnOpps');await p.waitForTimeout(400);
+  ck('an admin sees the source settings', await shown('oppsCfg'));
+  await p.fill('#f5500Main','https://x/reg.zip https://x/sf.zip');
+  await p.fill('#f5500Sched','https://x/schH.zip');
+  await p.click('#btnF5500Save');await p.waitForTimeout(400);
+  ck('saving posts the main files and the schedules together',
+     cfgAsked.length===1&&/reg\.zip/.test(cfgAsked[0].url)&&/sf\.zip/.test(cfgAsked[0].url)
+     &&/schH\.zip/.test(cfgAsked[0].schedules), JSON.stringify(cfgAsked[0]||{}));
+  const n5=await p.textContent('#f5500Note');
+  ck('the result names what was read and priced',
+     /67,608 employers read, 23,140 priced/.test(n5), n5);
+  ck('  ...and a missing assets column with pricing working is not an alarm',
+     !/not recognised/.test(n5), n5);
+
+  who=me();
+  await load();
+  await p.click('#btnOpps');await p.waitForTimeout(400);
+  ck('a non-admin sees no source settings', !(await shown('oppsCfg')));
+
+  // --- closing without the scroll to the bottom ------------------------------
+  ck('the modal carries a close × at the top',
+     await p.evaluate(()=>!!document.querySelector('#mOpps .mclose')));
+  await p.click('#mOpps .mclose');await p.waitForTimeout(200);
+  ck('  ...and clicking it closes the modal', !(await p.isVisible('#mOpps .modal')));
+  ck('every modal got one — Close is never below the fold', await p.evaluate(()=>
+     [...document.querySelectorAll('.overlay .modal')].every(m=>m.querySelector('.mclose'))));
+  await p.evaluate(()=>openModal('mOpps'));await p.waitForTimeout(100);
+  await p.keyboard.press('Escape');await p.waitForTimeout(200);
+  ck('Escape still closes too', !(await p.isVisible('#mOpps .modal')));
+
   const unexpected=errs.filter(e=>!/Failed to load resource/.test(e));
   ck('no page errors', unexpected.length===0, unexpected.slice(0,2).join(' | '));
   console.log(fail?`\nFAILURES: ${fail} of ${n}`:`\nall ${n} checks passed`);
