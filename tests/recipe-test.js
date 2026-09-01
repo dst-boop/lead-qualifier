@@ -24,8 +24,11 @@ const LEAD={id:'L1',firstName:'A',lastName:'B',status:'New',activity:[],mobilePh
   const load=async()=>{
     await p.goto('http://127.0.0.1:8099/',{waitUntil:'domcontentloaded'});
     await p.evaluate(()=>localStorage.clear());
-    await p.goto('http://127.0.0.1:8099/',{waitUntil:'networkidle'});
-    await p.waitForTimeout(500);
+    // networkidle flaked twice under full-suite load; the app's own boot
+    // marker says exactly what this needs — server state merged.
+    await p.goto('http://127.0.0.1:8099/',{waitUntil:'domcontentloaded'});
+    await p.waitForFunction(()=>window.__booted===true,null,{timeout:15000});
+    await p.waitForTimeout(300);
   };
   const recipe=()=>p.evaluate(()=>state.settings.recipe);
 

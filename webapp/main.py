@@ -88,6 +88,9 @@ FORM5500_SCHEDULE_URLS = [u.strip() for u in
 SOURCE_STATES = os.environ.get("SOURCE_STATES", "")     # e.g. "NY,NJ,CT,PA"
 SOURCE_COUNTIES = os.environ.get("SOURCE_COUNTIES", "")  # e.g. "Nassau,Suffolk"
 SOURCE_MIN_WORKERS = int(os.environ.get("SOURCE_MIN_WORKERS", "25"))
+# State WARN archives reach back decades; events older than this many days are
+# not money in motion and stay out of the panel. 550 ≈ 18 months.
+OPPS_MAX_AGE_DAYS = int(os.environ.get("OPPS_MAX_AGE_DAYS", "550"))
 FS_OPPS = os.environ.get("FIRESTORE_OPPS_COLLECTION", "opportunities")
 
 # --- ZoomInfo via the MCP connector ---
@@ -1166,6 +1169,15 @@ async def _signed_in_email(request: Request) -> str:
     session = request.state.session
     if session.get("provider") == "password" and session.get("account_email"):
         return session["account_email"]
+    # The stamped identity is the answer for any session that has one: the
+    # cookie is the sign-in, and it outlives the provider's access token. The
+    # network round-trips below are only for sessions predating the stamp.
+    # Without this, a Google access token aging out an hour after sign-in
+    # read as "Not signed in" on every server feature — which is exactly what
+    # happened to the first non-Google-refreshed account that tried the app.
+    stamped = (session.get("identity") or "").lower()
+    if stamped:
+        return stamped
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -1207,6 +1219,12 @@ async def _active_token(request: Request) -> tuple[str, str]:
     token = _ms_token(session)
     if token:
         return "microsoft", token
+    # A session with a stamped identity IS signed in — the provider token
+    # aging out must not sign the person out of features that never needed
+    # that token. Callers that need a real one already handle "" (the same
+    # contract the password path has always had).
+    if _identity(session):
+        return session.get("provider") or "password", ""
     raise HTTPException(status_code=401, detail="Not signed in")
 
 
@@ -1306,7 +1324,7 @@ async def _sender_token(request: Request, sender_id: str) -> tuple[str, str, str
     session = request.state.session
     if not sender_id:
         provider, token = await _active_token(request)
-        if provider == "password" and not token:
+        if not token:
             raise HTTPException(status_code=400,
                                 detail="No sending address yet — link a Google or Microsoft "
                                        "account from the bar at the top, then choose it here.")
@@ -1424,6 +1442,20 @@ async def me(request: Request):
                     "zi_connected": bool(session.get("zoominfo")),
                     "storage": storage, "encryption": encryption, "credits": credits,
                     "is_admin": _is_admin(d.get("mail") or d.get("userPrincipalName") or "")}
+    # Provider token dead but the session stamped who this is: still signed
+    # in. Drive stays off and the linked flags read false, so the UI can
+    # offer a re-link, but nothing that runs on the session alone goes dark.
+    stamped = _identity(session)
+    if stamped:
+        return {"signed_in": True, "provider": session.get("provider") or "password",
+                "name": stamped.split("@")[0], "email": stamped,
+                "providers": providers, "features": features,
+                "linked_google": False,
+                "linked_microsoft": bool(session.get("ms_token_cache")),
+                "zi_connected": bool(session.get("zoominfo")),
+                "zi_mcp_connected": bool(_zi_mcp_token(session)),
+                "storage": storage, "encryption": encryption, "credits": credits,
+                "is_admin": _is_admin(stamped)}
     return JSONResponse({"signed_in": False, "providers": providers,
                          "features": features, "storage": storage,
                          "encryption": encryption})
@@ -2769,26 +2801,107 @@ async def _fetch_source(ref: str, token: str, want: str) -> str:
     return blob.decode("utf-8", errors="replace")
 
 
-async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
-    """Form 5500 sponsors, with assets joined in from Schedule H or I.
+# The 5500 source an admin saved in the app wins over the env var — the same
+# rule, for the same reason, as the WARN feed source above: config is data,
+# and the ^|^ delimiter a comma-separated FORM5500_URL forces through gcloud
+# is exactly the quoting trap the feed setting was built to end.
+_F5500_CFG = {"at": 0.0, "value": None}
+_MEM_F5500: dict = {}                     # local-dev fallback, like every _MEM_*
 
-    The 5500 file itself carries no money — only participant counts — so
-    without the schedule there is no average balance and nothing to rank on.
-    That is reported rather than left to be discovered.
+
+async def _form5500_value() -> tuple:
+    """(main_urls_string, schedule_refs_list, source_label), stored beating env.
+
+    The stored config is atomic: main files and schedules saved together,
+    never a stored main file joined against env-var schedules — half-mixed
+    config is undebuggable from the outside.
     """
-    urls = [u for u in re.split(r"[,\s]+", FORM5500_URL) if u]
-    if not urls:
-        return {"plans": {}, "note": "FORM5500_URL is not set."}
-    key = "plans|" + FORM5500_URL + "|" + ",".join(FORM5500_SCHEDULE_URLS) + "|" + SOURCE_STATES
-    if not fresh:
-        got = _cache_get(key, PLANS_TTL)
-        if got is not None:
-            return {**got, "cached": True}
+    now = time.time()
+    if _F5500_CFG["value"] is None or now - _F5500_CFG["at"] > 60:
+        doc = await _fs_get(FS_STATE, "form5500") or _MEM_F5500.get("v") or {}
+        _F5500_CFG.update(at=now, value={"url": (doc.get("url") or "").strip(),
+                                         "schedules": (doc.get("schedules") or "").strip()})
+    v = _F5500_CFG["value"]
+    if v["url"]:
+        sched = [u for u in re.split(r"[,\s]+", v["schedules"]) if u]
+        return v["url"], sched, "The 5500 source saved in the app"
+    return FORM5500_URL, FORM5500_SCHEDULE_URLS, "FORM5500_URL"
+
+
+def _plans_key(src_url: str, sched_refs: list) -> str:
+    return "plans|" + src_url + "|" + ",".join(sched_refs) + "|" + SOURCE_STATES
+
+
+class Form5500Cfg(BaseModel):
+    url: str = ""
+    schedules: str = ""
+
+
+@app.post("/api/sources/form5500")
+async def set_form5500(body: Form5500Cfg, request: Request,
+                       email: str = Depends(signed_in)):
+    """Save the Form 5500 source in the app — links to the main file(s) and
+    the schedules, Drive links included. The files are fetched and parsed
+    before anything is stored: a value is saved only once it has produced
+    employers, so a typo'd link can never look configured. Admin-only, and
+    an empty value clears the stored one so the env vars apply again."""
+    if not _is_admin(email):
+        raise HTTPException(status_code=403,
+                            detail="Only an admin can set the firm's 5500 source.")
+    url = (body.url or "").strip()
+    schedules = (body.schedules or "").strip()
+    if schedules and not url:
+        raise HTTPException(status_code=400,
+                            detail="Schedule links need a main 5500 file to join against — "
+                                   "add the Form 5500 / 5500-SF link too. Nothing was saved.")
+    result = None
+    if url:
+        urls = [u for u in re.split(r"[,\s]+", url) if u]
+        sched = [u for u in re.split(r"[,\s]+", schedules) if u]
+        try:
+            result = await _build_plans(urls, sched, await _drive_token_for(request),
+                                        strict=True)
+        except HTTPException as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Could not read that 5500 source "
+                                       f"({str(e.detail)[:160]}). Nothing was saved.")
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Could not read that 5500 source "
+                                       f"({type(e).__name__}: {str(e)[:160]}). Nothing was saved.")
+        if not result["plans"]:
+            raise HTTPException(status_code=400,
+                                detail="That file parsed but no employers were recognised — "
+                                       "check it is a DOL Form 5500 export. Nothing was saved.")
+    doc = {"url": url, "schedules": schedules, "by": email, "at": time.time()}
+    if not await _fs_set(FS_STATE, "form5500", doc):
+        _MEM_F5500["v"] = doc
+    _F5500_CFG.update(at=0.0, value=None)
+    if result:
+        # The validation read is the real read — cache it so the panel and
+        # the free enrich are instantly warm instead of fetching again.
+        _cache_put(_plans_key(url, [u for u in re.split(r"[,\s]+", schedules) if u]), result)
+    return {"ok": True, "cleared": not url,
+            "employers": (result or {}).get("kept") or 0,
+            "priced": (result or {}).get("priced") or 0,
+            "unmapped": (result or {}).get("unmapped") or [],
+            "note": (result or {}).get("note") or ""}
+
+
+async def _build_plans(urls: list, sched_refs: list, drive_token: str = "",
+                       strict: bool = False) -> dict:
+    """Fetch, parse and merge the 5500 files — no cache, sources explicit.
+
+    Split from _load_plans so saving the source in the app can validate a
+    candidate config by actually building from it, before storing anything.
+    """
     # Several main files merge into one index. The same keep-the-largest rule
     # as within a file: assets outrank a bare headcount, headcount breaks ties.
     # One dead file must not take the others down with it — its absence is
     # reported and the rest still load. A single dead file still raises,
-    # because then there is nothing at all to show.
+    # because then there is nothing at all to show; strict (the save-time
+    # check) raises on any dead file, because storing a half-working config
+    # on purpose is different from surviving one at read time.
     plans: dict = {}
     rows = kept = 0
     mapped, unmapped = None, []
@@ -2797,7 +2910,7 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
         try:
             text = await _fetch_source(url, drive_token, FORM5500_CSV_IN_ZIP)
         except HTTPException as e:
-            if len(urls) == 1:
+            if strict or len(urls) == 1:
                 raise
             file_notes.append(f"5500 file unavailable: {str(e.detail)[:160]}")
             continue
@@ -2818,20 +2931,20 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
         out["note"] = " ".join(file_notes)
 
     priced_inline = sum(1 for p in plans.values() if p.get("avg_balance"))
-    if priced_inline and not FORM5500_SCHEDULE_URLS:
+    if priced_inline and not sched_refs:
         # The SF file prices itself; without schedules that is all there is.
         out["priced"] = priced_inline
-        return _cache_put(key, out)
+        return out
 
-    if not FORM5500_SCHEDULE_URLS:
+    if not sched_refs:
         out["note"] = " ".join(file_notes + [
             "The 5500 file has participant counts but no assets — assets are "
-            "on Schedule H and Schedule I, which are separate downloads. Set "
-            "FORM5500_SCHEDULE_URLS or nothing can be priced."])
-        return _cache_put(key, out)
+            "on Schedule H and Schedule I, which are separate downloads. Add "
+            "the schedule links or nothing can be priced."])
+        return out
 
     assets, notes = {}, list(file_notes)
-    for ref in FORM5500_SCHEDULE_URLS:
+    for ref in sched_refs:
         try:
             sched = prospecting.parse_schedule_assets(
                 await _fetch_source(ref, drive_token, "sch"))
@@ -2842,8 +2955,12 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
             for k, v in sched["assets"].items():
                 assets.setdefault(k, v)
         except HTTPException as e:
+            if strict:
+                raise
             notes.append(f"schedule unavailable: {e.detail}"[:200])
         except Exception as e:
+            if strict:
+                raise
             notes.append(f"schedule unreadable: {type(e).__name__}")
     rep = prospecting.attach_assets(plans, assets)
     out["priced"] = sum(1 for p in plans.values() if p.get("avg_balance"))
@@ -2853,7 +2970,28 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
     elif not rep["filled"] and not priced_inline:
         out["note"] = ("Schedule files loaded but nothing joined — the ACK_ID values do "
                        "not line up with the 5500 file. Check both are the same year.")
-    return _cache_put(key, out)
+    return out
+
+
+async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
+    """Form 5500 sponsors, with assets joined in from Schedule H or I.
+
+    The 5500 file itself carries no money — only participant counts — so
+    without the schedule there is no average balance and nothing to rank on.
+    That is reported rather than left to be discovered. The source resolves
+    at call time (stored setting first, env var as fallback), so a change
+    takes effect without a restart.
+    """
+    src_url, sched_refs, _src = await _form5500_value()
+    urls = [u for u in re.split(r"[,\s]+", src_url) if u]
+    if not urls:
+        return {"plans": {}, "note": "No Form 5500 source is set."}
+    key = _plans_key(src_url, sched_refs)
+    if not fresh:
+        got = _cache_get(key, PLANS_TTL)
+        if got is not None:
+            return {**got, "cached": True}
+    return _cache_put(key, await _build_plans(urls, sched_refs, drive_token))
 
 
 @app.get("/api/sources/probe")
@@ -2876,19 +3014,21 @@ async def sources_probe(request: Request, which: str = "all"):
             out["warn"]["feeds"] = got["feeds"]
             out["warn"]["sample"] = got["events"][:3]
     if which in ("all", "5500"):
-        if not FORM5500_URL:
-            out["form5500"] = {"error": "FORM5500_URL is not set."}
+        src_url, sched_refs, src_label = await _form5500_value()
+        if not src_url.strip():
+            out["form5500"] = {"error": "No Form 5500 source is set."}
         else:
             try:
                 got = await _load_plans(await _drive_token_for(request), fresh=True)
                 sample = list(got["plans"].items())[:3]
-                out["form5500"] = {"rows_read": got.get("rows"), "kept": got.get("kept"),
+                out["form5500"] = {"source": src_label,
+                                   "rows_read": got.get("rows"), "kept": got.get("kept"),
                                    "mapped": got.get("mapped"), "unmapped": got.get("unmapped"),
                                    # The number that decides whether anything can be
                                    # ranked. Sponsors without it are counted, not hidden.
                                    "priced": got.get("priced"),
                                    "schedule_rows": got.get("schedule_rows"),
-                                   "schedules_configured": len(FORM5500_SCHEDULE_URLS),
+                                   "schedules_configured": len(sched_refs),
                                    "note": got.get("note"),
                                    "sample": [v for _, v in sample]}
             except HTTPException as e:
@@ -2919,7 +3059,7 @@ async def sources_refresh(request: Request):
     opps = prospecting.build_opportunities(
         warn["events"], plans.get("plans") or {},
         min_workers=SOURCE_MIN_WORKERS, states=_source_states() or None,
-        counties=_source_counties() or None)
+        counties=_source_counties() or None, max_age_days=OPPS_MAX_AGE_DAYS)
     await _fs_set(FS_OPPS, "latest", {
         "built_at": int(time.time()),
         "count": len(opps),
@@ -2976,7 +3116,8 @@ async def opportunities(request: Request, refresh: bool = False):
         plans = {}
     opps = prospecting.build_opportunities(
         warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
-        states=_source_states() or None, counties=_source_counties() or None)
+        states=_source_states() or None, counties=_source_counties() or None,
+        max_age_days=OPPS_MAX_AGE_DAYS)
     return {"built_at": int(time.time()), "count": len(opps),
             "matched": sum(1 for o in opps if o["plan_matched"]),
             "items": opps[:500], "feeds": warn["feeds"]}
@@ -3013,7 +3154,8 @@ async def opportunities_warmth(body: WarmOpportunitiesRequest, request: Request)
         plans = {}
     opps = prospecting.build_opportunities(
         warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
-        states=_source_states() or None, counties=_source_counties() or None)
+        states=_source_states() or None, counties=_source_counties() or None,
+        max_age_days=OPPS_MAX_AGE_DAYS)
     prospecting.annotate_warmth(opps, body.leads)
     prospecting.sort_opportunities(opps, by=body.sort)
     tally = {}
@@ -4721,8 +4863,9 @@ async def employer_plans(body: PlanRequest, request: Request):
     employers costs exactly what asking about one does.
     """
     await _active_token(request)
-    if not FORM5500_URL:
-        return {"plans": {}, "note": "FORM5500_URL is not set — see SETUP-prospecting.md."}
+    if not (await _form5500_value())[0].strip():
+        return {"plans": {}, "note": "No Form 5500 source is set — an admin can add it "
+                                     "under Money in motion."}
     try:
         plans = (await _load_plans(await _drive_token_for(request))).get("plans") or {}
     except Exception as e:
@@ -5247,7 +5390,8 @@ async def get_signals(body: SignalsRequest, request: Request, email: str = Depen
                 pass
             opps = prospecting.build_opportunities(
                 got["events"], plans, min_workers=1,
-                states=_source_states() or None, counties=_source_counties() or None)
+                states=_source_states() or None, counties=_source_counties() or None,
+                max_age_days=OPPS_MAX_AGE_DAYS)
             warn_index = signals.index_warn(opps)
             warn_ran = True
         except Exception as e:
@@ -5521,10 +5665,12 @@ DRIVE_DEFAULT_NAME = os.environ.get("DRIVE_LEADS_FILE", "Wealth Management Lead 
 async def _google_only(request: Request) -> str:
     """Drive needs the Google token specifically, not whichever is signed in."""
     provider, token = await _active_token(request)
-    if provider != "google":
+    if provider != "google" or not token:
         raise HTTPException(
             status_code=400,
-            detail="Drive import needs a Google sign-in. Sign out and sign in with Google.",
+            detail="Drive import needs a live Google sign-in. Sign out and sign in "
+                   "with Google." if provider == "google" else
+                   "Drive import needs a Google sign-in. Sign out and sign in with Google.",
         )
     return token
 

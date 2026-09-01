@@ -256,6 +256,22 @@
   .sigrow{display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0;gap:10px}
   .sigrow .pts{font-family:var(--font-mono);font-weight:700}
   .sigrow.hit .pts{color:var(--tierA)} .sigrow.miss{color:var(--ink-faint)} .sigrow.neg .pts{color:var(--tierX)}
+  /* The record leads with a card — the handful of facts a call actually runs
+     on, each with its basis — and everything deeper is a fold you open. */
+  .leadcard{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px}
+  .fact{background:#fbfcf9;border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
+  .fact b{display:block;font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px;font-weight:600}
+  .fact .fv{font-size:.92rem;font-weight:700;font-family:var(--font-mono);overflow-wrap:anywhere}
+  .fact small{display:block;font-size:.68rem;color:var(--ink-faint);margin-top:1px}
+  .fact.good .fv{color:var(--tierA)} .fact.warn .fv{color:var(--tierB)} .fact.dim .fv{color:var(--ink-faint);font-weight:400}
+  details.drill{border:1px solid var(--line);border-radius:6px;margin-top:8px;background:#fff}
+  details.drill>summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:10px;align-items:baseline;padding:7px 10px;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+  details.drill>summary::-webkit-details-marker{display:none}
+  details.drill>summary>span:first-child::before{content:'\25B8';margin-right:6px;color:var(--brass)}
+  details.drill[open]>summary>span:first-child::before{content:'\25BE'}
+  details.drill>summary .gist{font-family:var(--font-mono);text-transform:none;letter-spacing:0;font-size:.73rem;color:var(--ink);text-align:right;overflow-wrap:anywhere}
+  details.drill>.dbody{padding:2px 10px 10px}
+  details.drill h4{margin-top:8px}
   .fieldgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.8rem}
   .fieldgrid label{display:flex;flex-direction:column;gap:2px;color:var(--ink-faint);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em}
   .fieldgrid input{padding:5px 7px;border:1px solid var(--line);border-radius:3px;font-size:.82rem;font-family:var(--font-body)}
@@ -310,6 +326,12 @@
   .overlay{position:fixed;inset:0;background:rgba(20,28,38,.55);display:none;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
   .overlay.open{display:flex}
   .modal{background:var(--panel);border-radius:8px;max-width:720px;width:100%;padding:22px 24px;border-top:4px solid var(--brass);max-height:90vh;overflow:auto}
+  /* Every modal closes from the top corner too — Esc and a backdrop click
+     already work, but a long table should never make Close a scroll away.
+     Sticky, so the × stays put while the modal scrolls under it. */
+  .mclose-wrap{position:sticky;top:0;height:0;display:flex;justify-content:flex-end;z-index:6}
+  .mclose{width:28px;height:28px;margin:-10px -12px 0 0;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink-faint);font-size:1.1rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(5,29,75,.15)}
+  .mclose:hover{color:var(--ink);border-color:var(--brass)}
   .modal h2{font-family:var(--font-disp);font-size:1.15rem;margin-bottom:14px}
   .modal h3{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--brass);margin:16px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
   .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -753,6 +775,13 @@
       <button class="mbtn save" id="btnFeedsSave">Save</button>
     </div>
     <p class="hint" id="oppsCfgNote" style="margin-top:4px"></p>
+    <p class="hint" style="margin-top:10px"><b>Where the Form 5500 files live.</b> Links to the DOL files, saved the same way &mdash; the regular Form 5500 and the 5500-SF together in the first box (separated by a space; the SF is where business owners file), Schedule H&nbsp;/&nbsp;I in the second. Google Drive links work. The files are read and checked before anything is saved.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="f5500Main" type="text" placeholder="Form 5500 + 5500-SF links, separated by a space" style="flex:1 1 100%;min-width:280px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:.8rem">
+      <input id="f5500Sched" type="text" placeholder="Schedule H / I links (optional &mdash; the SF prices itself)" style="flex:1;min-width:280px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:.8rem">
+      <button class="mbtn save" id="btnF5500Save">Save</button>
+    </div>
+    <p class="hint" id="f5500Note" style="margin-top:4px"></p>
   </div>
   <div class="mfoot" style="justify-content:space-between">
     <button class="mbtn" id="btnOppsRefresh">Refresh from source</button>
@@ -2883,16 +2912,73 @@ function attomSection(L){
   b.push(`<p class="hint" style="margin-top:3px">${esc(A.addr||'')} \u2014 an automated estimate, not an appraisal. Trial data.</p>`);
   return b.join('');
 }
+/* "It's great, but it's not laid out well and it's too much." The record now
+   leads with the facts a call runs on — age with its basis, the 59½ date,
+   where they actually live, the home, the phone's status, the plan average —
+   and every long section folds behind a one-line gist you can drill into. */
+function leadCard(L){
+  const facts=[];
+  const age=leadAgeAny(L), ab=ageBasis(L);
+  facts.push({k:(ab.kind==='inferred')?'warn':(age?'good':'dim'),l:'Age',
+    v:age||'?',s:esc(ab.label)});
+  const hm=halfMonth(L);
+  if(hm!==null)facts.push({k:hm<=nowMonth()?'good':'',l:'59½',
+    v:hm<=nowMonth()?'Reached':esc(monLabel(hm)),s:hm<=nowMonth()?esc(monLabel(hm)):'not yet'});
+  else if(age)facts.push({k:age>=60?'good':'warn',l:'59½',
+    v:age>=60?'Reached':(age>=59?'~now':'Not yet'),s:'from age alone — no birth date'});
+  const home=(L.hd&&L.hd.city)?L.hd.city+', '+L.hd.state:[L.city,L.state].filter(Boolean).join(', ');
+  const moved=!!(L.hd&&L.hd.city&&L.hd.state&&L.state&&L.hd.state!==L.state);
+  facts.push({k:moved?'warn':'',l:'Lives in',v:esc(home||'?'),
+    s:moved?'list says '+esc(L.state):(L.hd&&L.hd.city?'public record':'from the list')});
+  const A=L.attom;
+  if(A&&A.avm)facts.push({k:'good',l:'Home',v:'$'+Math.round(A.avm/1000)+'K',
+    s:'estimate'+(A.score?' · '+A.score+'/100':'')});
+  else if(L.hd&&L.hd.ownsHome===true)facts.push({k:'good',l:'Home',v:'Owns',
+    s:(L.hd.props||1)+((L.hd.props||1)===1?' property':' properties')});
+  else if(L.hd)facts.push({k:'dim',l:'Home',v:L.hd.ownsHome===false?'Not theirs':'?',
+    s:L.hd.ownsHome===false?'deed in another name':'unknown'});
+  if(L.pv&&L.pv.wrong)facts.push({k:'warn',l:'Phone',v:'Wrong number',s:'reach by email'});
+  else facts.push({k:(L.pv&&L.pv.ok)?'good':(L.pv?'warn':'dim'),l:'Phone',
+    v:(L.pv&&L.pv.ok)?'Verified':(L.pv?'Check':'Unchecked'),
+    s:L.pv?esc(L.pv.label||''):'no lookup yet'});
+  if(L.plan&&L.plan.avg)facts.push({k:'good',l:'Avg plan',
+    v:'~$'+Math.round(L.plan.avg).toLocaleString(),
+    s:'employer-wide'+(L.plan.year?' · '+esc(''+L.plan.year):'')});
+  return '<div class="leadcard">'+facts.map(f=>
+    `<div class="fact ${f.k}"><b>${f.l}</b><span class="fv">${f.v}</span>${f.s?`<small>${f.s}</small>`:''}</div>`).join('')+'</div>';
+}
+/* Which folds are open, per lead. render() rebuilds the DOM on every action;
+   losing your place on each click would make the folds unusable. Session
+   memory only — a fresh page starts folded, which is the point. */
+const DRILL=new Set();
+window.drillMark=(id,key,open)=>{const k=id+'|'+key;if(open)DRILL.add(k);else DRILL.delete(k);};
 function detailRow(L){
+  /* DRL opens a fold, closed unless the operator opened it this session
+     (or a test set __unfold). Every fold ends with </div></details>. */
+  const DOPEN=k=>((window.__unfold||DRILL.has(L.id+'|'+k))?'open':'');
+  const DRL=(k,title,gist)=>`<details class="drill" ${DOPEN(k)} ontoggle="drillMark('${L.id}','${k}',this.open)"><summary><span>${title}</span><span class="gist">${gist||''}</span></summary><div class="dbody">`;
   const sigs=(L.signals||[]).map(s=>`<div class="sigrow ${s.neg?'neg':s.hit?'hit':'miss'}"><span>${esc(s.label)}${s.hit&&!s.conf?' <em>(inferred)</em>':''}</span><span class="pts">${s.pts>0?'+':''}${s.pts}</span></div>`).join('');
+  const hits=(L.signals||[]).filter(s=>s.hit&&s.pts>0).length;
+  const gHH=L.hd?(L.hd.rejected?'no record attached':[L.hd.city?esc(L.hd.city+', '+L.hd.state):'',(L.hd.mobiles&&L.hd.mobiles.length)?L.hd.mobiles.length+' mobile':'',(L.hd.emailRecords&&L.hd.emailRecords.length)?L.hd.emailRecords.length+(L.hd.emailRecords.length===1?' email':' emails'):'',L.hd.props?L.hd.props+(L.hd.props===1?' property':' properties'):''].filter(Boolean).join(' · ')):(L.pv?esc(L.pv.label||'number checked'):'');
+  const props=propertyList(L);
+  const gProp=(L.attom&&L.attom.avm)?'$'+Math.round(L.attom.avm).toLocaleString()+' est.':((L.attom&&L.attom.found===false)?'no property on file':(props.length?props.length+(props.length===1?' address':' addresses'):''));
+  const gPub=L.pub?[((L.pub.donations||{}).count?(L.pub.donations.count+' donations'):'no donations'),((L.pub.filings||[]).length?L.pub.filings.length+' insider filing'+((L.pub.filings||[]).length===1?'':'s'):'no insider filings')].join(' · '):(L.edgar?(L.edgar.age?'age '+L.edgar.age+' in a proxy':'no proxy age'):((L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length)?'prior addresses':''));
+  const gWeb=[L.site?('their site'+(L.site.found?' ✓':' — nothing')):'',L.web?('web'+(L.web.found?' ✓':' — nothing')):''].filter(Boolean).join(' · ');
+  const gAct=(L.activity&&L.activity.length)?L.activity.length+(L.activity.length===1?' entry':' entries'):'none yet';
   return `<tr class="detail"><td colspan="11"><div class="detail-grid">
-    <div class="dsec"><h4>Why this score</h4>${sigs}
+    ${leadCard(L)}
+    <div class="dsec">${DRL('score','Why this score',`${L.score}/100 · ${hits} signal${hits===1?'':'s'} firing`+(L.qc?` · QC ${L.qc.grade}`:''))}${sigs}
       ${L.qc?`<h4 style="margin-top:12px">AI quality control &mdash; grade ${L.qc.grade}</h4>
       <div>${['NW','YHE','401K','WL','INT'].map(g=>{const gs=(L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].s)||'UNKNOWN';const col=gs==='CONFIRMED'?'var(--tierA)':gs==='INFERRED'?'var(--tierB)':gs==='FAIL'?'var(--tierX)':'var(--ink-faint)';return `<span class="sig" style="width:auto;padding:0 5px;margin-right:4px;border-color:${col};color:${col}" title="${esc((L.qc.gates&&L.qc.gates[g]&&L.qc.gates[g].ev)||gs)}">${g}</span>`;}).join('')}</div>
       ${L.qc.note?`<p class="hint" style="margin-top:5px">${esc(L.qc.note)}</p>`:''}
       ${(L.qc.checklist&&L.qc.checklist.length)?`<div class="hint" style="margin-top:4px"><strong>First call, verify:</strong> ${esc(L.qc.checklist.join(' \u00b7 '))}</div>`:''}`:''}
-      ${L.hd?`<h4 style="margin-top:12px">Household &mdash; WhitePages</h4>
-      <div class="sigrow ${dobLabel(L)?'hit':(L.hd.age?'hit':'miss')}"><span>${dobLabel(L)?'Born':'Age (confirmed)'}</span><span class="pts">${dobLabel(L)?esc(dobLabel(L))+(dobAge(L)?' \u00b7 '+dobAge(L):''):(L.hd.age||'unknown')}</span></div>
+      <div class="manualtoggles">
+        <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
+        <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
+        <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
+      </div></div></details>
+    ${(L.hd||L.pv)?`${DRL('household','Household &mdash; WhitePages',gHH)}
+      ${L.hd?`<div class="sigrow ${dobLabel(L)?'hit':(L.hd.age?'hit':'miss')}"><span>${dobLabel(L)?'Born':'Age (confirmed)'}</span><span class="pts">${dobLabel(L)?esc(dobLabel(L))+(dobAge(L)?' \u00b7 '+dobAge(L):''):(L.hd.age||'unknown')}</span></div>
       ${halfMonth(L)!==null?`<div class="sigrow hit"><span>Reaches 59\u00bd</span><span class="pts">${esc(monLabel(halfMonth(L)))}</span></div>
       <p class="hint" style="margin-top:2px">No day of birth on file, so this is the month, not the date \u2014 confirm it on the call before anything is signed.</p>`:''}
       ${(L.hd.aliases&&L.hd.aliases.length)?`<div class="sigrow hit"><span>Also known as</span><span class="pts">${esc(L.hd.aliases.join(' \u00b7 '))}</span></div>`:''}
@@ -2921,17 +3007,20 @@ function detailRow(L){
       <p class="hint">${esc(L.pv.household.name)} holds ${esc(L.pv.household.phone)} at this address — likely a spouse, and often the other half of a retirement decision.</p>
       <button class="mbtn" style="margin-top:4px" onclick="addHousehold('${L.id}')">Add ${esc(L.pv.household.name)} as a lead</button>`:''}
       ${(L.pv&&L.pv.wrong)?`<p class="hint" style="margin-top:8px;color:var(--tierX)"><strong>Wrong number.</strong> Registered to ${esc(L.pv.household?L.pv.household.name:'someone else')} at a different address — treat the imported number as bad and reach them by email.</p>`:''}
-      ${propertyList(L).length?`<h4 style="margin-top:12px">Property</h4>
-      <p class="hint">No valuation in the WhitePages data &mdash; open an address to read an estimate yourself.</p>
-      ${propertyList(L).map(a=>`<div class="sigrow hit" style="align-items:flex-start">
+      ${(L.hd&&L.hd.relatives&&L.hd.relatives.length)?`<h4 style="margin-top:12px">Relatives on the record</h4>
+      <p class="hint">${esc(L.hd.relatives.join(' · '))}<br>A spouse is often the other half of a retirement decision.</p>`:''}
+      </div></details>`:''}
+    ${(props.length||L.attom)?`${DRL('property','Property &amp; home',gProp)}
+      ${props.length?`<p class="hint">No valuation in the WhitePages data &mdash; open an address to read an estimate yourself.</p>
+      ${props.map(a=>`<div class="sigrow hit" style="align-items:flex-start">
         <span>${esc(a.label)}<br><span class="hint">${esc(a.addr)}</span></span>
         <span class="pts" style="white-space:nowrap">
           <a target="_blank" rel="noopener" href="https://www.zillow.com/homes/${encodeURIComponent(a.addr)}_rb/">Zillow</a> &middot;
           <a target="_blank" rel="noopener" href="https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(a.addr)}&v=2">Redfin</a> &middot;
           <a target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(a.addr+' home value')}">Google</a>
         </span></div>`).join('')}`:''}
-      ${(L.hd&&L.hd.relatives&&L.hd.relatives.length)?`<h4 style="margin-top:12px">Relatives on the record</h4>
-      <p class="hint">${esc(L.hd.relatives.join(' · '))}<br>A spouse is often the other half of a retirement decision.</p>`:''}
+      ${attomSection(L)}</div></details>`:''}
+    ${(L.pub||L.edgar||(L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length))?`${DRL('public','Public records &mdash; free',gPub)}
       ${L.pub?pubSection(L):''}
       ${(L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length)?`<h4 style="margin-top:12px">Previously lived</h4>
       <p class="hint">${esc(L.hd.priorPlaces.join(' · '))}</p>`:''}
@@ -2940,19 +3029,16 @@ function detailRow(L){
       ${L.edgar.quote?`<span style="font-style:italic">&ldquo;${esc(L.edgar.quote)}&rdquo;</span><br>`:''}
       ${L.edgar.url?`<a target="_blank" rel="noopener" href="${esc(L.edgar.url)}">${esc(L.edgar.company||'Proxy statement')}, filed ${esc(L.edgar.filed||'')}</a> &mdash; read it and confirm this is the right person.`:''}</p>`
       :`<p class="hint">${esc(L.edgar.reason||'No age found in a proxy statement.')}<br>Officers and directors of public companies are listed with an age; nobody else is.</p>`}`:''}
-      <div class="manualtoggles">
-        <label><input type="checkbox" ${L.ageVerified?'checked':''} onchange="setFlag('${L.id}','ageVerified',this.checked)"> Age verified on LinkedIn</label>
-        <label><input type="checkbox" ${hasConcurrentRole(L)?'checked':''} onchange="setFlag('${L.id}','concurrentRole',this.checked)"> Holds another current role (Present)</label>
-        <label><input type="checkbox" ${L.jobHopper?'checked':''} onchange="setFlag('${L.id}','jobHopper',this.checked)"> Job hopper (flags in AI QC)</label>
-      </div>
-      ${siteSection(L)}${webSection(L)}${attomSection(L)}
+      </div></details>`:''}
+    ${(L.site||L.web)?`${DRL('web','Their own site &amp; the web',gWeb)}
+      ${siteSection(L)}${webSection(L)}</div></details>`:''}
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
     </div>
     <div class="dsec" id="research-${L.id}"><h4>Look this person up</h4>${researchPanel(L)}
       <div style="margin-top:8px"><button class="abtn li" onclick="openLI('${L.id}')" title="Copies your note, then opens their profile">Connect on LinkedIn</button></div>
     </div>
-    <div class="dsec"><h4>CRM export fields</h4>
+    <div class="dsec">${DRL('crm','CRM export fields',(L.assignedTo?esc(L.assignedTo):'unassigned'))}
       <div class="fieldgrid">
         <label>Street Address<input value="${esc(L.street)}" onchange="setField('${L.id}','street',this.value)"></label>
         <label>City<input value="${esc(L.city)}" onchange="setField('${L.id}','city',this.value)"></label>
@@ -2965,9 +3051,11 @@ function detailRow(L){
         <label>Assigned to<select onchange="setField('${L.id}','assignedTo',this.value)"><option value="">&mdash;</option>${advisorList().map(a=>`<option ${L.assignedTo===a?'selected':''}>${esc(a)}</option>`).join('')}</select></label>
       </div>
       <p class="hint" style="margin-top:8px">${L.accuracy?'ZoomInfo accuracy score: '+esc(L.accuracy)+'. ':''}${L.enriched===false?'Not yet enriched — email/phones/start date hidden until you spend the credit. ':''}Lead Other 2 exports as "Tier ${L.tier} (${L.score}/100)". Lead Source Detail exports as "${esc(state.settings.source)} — ${esc(L.batch)}".${truthy(L.directDnc)?' Direct line is DNC-flagged.':''}</p>
-      <h4 style="margin-top:12px">Activity</h4>
+      </div></details>
+    ${DRL('activity','Activity',gAct)}
       <div class="actlog">${(L.activity&&L.activity.length)?L.activity.slice().reverse().map(a=>`<div><time>${new Date(a.t).toLocaleString([],{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</time><strong>${ACT_LABEL[a.k]||a.k}</strong> ${esc(a.d)}</div>`).join(''):'<div style="color:var(--ink-faint)">No activity yet.</div>'}</div>
       <div style="margin-top:6px"><button class="abtn" onclick="quickNote('${L.id}')">+ Log note</button></div>
+      </div></details>
     </div>
   </div></td></tr>`;
 }
@@ -3765,6 +3853,30 @@ document.getElementById('btnFeedsBuiltin').addEventListener('click',()=>{
 document.getElementById('btnFeedsSave').addEventListener('click',()=>{
   saveFeeds(document.getElementById('oppsFeedUrl').value.trim());
 });
+/* The 5500 source, saved the same way: the server reads and parses the files
+   before storing anything, so a typo'd link is refused with the reason. */
+async function saveF5500(){
+  const note=document.getElementById('f5500Note');
+  const url=document.getElementById('f5500Main').value.trim();
+  const sched=document.getElementById('f5500Sched').value.trim();
+  note.textContent=url?'Reading the files — a full DOL year is big, this can take a minute…':'Clearing…';
+  try{
+    const d=await api('/api/sources/form5500',{url:url,schedules:sched});
+    if(d.cleared){note.textContent='Cleared — the FORM5500_URL env var (if any) applies again.';}
+    else{
+      // The regular 5500 file never carries assets — that is what the
+      // schedule join is for — so "assets" is only worth flagging when
+      // nothing got priced at all.
+      const un=(d.unmapped||[]).filter(f=>f!=='assets'||!d.priced);
+      note.textContent=d.employers.toLocaleString()+' employers read, '+d.priced.toLocaleString()
+        +' priced. Saved.'
+        +(un.length?' Columns not recognised: '+un.join(', ')+' — tell Claude, it is a missing alias.':'')
+        +(d.note?' '+d.note:'');
+    }
+    loadOpps(true);
+  }catch(e){note.textContent=e.message;}
+}
+document.getElementById('btnF5500Save').addEventListener('click',saveF5500);
 document.getElementById('btnTemplate').addEventListener('click',openTemplate);
 document.getElementById('btnTemplateFromMapper').addEventListener('click',openTemplate);
 document.getElementById('btnCopyPrompt').addEventListener('click',copyResearchPrompt);
@@ -3861,6 +3973,15 @@ document.getElementById('btnSaveSettings').addEventListener('click',async()=>{
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
+/* One × per modal, injected rather than hand-written fifteen times. It rides
+   sticky at the top-right so a long list never puts Close below the fold. */
+document.querySelectorAll('.overlay .modal').forEach(m=>{
+  const w=document.createElement('div');w.className='mclose-wrap';
+  const x=document.createElement('button');x.className='mclose';x.type='button';
+  x.innerHTML='&times;';x.title='Close (Esc works too)';x.setAttribute('aria-label','Close');
+  x.addEventListener('click',()=>m.closest('.overlay').classList.remove('open'));
+  w.appendChild(x);m.insertBefore(w,m.firstChild);
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
 let _qT=null;
 document.getElementById('q').addEventListener('input',()=>{clearTimeout(_qT);_qT=setTimeout(render,160);});
@@ -4949,8 +5070,7 @@ ACT_LABEL.pub='Public records';
 function pubSection(L){
   const P=L.pub||{};const d=P.donations||{};const f=P.filings||[];
   const src=P.sources||{};
-  const bits=[];
-  bits.push('<h4 style="margin-top:12px">Public records &mdash; free</h4>');
+  const bits=[];   // the fold's summary line carries the section title now
   // Coverage first, same rule as the signals panel: an empty answer from a
   // check that never ran must not read as an all-clear.
   const off=Object.keys(src).filter(k=>src[k]&&src[k].ran===false);
@@ -5416,7 +5536,9 @@ document.getElementById('btnAssign').addEventListener('click',()=>{
 });
 // boot() needs to know whether the user is signed in before it decides
 // between server state and the browser copy, so loadMe() has to finish first.
-(async()=>{await loadMe();await boot();})();
+/* __booted flips only after server state is merged — the honest "ready"
+   signal for tests, which otherwise wait on network silence and flake. */
+(async()=>{await loadMe();await boot();window.__booted=true;})();
 </script>
 </body>
 </html>

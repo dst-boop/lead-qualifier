@@ -37,6 +37,13 @@ ends. The notice tells you when that is.
 Everything is environment variables on the Cloud Run service. Nothing here is
 secret — these are public URLs — so plain env vars, no Secret Manager.
 
+**The env vars are the fallback, not the front door.** An admin sets both the
+WARN feed source and the Form 5500 files inside the app (Money in motion →
+the settings under the table): values are fetched and validated before they
+are stored, and a stored value wins over its env var. No gcloud, no `^|^`
+quoting. The rows below matter for deployments that prefer config at deploy
+time, and as the fallback when nothing is saved in the app.
+
 | Variable | Meaning |
 |---|---|
 | `WARN_FEEDS` | JSON array of feeds (below). **The feature is hidden until this is set.** |

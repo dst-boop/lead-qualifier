@@ -46,6 +46,9 @@ const PUB = {
     .catch(() => chromium.launch());
   const ctx = await b.newContext({ viewport: { width: 1500, height: 1000 } });
   const p = await ctx.newPage();
+  // A content suite: it asserts on what the record holds, so open every
+  // fold up front. recordcard-test.js owns the folded-by-default behavior.
+  await p.addInitScript(()=>{window.__unfold=true;});
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
 
@@ -118,7 +121,9 @@ const PUB = {
   ck('the itemised record hides behind one disclosure',
      await p.evaluate(() => !!document.querySelector('tr.detail details'))
      && !/Gave from Knoxville/.test(text) && !/Form 4 · 2025-11-03/.test(text));
-  await p.evaluate(() => { document.querySelector('tr.detail details').open = true; });
+  // The record's own section folds are .drill (opened by __unfold above); the
+  // itemised public record keeps its separate disclosure inside them.
+  await p.evaluate(() => { document.querySelector('tr.detail details:not(.drill)').open = true; });
   await p.waitForTimeout(150);
   const full = await p.evaluate(() => document.body.innerText.replace(/\s+/g, ' '));
   ck('  ...which opens on where he gave from', /Gave from Knoxville, TN/.test(full));

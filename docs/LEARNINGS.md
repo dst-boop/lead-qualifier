@@ -108,3 +108,16 @@ columns match the existing aliases via word-boundary matching, the merge
 keeps the larger filing per sponsor, and the schedule join fills only what
 is not already priced. Verify a new file year with /api/sources/probe —
 it names any column that failed to map.
+
+## 2026-09 · A provider token is not a session
+
+The first non-operator account lost every server feature within the hour:
+Google access tokens expire in 60 minutes, and both auth gates
+(`_active_token`, `_signed_in_email`) equated "no live provider token" with
+"not signed in" — while /api/state's 401 fallback quietly kept the UI looking
+signed in from localStorage. Diagnosis was slow precisely because the page
+half-worked. Rule: the session cookie plus the identity stamped at the
+callback IS the sign-in; provider tokens are attachments that individual
+features (Drive, sending) require with their own error sentences. Any new
+gate must be tested against a session whose tokens have aged out — that hour
+arrives for every user, every day.

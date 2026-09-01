@@ -45,6 +45,9 @@ const RECORD = {
     .catch(() => chromium.launch());
   const ctx = await b.newContext({ viewport: { width: 1500, height: 1000 } });
   const p = await ctx.newPage();
+  // A content suite: it asserts on what the record holds, so open every
+  // fold up front. recordcard-test.js owns the folded-by-default behavior.
+  await p.addInitScript(()=>{window.__unfold=true;});
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
 
