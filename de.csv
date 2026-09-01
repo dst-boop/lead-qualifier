@@ -1,21 +1,44 @@
 employer,notice_date,number_of_employees_affected,warn_type,city,zip,lwib_area,address,record_number,detail_page_url
 "Atlas Hospitality Group, LLC","Apr 30, 2026",67,WARN,Baltimore,21231,1 - Statewide,"1429 Aliceanna Street; Baltimore, Maryland 21231",110,https://joblink.delaware.gov/search/warn_lookups/110
 Conduent,"Jun 29, 2026",1,WARN,Florham Park,07932,1 - Statewide,"Sarah Amoriell, 100 Campus Dr. ; Florham Park, New Jersey 07932",111,https://joblink.delaware.gov/search/warn_lookups/111
-JeniusBank,"Aug 10, 2026",106,WARN,New York,10172,1 - Statewide,"277 Park Ave; New York, New York 10172",112,https://joblink.delaware.gov/search/warn_lookups/112
+JeniusBank,"Aug 10, 2026",,WARN,New York,10172,1 - Statewide,,112,https://joblink.delaware.gov/search/warn_lookups/112
 Quality Built LLC,"Jul 07, 2025",2,WARN,Fort Lauderdale,33301,1 - Statewide,"633 S. Andrews Ave; Fort Lauderdale, Florida 33301",109,https://joblink.delaware.gov/search/warn_lookups/109
 "Harrington Logistics, LLC","Mar 31, 2025",151,WARN,Harrington,19952,1 - Statewide,"111 Reese Ave; Harrington, Delaware 19952",108,https://joblink.delaware.gov/search/warn_lookups/108
-Thomson Reuters,"Dec 05, 2018",14,Non-WARN,,,1 - Statewide,,68,https://joblink.delaware.gov/search/warn_lookups/68
-PPG Architectural Coatings,"Jun 07, 2018",66,WARN,,,1 - Statewide,,60,https://joblink.delaware.gov/search/warn_lookups/60
-Sears Holdings Prices Corner,"Jan 04, 2018",,WARN,,,1 - Statewide,,62,https://joblink.delaware.gov/search/warn_lookups/62
-"Formosa Plastics Corp., USA","Jul 25, 2018",,WARN,,,1 - Statewide,,65,https://joblink.delaware.gov/search/warn_lookups/65
-Thomson Reuters,"Dec 05, 2018",,Non-WARN,,,1 - Statewide,,66,https://joblink.delaware.gov/search/warn_lookups/66
-Hygience,"Aug 02, 2018",,Non-WARN,,,1 - Statewide,,67,https://joblink.delaware.gov/search/warn_lookups/67
-"Sodexo, Inc., Facility Engineering","Jan 29, 2016",54,WARN,,,1 - Statewide,,51,https://joblink.delaware.gov/search/warn_lookups/51
-DynCorp,"Feb 01, 2016",57,Non-WARN,,,1 - Statewide,,52,https://joblink.delaware.gov/search/warn_lookups/52
-Capital One - Mortgage Services,"Feb 03, 2016",,WARN,,,1 - Statewide,,53,https://joblink.delaware.gov/search/warn_lookups/53
-Foxfire Printing and Packaging,"May 12, 2016",,WARN,,,1 - Statewide,,54,https://joblink.delaware.gov/search/warn_lookups/54
-AstraZeneca,"Dec 15, 2016",,WARN,,,1 - Statewide,,64,https://joblink.delaware.gov/search/warn_lookups/64
+ILC Dover,"Apr 26, 2023",41,WARN,Frederica,19946,1 - Statewide,"1 Moonwalker Rd; Frederica, Delaware 19946",106,https://joblink.delaware.gov/search/warn_lookups/106
+"Centurion of Delaware, LLC","May 09, 2023",572,WARN,Dover,19904,1 - Statewide,"841 Silver Lake Blvd., Suite 205; Dover, Delaware 19904",107,https://joblink.delaware.gov/search/warn_lookups/107
+"Jakes Seafood II, Inc.","Mar 16, 2020",20,Non-WARN,,,1 - Statewide,,80,https://joblink.delaware.gov/search/warn_lookups/80
+Ashby Hospitality Group,"Mar 16, 2020",457,WARN,,,1 - Statewide,,77,https://joblink.delaware.gov/search/warn_lookups/77
+Big Fish Restaurant Group,"Mar 16, 2020",,WARN,,,1 - Statewide,,78,https://joblink.delaware.gov/search/warn_lookups/78
+Platinum Dining Group,"Mar 16, 2020",,WARN,,,1 - Statewide,,79,https://joblink.delaware.gov/search/warn_lookups/79
+American Bread Company LLC,"Mar 16, 2020",,WARN,,,1 - Statewide,,81,https://joblink.delaware.gov/search/warn_lookups/81
+HMShost - Biden Welcome Center,"Mar 20, 2020",,WARN,Newark,19725,1 - Statewide,,82,https://joblink.delaware.gov/search/warn_lookups/82
+MDavis,"Mar 20, 2020",105,WARN,,,1 - Statewide,,83,https://joblink.delaware.gov/search/warn_lookups/83
+Six Paupers Restaurant,"Mar 23, 2020",30,Non-WARN,,,1 - Statewide,,84,https://joblink.delaware.gov/search/warn_lookups/84
+Ulysses American Gastropub,"Mar 23, 2020",50,WARN,,,1 - Statewide,,85,https://joblink.delaware.gov/search/warn_lookups/85
+La Casa Pasta,"Mar 23, 2020",,Non-WARN,,,1 - Statewide,,86,https://joblink.delaware.gov/search/warn_lookups/86
+Grotto's Pizza,"Mar 23, 2020",,WARN,,,1 - Statewide,,87,https://joblink.delaware.gov/search/warn_lookups/87
+Market Street Funders,"Mar 24, 2020",,Non-WARN,,,1 - Statewide,,88,https://joblink.delaware.gov/search/warn_lookups/88
+Go Fish Restaurant,"Mar 20, 2020",,Non-WARN,,,1 - Statewide,,89,https://joblink.delaware.gov/search/warn_lookups/89
+Go Brit Restaurant,"Mar 20, 2020",,Non-WARN,,,1 - Statewide,,90,https://joblink.delaware.gov/search/warn_lookups/90
+"Packers Sanitation Services, Inc.","Mar 19, 2020",99,WARN,Kieler,53812,1 - Statewide,"3681 Prism Lane; Kieler, Wisconsin 53812",91,https://joblink.delaware.gov/search/warn_lookups/91
+"Koons of Wilmington, Inc.","Apr 09, 2020",61,WARN,,,1 - Statewide,,92,https://joblink.delaware.gov/search/warn_lookups/92
+Dentsply Sirona,"Apr 02, 2020",313,WARN,,,1 - Statewide,,93,https://joblink.delaware.gov/search/warn_lookups/93
+"Millers Ale House, Inc.","Apr 06, 2020",,WARN,,,1 - Statewide,,94,https://joblink.delaware.gov/search/warn_lookups/94
+Doubletree Wilmington Legal District,"Mar 26, 2020",,Non-WARN,,,1 - Statewide,,95,https://joblink.delaware.gov/search/warn_lookups/95
+Clarios Middletown DAP facility,"May 04, 2020",,WARN,,,1 - Statewide,,96,https://joblink.delaware.gov/search/warn_lookups/96
+GE Aviation,"Jun 29, 2020",,WARN,,,1 - Statewide,,97,https://joblink.delaware.gov/search/warn_lookups/97
+Telamon Corporation Delaware Head Start Program,"Jul 21, 2020",169,WARN,,,1 - Statewide,,98,https://joblink.delaware.gov/search/warn_lookups/98
+Sallie Mae,"Sep 30, 2020",100,Non-WARN,,,1 - Statewide,,99,https://joblink.delaware.gov/search/warn_lookups/99
+Aramark at University of Delaware,"Sep 08, 2020",554,WARN,,,1 - Statewide,,101,https://joblink.delaware.gov/search/warn_lookups/101
+JPMorgan Chase & Co,"Nov 05, 2014",58,WARN,,,1 - Statewide,,45,https://joblink.delaware.gov/search/warn_lookups/45
+"Color Box, LLC/Georgia Pacific","Oct 10, 2013",,WARN,,,1 - Statewide,,43,https://joblink.delaware.gov/search/warn_lookups/43
+AstraZeneca,"May 31, 2013",,WARN,,,1 - Statewide,,41,https://joblink.delaware.gov/search/warn_lookups/41
+Evraz,"Oct 14, 2013",,WARN,,,1 - Statewide,,44,https://joblink.delaware.gov/search/warn_lookups/44
 Access Group,"Jan 03, 2012",40,Non-WARN,,,1 - Statewide,,37,https://joblink.delaware.gov/search/warn_lookups/37
 "Pinnacle Foods Group, LLC","Jul 31, 2012",426,WARN,,,1 - Statewide,,38,https://joblink.delaware.gov/search/warn_lookups/38
 Hostess Brands Inc,"Nov 13, 2012",,Non-WARN,,,1 - Statewide,,40,https://joblink.delaware.gov/search/warn_lookups/40
 "Sunoco Inc., R&M","Sep 14, 2012",,Non-WARN,,,1 - Statewide,,42,https://joblink.delaware.gov/search/warn_lookups/42
+Chrysler Corporation,"Oct 28, 2008",1125,WARN,,,1 - Statewide,,1,https://joblink.delaware.gov/search/warn_lookups/1
+General Motors,"Oct 21, 2008",393,WARN,,,1 - Statewide,,3,https://joblink.delaware.gov/search/warn_lookups/3
+Mundy Services,"Nov 06, 2008",,WARN,,,1 - Statewide,,5,https://joblink.delaware.gov/search/warn_lookups/5
+Invista,"Dec 08, 2008",,WARN,,,1 - Statewide,,11,https://joblink.delaware.gov/search/warn_lookups/11
