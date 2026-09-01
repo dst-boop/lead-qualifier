@@ -43,6 +43,9 @@ const WEB_OK = { ok: true, searched: '"Tim Shaughnessy" "Preferred Construction,
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
     .catch(() => chromium.launch());
   const p = await b.newPage({ viewport: { width: 1500, height: 1000 } });
+  // A content suite: it asserts on what the record holds, so open every
+  // fold up front. recordcard-test.js owns the folded-by-default behavior.
+  await p.addInitScript(()=>{window.__unfold=true;});
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
 

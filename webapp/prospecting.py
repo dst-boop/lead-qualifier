@@ -583,7 +583,8 @@ def sort_opportunities(opps: list[dict], by: str = "dollars") -> list[dict]:
 def build_opportunities(events: list[dict], plans: dict, *,
                         min_workers: int = 0, states: Optional[set] = None,
                         counties: Optional[set] = None,
-                        today: Optional[date] = None) -> list[dict]:
+                        today: Optional[date] = None,
+                        max_age_days: Optional[int] = 550) -> list[dict]:
     """WARN events joined to plan data, ranked by dollars likely in motion.
 
     A layoff with no plan match is still an opportunity — it is a dated
@@ -601,6 +602,7 @@ def build_opportunities(events: list[dict], plans: dict, *,
     """
     today = today or date.today()
     out = []
+    seen = set()
     for e in events:
         if states and e.get("state") and e["state"].upper() not in states:
             continue
@@ -621,6 +623,18 @@ def build_opportunities(events: list[dict], plans: dict, *,
                 days = (date.fromisoformat(eff) - today).days
             except ValueError:
                 days = None
+        # State archives reach back decades, and a 1999 layoff is not money in
+        # motion any more. Undated events are kept — a missing column must not
+        # empty the list — and the window is config, not code.
+        if max_age_days is not None and days is not None and days < -max_age_days:
+            continue
+        # The same notice can arrive from two feeds, or twice from one. An
+        # identical (employer, state, date, headcount) row carries no new
+        # information — the first one through stays.
+        key = (e["employer_key"], e.get("state", ""), eff or "", workers)
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({
             **e,
             "plan_matched": bool(plan),

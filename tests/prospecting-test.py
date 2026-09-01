@@ -362,5 +362,31 @@ ck("the dollars ordering is untouched by any of this",
                                    "Beacon Materials Corp"], [x["employer"] for x in _d])
 
 
+
+# --- decades of archive are not money in motion; twice-fed notices are one ---
+_T = date(2026, 9, 1)
+_EV = [
+    {"employer_key": "old", "company": "Old Co", "state": "AL", "workers": 100,
+     "effective_date": "1999-06-30"},
+    {"employer_key": "recent", "company": "Recent Co", "state": "AL", "workers": 60,
+     "effective_date": "2026-01-15"},
+    {"employer_key": "undated", "company": "NoDate Co", "state": "AL", "workers": 40},
+    {"employer_key": "recent", "company": "Recent Co", "state": "AL", "workers": 60,
+     "effective_date": "2026-01-15"},                       # the same notice, twice
+    {"employer_key": "recent", "company": "Recent Co", "state": "AL", "workers": 75,
+     "effective_date": "2026-01-15"},                       # a different headcount is news
+]
+_o = P.build_opportunities(_EV, {}, today=_T)
+_k = [(x["employer_key"], x.get("workers")) for x in _o]
+ck("a 1999 layoff is not in the panel", not any(x["employer_key"] == "old" for x in _o), _k)
+ck("  ...a recent one is", any(x["employer_key"] == "recent" for x in _o))
+ck("  ...and an undated event survives the age gate", any(x["employer_key"] == "undated" for x in _o))
+ck("an identical (employer, date, headcount) row lands once",
+   sum(1 for x in _o if x["employer_key"] == "recent" and x["workers"] == 60) == 1, _k)
+ck("  ...but a different headcount on the same day is kept",
+   sum(1 for x in _o if x["employer_key"] == "recent") == 2, _k)
+ck("the archive stays reachable when the window is off",
+   any(x["employer_key"] == "old" for x in P.build_opportunities(_EV, {}, today=_T, max_age_days=None)))
+
 print(("\nFAILURES: %d of %d" % (fail, TOTAL[0])) if fail else "\nall %d checks passed" % TOTAL[0])
 sys.exit(1 if fail else 0)

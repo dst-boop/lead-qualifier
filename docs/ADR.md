@@ -2584,3 +2584,32 @@ Same session: every modal now carries an injected sticky × at the top right
 (`.mclose`, added once in JS rather than hand-written per modal), because a
 long WARN table put the only visible Close below the fold. Esc and the
 backdrop click always worked; the fix is a control you can see.
+
+## 47. The session is the sign-in; the record is a card with folds
+
+**2026-09, the first outside tester.** Three findings from the first account
+that was not the operator's, all shipped together:
+
+1. **"NO OTHER USERS CAN USE THE FEATURES."** Root cause: `_active_token` and
+`_signed_in_email` treated a live provider access token as the definition of
+signed-in. A Google access token lives one hour; when it aged out with no
+refresh token in reach, every server feature answered "Not signed in" while
+the page still looked signed in (the list had silently fallen back to the
+browser copy). The session cookie is the sign-in: both gates now honour the
+identity stamped at the OAuth callback, /api/me reports such a session as
+signed in with `linked_google: false` so the UI can offer a re-link, and only
+the callers that truly need a live token (Drive import, sending) refuse with
+their own sentence. Regression: accounts-test simulates the dead-token hour.
+
+2. **"It's not laid out well and it's too much."** The expanded record now
+leads with a card — age with its basis, the 59½ date, where they actually
+live (flagging when it differs from the list), home value, phone status,
+plan average — and every long section folds behind a one-line gist
+(`details.drill`, open-state remembered per lead for the session in `DRILL`).
+Notes and the research panel stay unfolded: they are work tools. Content
+suites set `window.__unfold`; recordcard-test.js owns the folded behavior.
+
+3. **Money in motion showed 1999 layoffs and duplicate rows.** State archives
+reach back decades; `build_opportunities` now drops events older than
+OPPS_MAX_AGE_DAYS (default 550) — undated events kept — and collapses
+identical (employer, state, date, headcount) rows fed twice.

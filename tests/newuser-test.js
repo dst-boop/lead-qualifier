@@ -28,6 +28,9 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
     .catch(() => chromium.launch());
   const ctx = await b.newContext({ viewport: { width: 1500, height: 1000 } });
   const p = await ctx.newPage();
+  // A content suite: it asserts on what the record holds, so open every
+  // fold up front. recordcard-test.js owns the folded-by-default behavior.
+  await p.addInitScript(()=>{window.__unfold=true;});
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
 
@@ -270,7 +273,7 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'newuser',
   const rec = await p.evaluate(() => {
     const g = document.querySelector('tr.detail .detail-grid');
     const st = getComputedStyle(g);
-    const heads = [...g.querySelectorAll('.dsec > h4:first-child')].map(h => h.textContent.trim());
+    const heads = [...g.querySelectorAll('.dsec > details.drill > summary > span:first-child, .dsec > h4')].map(h => h.textContent.trim());
     return { overflowY: st.overflowY, maxHeight: st.maxHeight, heads,
              anchor: !!document.getElementById('research-x1') };
   });

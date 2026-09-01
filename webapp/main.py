@@ -88,6 +88,9 @@ FORM5500_SCHEDULE_URLS = [u.strip() for u in
 SOURCE_STATES = os.environ.get("SOURCE_STATES", "")     # e.g. "NY,NJ,CT,PA"
 SOURCE_COUNTIES = os.environ.get("SOURCE_COUNTIES", "")  # e.g. "Nassau,Suffolk"
 SOURCE_MIN_WORKERS = int(os.environ.get("SOURCE_MIN_WORKERS", "25"))
+# State WARN archives reach back decades; events older than this many days are
+# not money in motion and stay out of the panel. 550 ≈ 18 months.
+OPPS_MAX_AGE_DAYS = int(os.environ.get("OPPS_MAX_AGE_DAYS", "550"))
 FS_OPPS = os.environ.get("FIRESTORE_OPPS_COLLECTION", "opportunities")
 
 # --- ZoomInfo via the MCP connector ---
@@ -1166,6 +1169,15 @@ async def _signed_in_email(request: Request) -> str:
     session = request.state.session
     if session.get("provider") == "password" and session.get("account_email"):
         return session["account_email"]
+    # The stamped identity is the answer for any session that has one: the
+    # cookie is the sign-in, and it outlives the provider's access token. The
+    # network round-trips below are only for sessions predating the stamp.
+    # Without this, a Google access token aging out an hour after sign-in
+    # read as "Not signed in" on every server feature — which is exactly what
+    # happened to the first non-Google-refreshed account that tried the app.
+    stamped = (session.get("identity") or "").lower()
+    if stamped:
+        return stamped
     if session.get("provider") == "google":
         token = await _google_token(session)
         if token:
@@ -1207,6 +1219,12 @@ async def _active_token(request: Request) -> tuple[str, str]:
     token = _ms_token(session)
     if token:
         return "microsoft", token
+    # A session with a stamped identity IS signed in — the provider token
+    # aging out must not sign the person out of features that never needed
+    # that token. Callers that need a real one already handle "" (the same
+    # contract the password path has always had).
+    if _identity(session):
+        return session.get("provider") or "password", ""
     raise HTTPException(status_code=401, detail="Not signed in")
 
 
@@ -1306,7 +1324,7 @@ async def _sender_token(request: Request, sender_id: str) -> tuple[str, str, str
     session = request.state.session
     if not sender_id:
         provider, token = await _active_token(request)
-        if provider == "password" and not token:
+        if not token:
             raise HTTPException(status_code=400,
                                 detail="No sending address yet — link a Google or Microsoft "
                                        "account from the bar at the top, then choose it here.")
@@ -1424,6 +1442,20 @@ async def me(request: Request):
                     "zi_connected": bool(session.get("zoominfo")),
                     "storage": storage, "encryption": encryption, "credits": credits,
                     "is_admin": _is_admin(d.get("mail") or d.get("userPrincipalName") or "")}
+    # Provider token dead but the session stamped who this is: still signed
+    # in. Drive stays off and the linked flags read false, so the UI can
+    # offer a re-link, but nothing that runs on the session alone goes dark.
+    stamped = _identity(session)
+    if stamped:
+        return {"signed_in": True, "provider": session.get("provider") or "password",
+                "name": stamped.split("@")[0], "email": stamped,
+                "providers": providers, "features": features,
+                "linked_google": False,
+                "linked_microsoft": bool(session.get("ms_token_cache")),
+                "zi_connected": bool(session.get("zoominfo")),
+                "zi_mcp_connected": bool(_zi_mcp_token(session)),
+                "storage": storage, "encryption": encryption, "credits": credits,
+                "is_admin": _is_admin(stamped)}
     return JSONResponse({"signed_in": False, "providers": providers,
                          "features": features, "storage": storage,
                          "encryption": encryption})
@@ -3027,7 +3059,7 @@ async def sources_refresh(request: Request):
     opps = prospecting.build_opportunities(
         warn["events"], plans.get("plans") or {},
         min_workers=SOURCE_MIN_WORKERS, states=_source_states() or None,
-        counties=_source_counties() or None)
+        counties=_source_counties() or None, max_age_days=OPPS_MAX_AGE_DAYS)
     await _fs_set(FS_OPPS, "latest", {
         "built_at": int(time.time()),
         "count": len(opps),
@@ -3084,7 +3116,8 @@ async def opportunities(request: Request, refresh: bool = False):
         plans = {}
     opps = prospecting.build_opportunities(
         warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
-        states=_source_states() or None, counties=_source_counties() or None)
+        states=_source_states() or None, counties=_source_counties() or None,
+        max_age_days=OPPS_MAX_AGE_DAYS)
     return {"built_at": int(time.time()), "count": len(opps),
             "matched": sum(1 for o in opps if o["plan_matched"]),
             "items": opps[:500], "feeds": warn["feeds"]}
@@ -3121,7 +3154,8 @@ async def opportunities_warmth(body: WarmOpportunitiesRequest, request: Request)
         plans = {}
     opps = prospecting.build_opportunities(
         warn["events"], plans, min_workers=SOURCE_MIN_WORKERS,
-        states=_source_states() or None, counties=_source_counties() or None)
+        states=_source_states() or None, counties=_source_counties() or None,
+        max_age_days=OPPS_MAX_AGE_DAYS)
     prospecting.annotate_warmth(opps, body.leads)
     prospecting.sort_opportunities(opps, by=body.sort)
     tally = {}
@@ -5356,7 +5390,8 @@ async def get_signals(body: SignalsRequest, request: Request, email: str = Depen
                 pass
             opps = prospecting.build_opportunities(
                 got["events"], plans, min_workers=1,
-                states=_source_states() or None, counties=_source_counties() or None)
+                states=_source_states() or None, counties=_source_counties() or None,
+                max_age_days=OPPS_MAX_AGE_DAYS)
             warn_index = signals.index_warn(opps)
             warn_ran = True
         except Exception as e:
@@ -5630,10 +5665,12 @@ DRIVE_DEFAULT_NAME = os.environ.get("DRIVE_LEADS_FILE", "Wealth Management Lead 
 async def _google_only(request: Request) -> str:
     """Drive needs the Google token specifically, not whichever is signed in."""
     provider, token = await _active_token(request)
-    if provider != "google":
+    if provider != "google" or not token:
         raise HTTPException(
             status_code=400,
-            detail="Drive import needs a Google sign-in. Sign out and sign in with Google.",
+            detail="Drive import needs a live Google sign-in. Sign out and sign in "
+                   "with Google." if provider == "google" else
+                   "Drive import needs a Google sign-in. Sign out and sign in with Google.",
         )
     return token
 

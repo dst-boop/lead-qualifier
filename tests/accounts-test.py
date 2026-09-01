@@ -232,6 +232,31 @@ ck("  ...while google and microsoft still restore",
    me["linked_google"] is True and me["linked_microsoft"] is True,
    (me.get("linked_google"), me.get("linked_microsoft")))
 
+
+# --- the provider token dying must not read as signed out --------------------
+# The first outside tester hit this within an hour: a Google access token
+# lives sixty minutes, and when it aged out with no refresh token in reach,
+# every server feature said "Not signed in" while the page still looked
+# signed in. The cookie is the session; the stamped identity is who it is.
+import asyncio as _aio
+main._MEM_SESSIONS["sid3"] = {"provider": "google", "identity": "tester@newfirm.com"}
+c3 = TestClient(main.app, base_url="http://127.0.0.1:8750", follow_redirects=False)
+c3.cookies.set(main.SESSION_COOKIE, "sid3")
+me3 = c3.get("/api/me").json()
+ck("a google session with a dead token is still signed in",
+   me3.get("signed_in") is True and me3.get("email") == "tester@newfirm.com", me3.get("email"))
+ck("  ...but reads as needing a re-link, not as linked",
+   me3.get("linked_google") is False)
+ck("  ...and /api/credits answers instead of 401ing",
+   c3.get("/api/credits").status_code == 200, c3.get("/api/credits").text[:80])
+ck("  ...and the saved list loads instead of dropping to the browser copy",
+   c3.get("/api/state").status_code == 200)
+r3 = c3.get("/api/senders")
+ck("  ...senders lists empty rather than slamming the door",
+   r3.status_code == 200 and r3.json()["senders"] == [], r3.text[:80])
+ck("a truly anonymous session is still refused",
+   TestClient(main.app, base_url="http://127.0.0.1:8750").get("/api/credits").status_code == 401)
+
 print()
 print(f"FAILURES: {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)
