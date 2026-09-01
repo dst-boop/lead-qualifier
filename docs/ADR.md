@@ -2613,3 +2613,15 @@ suites set `window.__unfold`; recordcard-test.js owns the folded behavior.
 reach back decades; `build_opportunities` now drops events older than
 OPPS_MAX_AGE_DAYS (default 550) — undated events kept — and collapses
 identical (employer, state, date, headcount) rows fed twice.
+
+## 48. The built-in feed is the default, not a button
+
+**2026-09.** "The user should NOT have to do this to see the employers. It
+needs to be built into the app." Correct — the built-in 41-state feed existed
+but sat behind an admin button, which made zero-setup a setup step. The
+fallback chain in `_warn_feeds_value()` is now: value saved in the app →
+`WARN_FEEDS` env var → the built-in feed (`WARN_BUILTIN`, overridable,
+`""` disables). A brand-new deployment shows Money in Motion with nothing
+configured; the settings field is an override for firms with their own feed
+list, and the button now reads "Back to the built-in feed" and clears the
+override rather than pasting a URL the app already knows.

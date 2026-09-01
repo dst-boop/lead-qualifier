@@ -46,7 +46,7 @@ time, and as the fallback when nothing is saved in the app.
 
 | Variable | Meaning |
 |---|---|
-| `WARN_FEEDS` | JSON array of feeds (below). **The feature is hidden until this is set.** |
+| `WARN_FEEDS` | JSON array of feeds (below). **Optional — an override.** With nothing set anywhere, the app uses its own built-in daily 41-state feed (the `warn-data` branch) automatically; Money in Motion works with zero setup. Set `WARN_BUILTIN=""` to disable that default. |
 | `FORM5500_URL` | The DOL Form 5500 dataset — and optionally the **5500-SF** (short form) alongside it, separated by a comma or space (use `^|^` if comma). A `.zip` is unpacked in memory. **Google Drive links or file ids** also work. The SF carries its assets inline and is where small plans file — the business-owner population — so including it prices employers Schedule H never will. |
 | `FORM5500_SCHEDULE_URLS` | Schedule H and Schedule I, comma-separated. **Required for any dollar figure** — see below. |
 | `FORM5500_CSV_IN_ZIP` | Substring identifying which CSV inside the zip to read. Default `f_5500`. |

@@ -66,6 +66,7 @@ def sig(leads):
 
 # --- the unconfigured deployment says so ------------------------------------
 main.WARN_FEEDS = ""
+main.WARN_BUILTIN = ""   # the built-in default is on by design; this tests bare
 main.EDGAR_USER_AGENT = ""
 d = sig(NO_AGE)
 notes = " ".join(d.get("notes") or [])
