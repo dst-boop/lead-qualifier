@@ -71,9 +71,18 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 # back — the parser gets pinned to a real response rather than to a guess about
 # column names.
 #
-# WARN_FEEDS is JSON: [{"id","state","format":"csv"|"json","url"}]. Empty by
-# default, because a wrong URL that quietly 404s is worse than no feed at all.
+# WARN_FEEDS is JSON: [{"id","state","format":"csv"|"json","url"}]. It is an
+# override now, not a requirement — see WARN_BUILTIN below.
 WARN_FEEDS = os.environ.get("WARN_FEEDS", "")
+# The built-in feed: this app's own daily 41-state WARN scrape, published on
+# the warn-data branch by .github/workflows/warn-sync.yml. It is the default
+# source — "the user should NOT have to do this to see the employers" — so a
+# brand-new deployment shows Money in Motion with zero setup. A value saved
+# in the app or a WARN_FEEDS env var overrides it; setting WARN_BUILTIN=""
+# disables the default entirely.
+WARN_BUILTIN = os.environ.get(
+    "WARN_BUILTIN",
+    "https://raw.githubusercontent.com/dst-boop/lead-qualifier/warn-data/warn_feeds.json")
 FORM5500_URL = os.environ.get("FORM5500_URL", "")
 # The DOL splits filers across two main files: the regular Form 5500 and the
 # 5500-SF (small plans — exactly where a business owner's own 401(k) lives).
@@ -2586,7 +2595,11 @@ async def _warn_feeds_value() -> tuple:
         _FEEDS_CFG.update(at=now, value=(doc.get("value") or "").strip())
     if _FEEDS_CFG["value"]:
         return _FEEDS_CFG["value"], "The feed source saved in the app"
-    return WARN_FEEDS, "WARN_FEEDS"
+    if WARN_FEEDS.strip():
+        return WARN_FEEDS, "WARN_FEEDS"
+    if WARN_BUILTIN.strip():
+        return WARN_BUILTIN, "the built-in 41-state feed"
+    return "", "WARN_FEEDS"
 
 
 class FeedsCfg(BaseModel):

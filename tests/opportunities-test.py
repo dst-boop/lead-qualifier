@@ -192,6 +192,22 @@ main.FORM5500_URL = STUB + "/f5500.zip"
 # An empty panel has two very different causes and a new account met the wrong
 # answer to both: "see SETUP-prospecting.md", which is neither an explanation
 # nor something a user can act on.
+# --- zero setup: the built-in feed is the default ----------------------------
+# "The user should NOT have to do this to see the employers." With nothing
+# saved and no env var, the source is the app's own 41-state feed.
+main.WARN_FEEDS = ""
+main._FEEDS_CFG.update(at=0.0, value=None)
+_v, _src = asyncio.run(main._warn_feeds_value())
+ck("with nothing configured the built-in feed is the source",
+   _v == main.WARN_BUILTIN and "built-in" in _src, _src)
+ck("  ...so Money in Motion is on for a brand-new deployment",
+   c.get("/api/me").json()["features"]["opportunities"] is True)
+ck("  ...and an env var still overrides it",
+   (setattr(main, "WARN_FEEDS", "[]") or asyncio.run(main._warn_feeds_value())[1]) == "WARN_FEEDS")
+# The rest of the suite exercises the genuinely-bare states, so turn the
+# built-in default off for it, the way a hermetic deployment would.
+main.WARN_BUILTIN = ""
+
 main.WARN_FEEDS = ""
 r = c.get("/api/opportunities", params={"refresh": "true"})
 d = r.json()
