@@ -112,6 +112,54 @@ untouched = P.attach_assets(already["plans"], {"20260101A": 1.0})
 ck("  ...and is not overwritten by one", untouched["filled"] == 0
    and already["plans"]["cordova industrial"]["assets"] == 82431006.55)
 
+# --- the short form: the file a business owner is actually in ----------------
+# 5500-SF columns as the DOL prefixes them. The SF carries its assets inline —
+# no schedule join — and it is where small plans live, which is exactly the
+# Age 59.5 pipeline's population (the owner of a nine-person company).
+SF = (
+    "ACK_ID,SF_PLAN_NAME,SF_SPONSOR_NAME,SF_SPONS_EIN,SF_SPONS_US_STATE,"
+    "SF_TAX_PRD,SF_TOT_PARTCP_BOY_CNT,SF_TOT_ASSETS_EOY_AMT\n"
+    '20260101D,PREFERRED 401(K),"PREFERRED CONSTRUCTION, LLC",621234567,TN,'
+    "2025-12-31,9,1740000\n")
+sf = P.parse_5500_csv(SF)
+sfp = sf["plans"].get(P.norm_company("Preferred Construction, LLC"))
+ck("the SF-prefixed columns map without special-casing",
+   sfp is not None and set(sf["unmapped"]) <= {"plan_type"}, sf["unmapped"])
+ck("  ...and the SF prices itself: assets inline, average computed",
+   sfp and sfp["assets"] == 1740000 and sfp["participants"] == 9
+   and sfp["avg_balance"] == 193333, sfp)
+
+# --- both main files, merged by the loader -----------------------------------
+import asyncio
+from webapp import main as M
+
+SCHH2 = ("ACK_ID,TOT_ASSETS_EOY_AMT\n"
+         "20260101A,82431006\n")
+FILES = {"reg": F5500, "sfile": SF, "sch2": SCHH2}
+
+
+async def fake_fetch(url, drive_token, hint):
+    return FILES[url]
+
+_orig = M._fetch_source
+M._fetch_source = fake_fetch
+M.FORM5500_URL = "reg, sfile"
+M.FORM5500_SCHEDULE_URLS = ["sch2"]
+got = asyncio.run(M._load_plans(fresh=True))
+M._fetch_source = _orig
+
+ck("two main files merge into one index", len(got["plans"]) == 4, len(got["plans"]))
+cor = got["plans"][P.norm_company("CORDOVA INDUSTRIAL GROUP INC")]
+pre = got["plans"][P.norm_company("Preferred Construction, LLC")]
+ck("the regular filer is priced by the Schedule H join",
+   cor["assets"] == 82431006 and cor["avg_balance"] == round(82431006 / 940), cor.get("avg_balance"))
+ck("the SF filer keeps its inline price — the join never overwrites it",
+   pre["assets"] == 1740000 and pre["avg_balance"] == 193333)
+ck("priced counts both routes to a number", got["priced"] == 2, got.get("priced"))
+ck("the unjoined regular filers still carry their headcount",
+   got["plans"][P.norm_company("HALSTEAD MARINE LLC")]["participants"] == 58
+   and got["plans"][P.norm_company("HALSTEAD MARINE LLC")]["avg_balance"] is None)
+
 print()
 print(f"FAILURES {bad} of {n}" if bad else f"all {n} checks passed")
 sys.exit(1 if bad else 0)

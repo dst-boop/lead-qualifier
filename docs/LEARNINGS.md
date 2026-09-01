@@ -97,3 +97,14 @@ a single `JSON.parse` silently yields strings where objects were expected.
 Also from the same account: `age` is a disallowed search field alongside
 `yearsOfExperience`, and "VP Level Exec" is the second exact-match
 managementLevel string.
+
+## 2026-09 · The 5500-SF is where the business owners are
+
+The regular f_5500 file (140 columns, no money) misses every small plan:
+those file the separate 5500-SF, which carries its assets inline — no
+Schedule H join. A nine-person construction company's 401(k) exists only
+there. **Rule:** FORM5500_URL accepts both main files; the SF's SF_-prefixed
+columns match the existing aliases via word-boundary matching, the merge
+keeps the larger filing per sponsor, and the schedule join fills only what
+is not already priced. Verify a new file year with /api/sources/probe —
+it names any column that failed to map.

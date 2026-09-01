@@ -75,6 +75,11 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 # default, because a wrong URL that quietly 404s is worse than no feed at all.
 WARN_FEEDS = os.environ.get("WARN_FEEDS", "")
 FORM5500_URL = os.environ.get("FORM5500_URL", "")
+# The DOL splits filers across two main files: the regular Form 5500 and the
+# 5500-SF (small plans — exactly where a business owner's own 401(k) lives).
+# FORM5500_URL accepts both, separated by commas or whitespace; the SF file
+# carries its assets inline, so it needs no schedule join. The split happens
+# at call time in _load_plans so a changed FORM5500_URL takes effect live.
 FORM5500_CSV_IN_ZIP = os.environ.get("FORM5500_CSV_IN_ZIP", "f_5500")
 # Schedule H and Schedule I, comma-separated. The 5500 file has no assets on
 # it; these are where the money is, joined back on ACK_ID.
@@ -2771,31 +2776,61 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
     without the schedule there is no average balance and nothing to rank on.
     That is reported rather than left to be discovered.
     """
-    if not FORM5500_URL:
+    urls = [u for u in re.split(r"[,\s]+", FORM5500_URL) if u]
+    if not urls:
         return {"plans": {}, "note": "FORM5500_URL is not set."}
     key = "plans|" + FORM5500_URL + "|" + ",".join(FORM5500_SCHEDULE_URLS) + "|" + SOURCE_STATES
     if not fresh:
         got = _cache_get(key, PLANS_TTL)
         if got is not None:
             return {**got, "cached": True}
-    text = await _fetch_source(FORM5500_URL, drive_token, FORM5500_CSV_IN_ZIP)
-    parsed = prospecting.parse_5500_csv(text, states=_source_states() or None)
-    out = {"plans": parsed["plans"], "rows": parsed.get("rows"),
-           "kept": parsed.get("kept"), "mapped": parsed["mapped"],
-           "unmapped": parsed["unmapped"]}
+    # Several main files merge into one index. The same keep-the-largest rule
+    # as within a file: assets outrank a bare headcount, headcount breaks ties.
+    # One dead file must not take the others down with it — its absence is
+    # reported and the rest still load. A single dead file still raises,
+    # because then there is nothing at all to show.
+    plans: dict = {}
+    rows = kept = 0
+    mapped, unmapped = None, []
+    file_notes = []
+    for url in urls:
+        try:
+            text = await _fetch_source(url, drive_token, FORM5500_CSV_IN_ZIP)
+        except HTTPException as e:
+            if len(urls) == 1:
+                raise
+            file_notes.append(f"5500 file unavailable: {str(e.detail)[:160]}")
+            continue
+        parsed = prospecting.parse_5500_csv(text, states=_source_states() or None)
+        for k, v in parsed["plans"].items():
+            prev = plans.get(k)
+            if prev and ((prev.get("assets") or 0, prev.get("participants") or 0)
+                         >= ((v.get("assets") or 0, v.get("participants") or 0))):
+                continue
+            plans[k] = v
+        rows += parsed.get("rows") or 0
+        kept += parsed.get("kept") or 0
+        mapped = mapped or parsed["mapped"]
+        unmapped = parsed["unmapped"]
+    out = {"plans": plans, "rows": rows, "kept": kept,
+           "mapped": mapped or {}, "unmapped": unmapped}
+    if file_notes:
+        out["note"] = " ".join(file_notes)
 
-    priced = sum(1 for p in parsed["plans"].values() if p.get("avg_balance"))
-    if priced:
-        out["priced"] = priced
+    priced_inline = sum(1 for p in plans.values() if p.get("avg_balance"))
+    if priced_inline and not FORM5500_SCHEDULE_URLS:
+        # The SF file prices itself; without schedules that is all there is.
+        out["priced"] = priced_inline
         return _cache_put(key, out)
 
     if not FORM5500_SCHEDULE_URLS:
-        out["note"] = ("The 5500 file has participant counts but no assets — assets are "
-                       "on Schedule H and Schedule I, which are separate downloads. Set "
-                       "FORM5500_SCHEDULE_URLS or nothing can be priced.")
+        out["note"] = " ".join(file_notes + [
+            "The 5500 file has participant counts but no assets — assets are "
+            "on Schedule H and Schedule I, which are separate downloads. Set "
+            "FORM5500_SCHEDULE_URLS or nothing can be priced."])
         return _cache_put(key, out)
 
-    assets, notes = {}, []
+    assets, notes = {}, list(file_notes)
     for ref in FORM5500_SCHEDULE_URLS:
         try:
             sched = prospecting.parse_schedule_assets(
@@ -2810,12 +2845,12 @@ async def _load_plans(drive_token: str = "", fresh: bool = False) -> dict:
             notes.append(f"schedule unavailable: {e.detail}"[:200])
         except Exception as e:
             notes.append(f"schedule unreadable: {type(e).__name__}")
-    rep = prospecting.attach_assets(parsed["plans"], assets)
-    out["priced"] = rep["filled"]
+    rep = prospecting.attach_assets(plans, assets)
+    out["priced"] = sum(1 for p in plans.values() if p.get("avg_balance"))
     out["schedule_rows"] = len(assets)
     if notes:
         out["note"] = " ".join(notes)
-    elif not rep["filled"]:
+    elif not rep["filled"] and not priced_inline:
         out["note"] = ("Schedule files loaded but nothing joined — the ACK_ID values do "
                        "not line up with the 5500 file. Check both are the same year.")
     return _cache_put(key, out)
