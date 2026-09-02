@@ -539,8 +539,8 @@ Date,Company,Type,Jobs Affected,City,Location
 5/22/2017,TCBY,Closure,,Lincoln,O Street - Lincoln
 5/1/2017,Speak Out,Closure,4,Scottsbluff,P.O. Box 1066
 4/28/2017,Family Christian,Closure,,Lincoln,Lincoln
-4/24/2017,Da Buzz,Closure,4,North Platte,North Platte
 4/24/2017,Good Samaritan Society,Layoff,40,Wymore,Wymore
+4/24/2017,Da Buzz,Closure,4,North Platte,North Platte
 4/21/2017,Ragazzi's Pizza,Closure,,Ralston,Ralston
 4/17/2017,Gothenburg Medical Arts,Closure,4,Gothernburg,Gothenburg
 4/17/2017,Rue 21,Closure,14,Gretna,Gretna
@@ -619,24 +619,24 @@ Date,Company,Type,Jobs Affected,City,Location
 12/31/2018,PaymentSpring - Nelnet,Layoff,30,Omaha,Omaha
 12/31/2018,Dr. Mausolf Ophthalmology,Closure,7,Lincoln,Lincoln
 12/28/2018,Kearney Little Learners,Closure,23,Kearney,Kearney
-12/22/2018,Shopko Corporate Office,Closure,12,Gordon,Gordon
-12/22/2018,Shopko Corporate Office,Closure,16,Ogallala,Ogallala
 12/22/2018,CraftHouse,Closure,,Lincoln,Lincoln
 12/22/2018,Shopko xxxx,Closure,12,Gordon,Gordon
 12/22/2018,Shopko xxxx,Closure,16,Ogallala,Ogallala
+12/22/2018,Shopko Corporate Office,Closure,12,Gordon,Gordon
+12/22/2018,Shopko Corporate Office,Closure,16,Ogallala,Ogallala
 12/21/2018,201 Tanning & Spa,Closure,2,Beatrice,Beatrice
 12/15/2018,O'Connor's Irish Pub,Closure,3,Omaha,Omaha
 12/7/2018,Capital One Financial,Layoff,155,Lincoln,Lincoln
 12/2/2018,Shivers Sweets N Treats,Closure,2,Lincoln,Lincoln
 11/27/2018,The Creative Teacher,Closure,,Kearney,Kearney
 11/21/2018,Funshine Shop,Closure,2,Kearney,Kearney
-11/16/2018,Quad Graphics,Layoff,30,Sidney,Sidney
 11/16/2018,The Emporium Restaurant,Closure,11,Scottsbluff,Scottsbluff
+11/16/2018,Quad Graphics,Layoff,30,Sidney,Sidney
 11/14/2018,Jimmy's Egg,Closure,,Lincoln,Lincoln
 10/31/2018,Five Guys,Closure,,Lincoln,Lincoln - Downtown
 10/31/2018,The Donut Shop,Closure,2,Omaha,Omaha
-10/27/2018,Heartland Foods,Layoff,4,Beatrice,Beatrice
 10/27/2018,Lewis Greenscape,Closure,12,Grand Island,Grand Island
+10/27/2018,Heartland Foods,Layoff,4,Beatrice,Beatrice
 10/2/2018,Crafts Inc.,Layoff,3,Norfolk,Norfolk
 10/1/2018,Jason Sears Flooring,Closure,3,O'Neill,O'Neill
 9/30/2018,Big Top Party Shop,Closure,5,Norfolk,Norfolk
@@ -646,8 +646,8 @@ Date,Company,Type,Jobs Affected,City,Location
 9/27/2018,Gamers,Closure,,La Vista,La Vista
 9/18/2018,Poling Drug,Layoff,4,Beatrice,Beatrice
 9/15/2018,Allen's Superstore,Closure,33,Hastings,Hastings
-8/31/2018,Save Best Store,Closure,8,Lincoln,Lincoln
 8/31/2018,Herbergers,Closure,80,Kearney,Kearney
+8/31/2018,Save Best Store,Closure,8,Lincoln,Lincoln
 8/31/2018,Younkers,Closure,190,Omaha,Omaha - Westroads Mall
 8/31/2018,Younkers,Closure,80,Grand Island,Grand Island
 8/31/2018,Younkers,Closure,141,Omaha,Omaha - Oakview Mall
@@ -664,16 +664,16 @@ Date,Company,Type,Jobs Affected,City,Location
 7/27/2018,Brightstar,Closure,53,Omaha,Omaha
 7/20/2018,Staples,Closure,12,North Platte,North Platte
 7/5/2018,Serendipity,Closure,1,Norfolk,Norfolk
-7/2/2018,MB Financial Bank,Layoff,31,Omaha,Omaha
 7/2/2018,Little Blessings,Closure,13,Omaha,Omaha
 7/2/2018,Little Blessings,Closure,7,Lincoln,Lincoln
-6/30/2018,Adams County Senior Services,Closure,9,Hastings,Hastings
-6/30/2018,Shopko Corporate Office,Closure,12,Crete,Crete
-6/30/2018,Randolph Car Wash,Closure,20,Lincoln,Lincoln
-6/30/2018,Building Healthy Futures,Closure,5,Omaha,Omaha
-6/30/2018,Joseph's College,Closure,2,North Platte,North Platte
-6/30/2018,Akin's Natural Foods,Closure,10,Lincoln,Lincoln
+7/2/2018,MB Financial Bank,Layoff,31,Omaha,Omaha
 6/30/2018,Shopko xxxx,Closure,12,Crete,Crete
+6/30/2018,Shopko Corporate Office,Closure,12,Crete,Crete
+6/30/2018,Akin's Natural Foods,Closure,10,Lincoln,Lincoln
+6/30/2018,Adams County Senior Services,Closure,9,Hastings,Hastings
+6/30/2018,Building Healthy Futures,Closure,5,Omaha,Omaha
+6/30/2018,Randolph Car Wash,Closure,20,Lincoln,Lincoln
+6/30/2018,Joseph's College,Closure,2,North Platte,North Platte
 6/29/2018,Maximus,Closure,41,Omaha,Omaha
 6/27/2018,Toys-R-Us,Closure,30,Omaha,Omaha - Oakview Mall
 6/27/2018,Toys-R-Us,Closure,30,Lincoln,Lincoln
@@ -682,13 +682,13 @@ Date,Company,Type,Jobs Affected,City,Location
 6/24/2018,Lyons Living Center,Closure,30,Lyons,Lyons
 6/22/2018,PureRed Integrated Marketing,Closure,19,Norfolk,Norfolk
 6/21/2018,Center for People in Need,Layoff,3,Lincoln,Lincoln
-6/15/2018,Good Samaritan Assisted Living,Closure,7,Scribner,Scribner
 6/15/2018,Farner Company,Closure,17,Norfolk,Norfolk
+6/15/2018,Good Samaritan Assisted Living,Closure,7,Scribner,Scribner
 6/14/2018,Applebee's,Closure,5,Hastings,Hastings
-5/31/2018,Convergys Corporation,Closure,123,Omaha,Omaha
-5/31/2018,Grace University,Closure,135,Omaha,Omaha
 5/31/2018,The Minuteman Hotel,Layoff,4,Lexington,Lexington
 5/31/2018,Roadrunner Temperature Controlled,Layoff,28,Omaha,Omaha
+5/31/2018,Convergys Corporation,Closure,123,Omaha,Omaha
+5/31/2018,Grace University,Closure,135,Omaha,Omaha
 5/16/2018,Wells Fargo,Closure,18,Grand Island,Grand Island
 5/10/2018,Cenveo Corporation,Layoff,52,Omaha,Omaha
 5/4/2018,Streck,Layoff,9,La Vista,La Vista
@@ -704,9 +704,9 @@ Date,Company,Type,Jobs Affected,City,Location
 4/6/2018,C & C Specialty Market,Closure,3,Beatrice,Beatrice
 4/4/2018,PCT Livestock,Closure,2,St. Libory,St. Libory
 4/3/2018,Direct Check,Closure,1,McCook,McCook
-4/2/2018,Eagle Distributing,Layoff,2,Norfolk,Norfolk
 4/2/2018,Corelink Administrative Solutions,Layoff,14,Fargo,HQ
 4/2/2018,Election Systems & Software,Layoff,1,Omaha,Omaha
+4/2/2018,Eagle Distributing,Layoff,2,Norfolk,Norfolk
 4/1/2018,Great Plains Health,Layoff,7,North Platte,North Platte
 3/31/2018,Defy Gravity Trampoline Park,Closure,,La Vista,La Vista
 3/29/2018,Nifast,Closure,4,Beatrice,Beatrice
@@ -765,7 +765,6 @@ Date,Company,Type,Jobs Affected,City,Location
 2/11/2019,Lincoln Journal Star,,48,Lincoln,Lincoln
 1/14/2019,Wausa Care and Rehabilitation Center,,39,Wausa,Wausa
 1/10/2019,Sidney Care and Rehabilitation Center,,51,Sidney,Sidney
-12/31/2019,Land O Lakes Inc,Closure,3,McCook,McCook
 12/31/2019,Wright's Jewelers,Closure,5,Lincoln,Lincoln
 12/31/2019,Jack Link's Jerky,Closure,62,Bellevue,Bellevue
 12/31/2019,Leonard and His House of Unfinished Furniture,Closure,1,Lincoln,Lincoln
@@ -773,6 +772,7 @@ Date,Company,Type,Jobs Affected,City,Location
 12/31/2019,Le Cupcake,Closure,5,Lincoln,Lincoln
 12/31/2019,Goodwill Outlet,Layoff,1,Grand Island,Grand Island
 12/31/2019,Tornado Crepes,Closure,,Lincoln,Lincoln
+12/31/2019,Land O Lakes Inc,Closure,3,McCook,McCook
 12/31/2019,Beed Transportation Inc,Closure,26,West Point,Office
 12/28/2019,Connect Gallery,Closure,2,Omaha,Omaha
 12/21/2019,Kitchen Sink Bakery,Closure,2,Lincoln,Lincoln
@@ -814,8 +814,8 @@ Date,Company,Type,Jobs Affected,City,Location
 9/28/2019,Don & Randy Shoemaker's Truck Station,Closure,20,Lincoln,Lincoln
 9/27/2019,Greenbrier Railcar (GBW),Layoff,14,Omaha,Omaha
 9/27/2019,The Michael's Cantina at the Market,Closure,25,Omaha,Omaha
-9/25/2019,Kentucky Fried Chicken,Closure,,Columbus,Columbus
 9/25/2019,Family Video,Closure,4,Columbus,Columbus
+9/25/2019,Kentucky Fried Chicken,Closure,,Columbus,Columbus
 9/25/2019,Kentucky Fried Chicken,Closure,17,S. Sioux City,S. Sioux City
 9/13/2019,Set the Bar Fitness & Nutrition,Closure,,Norfolk,Norfolk
 9/5/2019,MMP Enterprises,Layoff,7,Sidney,Sidney
@@ -838,12 +838,12 @@ Date,Company,Type,Jobs Affected,City,Location
 8/6/2019,Premier Estates,Closure,35,West Point,West Point
 8/4/2019,Earl May Nursery & Garden Center,Closure,3,Beatrice,Beatrice
 8/2/2019,Eakes Office Solutions Corporation,Closure,3,York,York
-7/31/2019,The Pipeline Clothing eXchange,Closure,1,Beatrice,Beatrice
 7/31/2019,Norfolk Natural Market,Closure,5,Norfolk,Norfolk
 7/31/2019,El Canelo Mexican Restaurant,Closure,,Beatrice,Beatrice
 7/31/2019,Anderson Auto Parts,Layoff,4,Grand Island,Grand Island
-7/28/2019,Therman's Bike and Sport,Closure,0,Nebraska City,Nebraska City
+7/31/2019,The Pipeline Clothing eXchange,Closure,1,Beatrice,Beatrice
 7/28/2019,Goodyear Fitness Center,Closure,20,Lincoln,Lincoln
+7/28/2019,Therman's Bike and Sport,Closure,0,Nebraska City,Nebraska City
 7/27/2019,Merle's Food & Drink,Closure,13,Lincoln,Lincoln
 7/27/2019,B & B Grill and Arcade,Closure,11,Bellevue,Bellevue
 7/24/2019,Spreetail,Layoff,22,Lincoln,Lincoln
@@ -851,28 +851,28 @@ Date,Company,Type,Jobs Affected,City,Location
 7/19/2019,Charter Spectrum,Layoff,2,Beatrice,Beatrice
 6/30/2019,Good Samaritan Nursing Home,Closure,40,Wood River,Wood River
 6/28/2019,Cosmo Professional Beauty Supply,Closure,31,Lincoln,Lincoln
-6/28/2019,Video Kingdom Electronics,Closure,5,Hastings,Hastings
 6/28/2019,Highnooner's Deli,Closure,4,Lincoln,Lincoln
-6/23/2019,Shopko Corporate Office,Closure,53,Omaha,Omaha - 14445 West Center Road
+6/28/2019,Video Kingdom Electronics,Closure,5,Hastings,Hastings
 6/23/2019,Amato's,Closure,5,Omaha,Omaha
 6/23/2019,Shopko Hometown xxxx,Closure,53,Omaha,Shopko Hometown Omaha
-6/21/2019,Werner Service & Trucking,Closure,24,St. Edward,St. Edward
+6/23/2019,Shopko Corporate Office,Closure,53,Omaha,Omaha - 14445 West Center Road
 6/21/2019,Union Pacific,Layoff,78,North Platte,North Platte
+6/21/2019,Werner Service & Trucking,Closure,24,St. Edward,St. Edward
 6/18/2019,Grand Island Park Place Care & Rehabilitation Center,Closure,64,Grand Island,Grand Island
+6/16/2019,Shopko Hometown xxxx,Closure,15,Broken Bow,Broken Bow
 6/16/2019,Shopko Hometown xxxx,Closure,25,Wayne,SHopko Hometown Wayne
 6/16/2019,Shopko xxxx,Closure,45,North Platte,North Platte
 6/16/2019,Shopko Hometown xxxx,Closure,21,Holdrege,Holdrege
 6/16/2019,Shopko xxxx,Closure,54,Grand Island,Grand Island
 6/16/2019,Shopko xxxx,Closure,19,O.Neil,Shopko O'Neil
 6/16/2019,Shopko Hometown xxxx,Closure,18,Valentine,Valentine
-6/16/2019,Shopko Hometown xxxx,Closure,15,Broken Bow,Broken Bow
-6/16/2019,Shopko Corporate Office,Closure,25,Wayne,Wayne
 6/16/2019,Shopko Corporate Office,Closure,15,Broken Bow,Broken Bow
-6/16/2019,Shopko Corporate Office,Closure,54,Grand Island,Grand Island
-6/16/2019,Shopko Corporate Office,Closure,21,Holdrege,Holdrege
 6/16/2019,Shopko Corporate Office,Closure,45,North Platte,North Platte
 6/16/2019,Shopko Corporate Office,Closure,19,O'Neill,O'Neill
 6/16/2019,Shopko Corporate Office,Closure,18,Valentine,Valentine
+6/16/2019,Shopko Corporate Office,Closure,54,Grand Island,Grand Island
+6/16/2019,Shopko Corporate Office,Closure,21,Holdrege,Holdrege
+6/16/2019,Shopko Corporate Office,Closure,25,Wayne,Wayne
 6/5/2019,Wahoo Super,Closure,28,Wahoo,Wahoo
 5/31/2019,Bigler Motors,Closure,12,Lincoln,Lincoln
 5/31/2019,Payless,Closure,2,Scottsbluff,Scottsbluff
@@ -884,15 +884,15 @@ Date,Company,Type,Jobs Affected,City,Location
 5/12/2019,Shopko xxxxx,Closure,15,Beatrice,Beatrice
 5/12/2019,Shopko Hometown xxxx,Closure,25,Falls City,Falls City
 5/12/2019,Shopko Corporate Office,Closure,25,Falls City,Falls City
-5/12/2019,Shopko Corporate Office,Closure,18,Ainsworth,Ainsworth
 5/12/2019,Shopko Corporate Office,Closure,15,Beatrice,Beatrice
+5/12/2019,Shopko Corporate Office,Closure,18,Ainsworth,Ainsworth
 5/11/2019,Cabela's Corporation,Closure,41,Oskosh,Returns Facility - Oshkosh
 5/11/2019,Cabela's Corporation,Closure,120,Sidney,Distribution Center - Sidney
-5/11/2019,Norfolk Care & Rehabilitation Center,Closure,42,Norfolk,Norfolk
 5/11/2019,Schuyler Care & Rehabilitation Center,Closure,53,Schuyler,Schuyler
+5/11/2019,Norfolk Care & Rehabilitation Center,Closure,42,Norfolk,Norfolk
 5/5/2019,Shopko xxxx,Closure,15,Gothenburg,Gothenburg
-5/5/2019,Shopko Hometown xxxx,Closure,20,Auburn,Auburn
 5/5/2019,Shopko Hometown xxxx,Closure,12,Superior,Superior
+5/5/2019,Shopko Hometown xxxx,Closure,20,Auburn,Auburn
 5/5/2019,Shopko Corporate Office,Closure,15,Gothenburg,Gothenburg
 5/5/2019,Shopko Corporate Office,Closure,20,Auburn,Auburn
 5/2/2019,Shopko Corporate Office,Closure,24,West Point,West Point
@@ -900,8 +900,8 @@ Date,Company,Type,Jobs Affected,City,Location
 4/23/2019,Noodles & Company,Closure,16,Lincoln,Lincoln
 4/22/2019,"Elkhorn River Farms, LLC",Layoff,31,O'Neill,O'Neill
 4/20/2019,Payless ShoeSource,Closure,2,Lincoln,Lincoln 6845
-4/19/2019,Payless ShoeSource,Closure,3,Lincoln,Lincoln 4200
 4/19/2019,Payless,Closure,5,North Platte,North Platte
+4/19/2019,Payless ShoeSource,Closure,3,Lincoln,Lincoln 4200
 4/15/2019,Spectrum America Supply Chain Solutions (Shopko distribution)xxxx,Closure,295,Omaha,Shopko Distribution Center
 4/15/2019,Shopko Corporate Office,Closure,42,Lincoln,Lincoln - 4200 South 27th Street
 4/15/2019,Shopko Corporate Office,Closure,44,Lincoln,Lincoln - 100 South 66th Street
@@ -933,13 +933,13 @@ Date,Company,Type,Jobs Affected,City,Location
 3/2/2019,Shopko Corporate Office,Closure,17,Ord,Ord
 3/2/2019,Shopko Corporate Office,Closure,48,Lincoln,Lincoln - 3400 North 27th Street
 3/1/2019,Capital One Financial,Layoff,4,Lincoln,Lincoln
-2/28/2019,Shopko Corporate Office,Closure,16,Kimball,Kimball
-2/28/2019,Sears,Closure,27,Grand Island,Grand Island
 2/28/2019,Shopko xxxx,Closure,16,Kimball,Kimball
+2/28/2019,Shopko Corporate Office,Closure,16,Kimball,Kimball
 2/28/2019,Corps of Discovery Welcome Center,Closure,1,Crofton,Crofton
+2/28/2019,Sears,Closure,27,Grand Island,Grand Island
+2/18/2019,Country Nest,Closure,0,Kearney,Kearney
 2/18/2019,Shopko Hometown xxxx,Closure,3,Broken Bow,Broken Bow - Pharmacy
 2/18/2019,Shopko xxxx,Closure,3,Ainsworth,Ainsworth - Pharmacy
-2/18/2019,Country Nest,Closure,0,Kearney,Kearney
 2/18/2019,Shopko Corporate Office,Closure,3,Broken Bow,Broken Bow
 1/31/2019,The Solid Rock,Closure,6,Kearney,Kearney
 1/30/2019,Union Pacific,Closure,68,Morrill,Morrill
@@ -956,6 +956,6 @@ Date,Company,Type,Jobs Affected,City,Location
 1/9/2019,Shopko Pharmacy xxxx,Closure,6,Lincoln,Lincoln 4200 S. 27th
 1/8/2019,Shopko Pharmacy xxxx,Closure,,Lincoln,Lincoln 100 S. 66th
 1/8/2019,Shopko Corporate Office,Closure,,Lincoln,Lincoln - 100 South 66th Street Pharmacy
-1/4/2019,Diversified Foods & Seasoning,Closure,54,Nebraska City,Nebraska City
 1/4/2019,Capital One Financial,Layoff,45,Lincoln,Lincoln
 1/4/2019,Quad Graphics,Layoff,6,Sidney,Sidney
+1/4/2019,Diversified Foods & Seasoning,Closure,54,Nebraska City,Nebraska City
