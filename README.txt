@@ -8,7 +8,7 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x7fef402f9580> found
+<function system at 0x7f7de923a160> found
 scrape_state verify: True
 Site init SSL verification status: True
 scraped 30 of 41 jurisdictions
@@ -17,7 +17,7 @@ failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   FL  IndexError: list index out of range
   GA  ConnectTimeout: HTTPSConnectionPool(host='www.tcsg.edu', port=443): Max retries exceeded with url: /warn-public-view/entry/82923/ (Caused by ConnectTimeoutError(<HTTPSConnection(host='www.tcsg.edu', port=443) at 0x7f
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#12767e7b603c657d6079747d6071773c767764777e7d62527a7365737b7b3c757d64': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#12767e7b603c65
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#9cf8f0f5eeb2ebf3eef7faf3eefff9b2f8f9eaf9f0f3ecdcf4fdebfdf5f5b2fbf3ea': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#9cf8f0f5eeb2eb
   ID  PdfminerException: No /Root object! - Is this really a PDF?
   KY  ModuleNotFoundError: No module named 'pyquery'
   LA  TypeError: write() argument must be str, not None
