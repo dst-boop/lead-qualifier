@@ -8,25 +8,24 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x7f9b086e5bc0> found
+<function system at 0x7f2b1d006520> found
 scrape_state verify: True
 Site init SSL verification status: True
-scraped 30 of 41 jurisdictions
+scraped 31 of 41 jurisdictions
 
 failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   FL  IndexError: list index out of range
   GA  ConnectTimeout: HTTPSConnectionPool(host='www.tcsg.edu', port=443): Max retries exceeded with url: /warn-public-view/entry/83061/ (Caused by ConnectTimeoutError(<HTTPSConnection(host='www.tcsg.edu', port=443) at 0x7f
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#98fcf4f1eab6eff7eaf3fef7eafbfdb6fcfdeefdf4f7e8d8f0f9eff9f1f1b6fff7ee': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#98fcf4f1eab6ef
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#82e6eeebf0acf5edf0e9e4edf0e1e7ace6e7f4e7eeedf2c2eae3f5e3ebebace5edf4': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#82e6eeebf0acf5
   ID  PdfminerException: No /Root object! - Is this really a PDF?
-  KY  ModuleNotFoundError: No module named 'pyquery'
   LA  TypeError: write() argument must be str, not None
-  MI  ModuleNotFoundError: No module named 'pyquery'
+  MI  KeyError: 'Site addresses'
   NM  ValueError: scraper produced an empty file
-  OH  FeatureNotFound: Couldn't find a tree builder with the features you requested: lxml. Do you need to install a parser library?
+  OH  ValueError: Could not find JSON data div
   TX  Exception: Scraper isn't scraping.
 
 no scraper exists for these, so they are not covered at all:
   AR MA MN MS NC ND NH NV WV WY
 
-wrote 30 feeds to /home/runner/work/_temp/warn/warn_feeds.json
+wrote 31 feeds to /home/runner/work/_temp/warn/warn_feeds.json
