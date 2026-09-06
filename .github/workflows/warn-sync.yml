@@ -13,6 +13,9 @@
 name: warn-sync
 
 on:
+  push:
+    branches: [codex/warn-parser-repair]
+    paths: [.github/workflows/warn-sync.yml]
   schedule:
     # Daily, early UTC. WARN notices arrive continuously and states publish on
     # their own cadence, so more often than daily is noise and less is stale.
@@ -44,11 +47,12 @@ jobs:
           cache: pip
 
       - name: Install the scraper
-        run: pip install warn-scraper
+        run: pip install warn-scraper pyquery lxml
 
       - name: Scrape every covered state
         id: scrape
         run: |
+          set -euo pipefail
           python -m tools.warn_sync \
             --out "$RUNNER_TEMP/warn" \
             --states "${{ inputs.states || 'all' }}" \
@@ -78,6 +82,7 @@ jobs:
           cp "$RUNNER_TEMP"/warn/*.csv "$RUNNER_TEMP/pub/" 2>/dev/null || true
           cp "$RUNNER_TEMP/warn/warn_feeds.json" "$RUNNER_TEMP/pub/"
           cp "$RUNNER_TEMP/report.txt" "$RUNNER_TEMP/pub/README.txt"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/pub/updated_at.txt"
 
           cd "$RUNNER_TEMP/pub"
           git add -A
