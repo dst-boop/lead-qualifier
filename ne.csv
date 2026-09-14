@@ -66,8 +66,8 @@ Date,Company,Type,Jobs Affected,City,Location
 11/29/2011,TD Ameritrade,Layoff,60,Omaha,TD Ameritrade
 11/14/2011,The Clark Enersen Partners,Layoff,7,Lincoln,The Clark Enersen Partners
 10/31/2011,Vetter Health Services: Friendship Villa,Closure,50,Spalding,Vetter Health Services:  Friendship Villla
-10/30/2011,Square D (Schneider Electric),Layoff,8,Lincoln,Square D (Schneider Electric)
 10/30/2011,Lannys Bar and Grill,Closure,10,Hadar,Lannys Bar and Grill
+10/30/2011,Square D (Schneider Electric),Layoff,8,Lincoln,Square D (Schneider Electric)
 9/30/2011,Whispering Pines,Closure,9,Schuyler,Whispering Pines
 9/16/2011,Tabitha Health Care Services,Layoff,12,Lincoln,Tabitha Health Care Services
 9/2/2011,American Red Cross,Layoff,12,Lincoln,American Red Cross - Statewide
@@ -136,8 +136,8 @@ Date,Company,Type,Jobs Affected,City,Location
 6/16/2012,Library Restaurant and Lounge,Closure,14,Grand Island,Library Restaurant and Lounge
 5/31/2012,Grand View Manor,Closure,30,Campbell,Grand View Manor
 5/31/2012,Grand View Manor,Closure,30,Campbell,Grandview Manor
-5/25/2012,Stone Creek Homes,Layoff,41,Central City,Stone Creek Homes
 5/25/2012,"Beef Products, Inc. - Lexington",Layoff,10,Lexington,"Beef Products, Inc. - Lexington"
+5/25/2012,Stone Creek Homes,Layoff,41,Central City,Stone Creek Homes
 5/24/2012,William Thiemann DDS,Closure,4,Grand Island,William Thiemann DDS
 5/15/2012,"Beef Products, Inc. - South Sioux City",Layoff,45,South Sioux City,"Beef Products, Inc. - South Sioux City"
 4/22/2012,Wendy's,Closure,20,Central City,Wendys - Central City
@@ -159,9 +159,9 @@ Date,Company,Type,Jobs Affected,City,Location
 4/15/2013,QBE North America,,113,Lincoln,Lincoln
 4/4/2013,First Student,,500,Omaha,Omaha
 1/22/2013,American Suzuki Motor Corporation,,1,,Butler County
-12/31/2013,Pacific Coast Feather Company,Closure,117,Wayne,Wayne
-12/31/2013,Lancaster County Community Mental Health Center,Layoff,70,Lincoln,Lincoln
 12/31/2013,"AMES Companies, Inc.",Closure,22,Falls City,Falls City
+12/31/2013,Lancaster County Community Mental Health Center,Layoff,70,Lincoln,Lincoln
+12/31/2013,Pacific Coast Feather Company,Closure,117,Wayne,Wayne
 12/21/2013,DressBarn,Closure,11,Nebraska City,Nebraska City
 12/13/2013,MBA Poultry,Layoff,9,Tecumseh,Tecumseh
 12/5/2013,CSG Systems International Inc.,Layoff,36,Omaha,Omaha
@@ -172,8 +172,8 @@ Date,Company,Type,Jobs Affected,City,Location
 11/8/2013,Leprino Foods,Closure,168,Ravenna,Ravenna
 11/4/2013,Hewlett Packard,Layoff,100,Omaha,Omaha - Farnam Dr.
 10/27/2013,Pet Sense,Closure,6,Columbus,Columbus
-10/22/2013,"OTR Logistics, Inc.",Closure,8,Grand Island,Grand Island
 10/22/2013,"Oakland Logistics Service, Inc.",Closure,319,Grand Island,Grand Island
+10/22/2013,"OTR Logistics, Inc.",Closure,8,Grand Island,Grand Island
 9/7/2013,Bubba Foods,Layoff,11,Hastings,Hastings
 8/31/2013,Pawnee Assisted Living Hotel,Closure,10,North Platte,North Platte
 8/30/2013,Bubba Foods,Layoff,11,Hastings,Hastings
@@ -257,18 +257,18 @@ Date,Company,Type,Jobs Affected,City,Location
 3/23/2015,"Skag-Way Discount Department Stores, Inc.",,134,Grand Island,Grand Island (State Street)
 3/11/2015,"United Airlines, Inc.",,76,Omaha,Omaha
 2/27/2015,Land O'Frost,,125,West Point,West Point
-12/31/2015,Lockheed Martin,Layoff,8,Bellevue,Bellevue
-12/31/2015,H & H Chevrolet LLC,Closure,153,Omaha,Omaha
 12/31/2015,H & H Motors Omaha dba H & H KIA,Closure,53,Omaha,Omaha
+12/31/2015,H & H Chevrolet LLC,Closure,153,Omaha,Omaha
+12/31/2015,Lockheed Martin,Layoff,8,Bellevue,Bellevue
 12/31/2015,Folders Express,Closure,57,Omaha,Omaha
 12/30/2015,"RICOH USA, Inc.",Closure,26,,Scottsbluff
 12/18/2015,Subway Pizza Express/Auntie Anne's Pretzels,Closure,5,Lincoln,Lincoln
 12/18/2015,Catholic Health Initiative,Layoff,60,Omaha,Omaha
 12/16/2015,Lincolnland Printing,Layoff,2,Lincoln,Lincoln
-12/5/2015,"Packers Sanitation Services, Inc.",Closure,,Columbus,Columbus
 12/5/2015,Sears Automotive Center,Closure,4,Grand Island,Grand Island
-12/4/2015,American Express Global Business Travel,Layoff,5,Omaha,Omaha
+12/5/2015,"Packers Sanitation Services, Inc.",Closure,,Columbus,Columbus
 12/4/2015,Cargill Meat Solutions Corporation,Layoff,75,Columbus,Columbus
+12/4/2015,American Express Global Business Travel,Layoff,5,Omaha,Omaha
 12/2/2015,The Knolls,Closure,2,Lincoln,Lincoln
 12/1/2015,Bag'n Save/No Frills,Closure,0,Omaha,Omaha
 11/27/2015,Omni Engineering,Layoff,30,Omaha,Omaha
@@ -277,8 +277,8 @@ Date,Company,Type,Jobs Affected,City,Location
 11/20/2015,Quality Service Integrity,Closure,58,Dakota City,Dakota City
 11/17/2015,IAC Acoustics,Closure,160,Lincoln,Lincoln
 11/16/2015,Lincoln Journal Star,Layoff,8,Lincoln,Lincoln
-11/14/2015,Office Depot,Closure,,Lincoln,Lincoln
 11/14/2015,Office Depot,Closure,,Omaha,Omaha
+11/14/2015,Office Depot,Closure,,Lincoln,Lincoln
 11/9/2015,Alter Trading Co,Layoff,3,Kearney,Kearney
 11/9/2015,Alter Trading Co,Layoff,1,Lincoln,Lincoln
 11/9/2015,Alter Trading Co,Layoff,1,Omaha,Omaha
@@ -289,8 +289,8 @@ Date,Company,Type,Jobs Affected,City,Location
 11/5/2015,The Knolls,Layoff,5,Lincoln,Lincoln
 11/5/2015,Hexagon Lincoln,Layoff,45,Lincoln,Lincoln
 11/2/2015,Omni Engineering,Layoff,5,Omaha,Omaha
-11/1/2015,Elliott Equipment Company,Layoff,5,,Omaha
 11/1/2015,Grossenburg Implement,Closure,14,Laurel,Laurel
+11/1/2015,Elliott Equipment Company,Layoff,5,,Omaha
 10/28/2015,IAC Acoustics,Layoff,30,Lincoln,Lincoln
 10/26/2015,Sears,Closure,,Scottsbluff,Scottsbluff
 10/23/2015,CNH America LLC,Layoff,49,Grand Island,Grand Island
@@ -302,14 +302,14 @@ Date,Company,Type,Jobs Affected,City,Location
 10/7/2015,Staples,Closure,13,Omaha,Omaha
 10/7/2015,Telecare Corporation,Closure,,Omaha,Omaha
 10/6/2015,Allmand Brothers,Layoff,23,Holdrege,Holdrege
-10/4/2015,The Knolls Restaurant,Closure,11,Lincoln,Lincoln
 10/4/2015,Apogee Call Center/Savers,Closure,296,Columbus,Columbus
+10/4/2015,The Knolls Restaurant,Closure,11,Lincoln,Lincoln
 10/2/2015,Preferred Sands of Genoa,Layoff,30,Genoa,Genoa
+10/1/2015,Preferred Resin of Genoa,Layoff,4,Genoa,Genoa
 10/1/2015,Chief Industries,Layoff,32,Grand Island,Grand Island
 10/1/2015,Golden Star,Closure,15,Ainsworth,Ainsworth
-10/1/2015,Preferred Resin of Genoa,Layoff,4,Genoa,Genoa
-9/30/2015,Main Street Market & Deli,Closure,8,Stapleton,Stapleton
 9/30/2015,Family Variety,Closure,,Bloomfield,Bloomfield
+9/30/2015,Main Street Market & Deli,Closure,8,Stapleton,Stapleton
 9/28/2015,Infocrossing,Layoff,4,Omaha,Omaha
 9/26/2015,A&A Bar,Closure,1,Western,Western
 9/25/2015,Election Systems & Software,Layoff,25,Omaha,Omaha
@@ -317,8 +317,8 @@ Date,Company,Type,Jobs Affected,City,Location
 9/23/2015,Cox's Drywall,Closure,1,North Platte,North Platte
 9/23/2015,Preferred Pump,Layoff,4,Grand Island,Grand Island
 9/23/2015,Cabela's Corporation,Layoff,,Sidney,Cabela's Store - Sidney
-9/18/2015,Allmand Brothers,Layoff,12,Holdrege,Holdrege
 9/18/2015,Depot Bar & Grill,Closure,,North Platte,North Platte
+9/18/2015,Allmand Brothers,Layoff,12,Holdrege,Holdrege
 9/18/2015,Medicine Shoppe Pharmacy,Closure,5,Beatrice,Beatrice
 9/16/2015,Union Pacific,Layoff,100+,Omaha,Omaha
 9/14/2015,Candy's Cupcakery,Closure,,North Platte,North Platte
@@ -346,19 +346,19 @@ Date,Company,Type,Jobs Affected,City,Location
 3/31/2015,Nationstar,Closure,114,Scottsbluff,Scottsbluff
 3/31/2015,Charter Communication,Layoff,5,Hastings,Hastings
 3/16/2015,Alco Discount Store,Closure,12,McCook,McCook
-2/28/2015,Alco Discount Store,Closure,15,Valentine,Valentine
 2/28/2015,Alco Discount Store,Closure,16,Albion,Albion
+2/28/2015,Alco Discount Store,Closure,15,Valentine,Valentine
 2/28/2015,Applause Video,Closure,10,Hastings,Hastings
 2/15/2015,Alco Discount Store,Closure,13,North Platte,North Platte
 2/15/2015,Alco Discount Store,Closure,13,O'Neill,O'Neill
-2/10/2015,Alco Discount Store,Closure,11,Ord,Ord
 2/10/2015,Alco Discount Store,Closure,13,Broken Bow,Broken Bow
 2/10/2015,Alco Discount Store,Closure,14,Cozad,Cozad
+2/10/2015,Alco Discount Store,Closure,11,Ord,Ord
 1/31/2015,Alco Discount Store,Closure,15,Gordon,Gordon
 1/31/2015,Alco Discount Store,Closure,0,Imperial,Imperial
 1/31/2015,Alco Discount Store,Closure,28,Ainsworth,Ainsworth
-1/30/2015,Alco Discount Store,Closure,13,West Point,West Point
 1/30/2015,Alco Discount Store,Closure,17,Ogallala,Ogallala
+1/30/2015,Alco Discount Store,Closure,13,West Point,West Point
 11/16/2016,Experience Works,,5,North Platte,North Platte
 11/7/2016,Verizon,,324,Lincoln,Lincoln
 10/10/2016,Hood Packaging Corporation,,25,Omaha,Omaha
@@ -453,26 +453,26 @@ Date,Company,Type,Jobs Affected,City,Location
 3/5/2016,Regional Recycling,Closure,0,North Platte,North Platte
 3/4/2016,Preferred Pump,Layoff,4,Grand Island,Grand Island
 2/28/2016,Barb's Hallmark,Closure,,Lincoln,Lincoln
-2/28/2016,Grandmother's Restaurant,Closure,,Lincoln,Lincoln
 2/28/2016,Hancock Fabrics,Closure,,Lincoln,Lincoln
+2/28/2016,Grandmother's Restaurant,Closure,,Lincoln,Lincoln
 2/27/2016,Henry's on South,Closure,,Lincoln,Lincoln
 2/25/2016,Progress Rail,Layoff,5,Gering,Gering
 2/1/2016,Abengoa,Closure,,Ravenna,Ravenna
 2/1/2016,Abengoa,Closure,,York,York
+1/31/2016,Schweser's,Closure,33,Fremont,Fremont
+1/31/2016,Convergys Corporation,Layoff,191,Omaha,Omaha
 1/31/2016,Ann Taylor Loft,Closure,,Lincoln,Lincoln
 1/31/2016,The Limited,Closure,,Lincoln,Lincoln
-1/31/2016,Schweser's,Closure,33,Fremont,Fremont
+1/31/2016,Piccolo Pete's,Closure,50,Omaha,Omaha
 1/31/2016,Sugar Bakers Gift Shop,Closure,,Omaha,Omaha
 1/31/2016,Sonic,Closure,,Omaha,Omaha
-1/31/2016,Piccolo Pete's,Closure,50,Omaha,Omaha
-1/31/2016,Convergys Corporation,Layoff,191,Omaha,Omaha
 1/11/2016,"Cargill, Inc.",Layoff,7,Blair,"Blair, NE"
 1/4/2016,Burkley Envelope Company,Closure,,Wahoo,Wahoo
 1/3/2016,Burger King,Closure,,Lincoln,Lincoln
 1/1/2016,Shopko xxxx,Closure,265,Omaha,Omaha Distribution Center
-1/1/2016,Schweser's,Closure,10,Lincoln,Lincoln
 1/1/2016,Schweser's,Closure,12,Columbus,Columbus
 1/1/2016,Schweser's,Closure,8,Beatrice,Beatrice
+1/1/2016,Schweser's,Closure,10,Lincoln,Lincoln
 1/1/2016,Shopko Corporate Office,Closure,265,Omaha,Omaha - Shopko Distribution Center
 12/19/2017,CHS,,63,South Sioux City,South Sioux City
 8/8/2017,RHD,,160,Omaha,Omaha
@@ -483,9 +483,9 @@ Date,Company,Type,Jobs Affected,City,Location
 4/4/2017,Dollar Express,,7,Omaha,Omaha
 3/14/2017,Gordmans,,450,Omaha,Headquarter
 12/31/2017,Progress Rail,Closure,39,Gering,Gering
+12/31/2017,Good Samaritan Society,Closure,50,Alliance,Alliance
 12/31/2017,Reicherts Jewelry,Closure,3,Ogallala,Ogallala
 12/31/2017,Eagle Grocery,Closure,5,Eagle,Eagle
-12/31/2017,Good Samaritan Society,Closure,50,Alliance,Alliance
 12/29/2017,Stagecoach Mall,Closure,5,Fairbury,Fairbury
 12/29/2017,Union Tank Car,Closure,12,Omaha,Omaha
 12/29/2017,Black Hills Energy,Layoff,5,Lincoln,Lincoln
@@ -527,20 +527,20 @@ Date,Company,Type,Jobs Affected,City,Location
 7/24/2017,Marshfield Food Safety Services,Closure,18,Schuyler,Schuyler
 7/19/2017,Black Hills Energy,Layoff,35,Papillion,Papillion
 7/16/2017,Prengers,Closure,25,Norfolk,Norfolk
-7/15/2017,Game Cycle,Closure,1,Beatrice,Beatrice
 7/15/2017,Doc's Place,Closure,,Lincoln,Lincoln
+7/15/2017,Game Cycle,Closure,1,Beatrice,Beatrice
 7/11/2017,Ploughshare,Closure,,Lincoln,Lincoln
 7/10/2017,Tiger Town Food and Floral Center,Closure,,Osmond,Osmond
 7/1/2017,Good Air Home Medical Equipment,Closure,6,Ogallala,Ogallala
-6/30/2017,Integrated Life Choices,Layoff,8,Beatrice,Beatrice
 6/30/2017,Nebraska Bull Service,Layoff,14,McCook,McCook
+6/30/2017,Integrated Life Choices,Layoff,8,Beatrice,Beatrice
 6/23/2017,"MWD Steel Fabrication, LLC",Closure,20,Lincoln,Lincoln
 6/16/2017,"Dickey's Barbeque Restaurants, Inc",Closure,,Lincoln,Lincoln
 5/22/2017,TCBY,Closure,,Lincoln,O Street - Lincoln
 5/1/2017,Speak Out,Closure,4,Scottsbluff,P.O. Box 1066
 4/28/2017,Family Christian,Closure,,Lincoln,Lincoln
-4/24/2017,Good Samaritan Society,Layoff,40,Wymore,Wymore
 4/24/2017,Da Buzz,Closure,4,North Platte,North Platte
+4/24/2017,Good Samaritan Society,Layoff,40,Wymore,Wymore
 4/21/2017,Ragazzi's Pizza,Closure,,Ralston,Ralston
 4/17/2017,Gothenburg Medical Arts,Closure,4,Gothernburg,Gothenburg
 4/17/2017,Rue 21,Closure,14,Gretna,Gretna
@@ -550,8 +550,8 @@ Date,Company,Type,Jobs Affected,City,Location
 4/7/2017,Omaha Truck and Trailer,Layoff,2,Bellevue,Omaha
 4/1/2017,Nathan Detroit's,Closure,,Grand Island,Grand Island
 3/31/2017,Envision,Closure,15,Norfolk,Norfolk
-3/31/2017,Big Apple Bagels,Closure,3,Norfolk,Norfolk
 3/31/2017,Resource Real Estate Management,Layoff,6,Omaha,Omaha
+3/31/2017,Big Apple Bagels,Closure,3,Norfolk,Norfolk
 3/28/2017,Casey's,Closure,15,West Point,West Point
 3/27/2017,Vanity,Closure,7,Scottsbluff,Scottsbluff
 3/27/2017,Vanity,Closure,5,Omaha,Omaha - California Street
@@ -577,17 +577,17 @@ Date,Company,Type,Jobs Affected,City,Location
 3/10/2017,Capriottis,Closure,0,Lincoln,S. 11th Street
 3/9/2017,Nebraska Book Company,Layoff,40,Lincoln,Lincoln
 3/1/2017,Titan Machinery,Layoff,,Broken Bow,Broken Bow
-2/28/2017,Nebraska State Patrol-Communications Center,Layoff,9,Lincoln,Lincoln
 2/28/2017,City of Fairbury,Closure,,Fairbury,Fairbury
+2/28/2017,Nebraska State Patrol-Communications Center,Layoff,9,Lincoln,Lincoln
 2/27/2017,PureRed Integrated Marketing,Layoff,3,Norfolk,Norfolk
 2/23/2017,Creighton University,Layoff,6,Omaha,Omaha
 2/22/2017,Amy's Hallmark,Closure,9,Fremont,Fremont
 2/21/2017,Lutheran Family Services,Layoff,8,Omaha,Omaha
 2/20/2017,Cleaver Brooks,Layoff,2,Lincoln,Lincoln
 2/17/2017,Cleaver Brooks,Layoff,23,Lincoln,Lincoln
+2/16/2017,First National Bank,Layoff,65,Omaha,Omaha
 2/16/2017,Sunmart,Closure,25,Ogalalla,Ogalalla
 2/16/2017,Sunmart,Closure,25,Ogallala,Ogallala
-2/16/2017,First National Bank,Layoff,65,Omaha,Omaha
 2/15/2017,R Way Mental Health Rehabilitation,Closure,25,Wayne,Wayne
 2/14/2017,Taco Inn,Closure,16,Lincoln,Lincoln
 2/3/2017,Sunflower Marketing,Closure,14,Geneva,"Geneva, NE"
@@ -595,8 +595,8 @@ Date,Company,Type,Jobs Affected,City,Location
 1/31/2017,Bentley Fine Jewelry and Repair,Closure,1,Scottsbluff,Scottsbluff
 1/28/2017,Pendleton Woolen Mills,Closure,4,Nebraska City,Nebraska City
 1/28/2017,Braeda,Closure,14,Lincoln,Lincoln
-1/27/2017,NCI Building Systems,Closure,30,Omaha,Omaha
 1/27/2017,Midwest Medical Transport,Closure,5,North Platte,North Platte
+1/27/2017,NCI Building Systems,Closure,30,Omaha,Omaha
 1/27/2017,Catholic Charities,Closure,28,Omaha,Omaha
 1/26/2017,Simply Mac,Closure,6,Lincoln,Gateway Mall
 1/14/2017,Zoup,Closure,8,Lincoln,Lincoln
@@ -664,16 +664,16 @@ Date,Company,Type,Jobs Affected,City,Location
 7/27/2018,Brightstar,Closure,53,Omaha,Omaha
 7/20/2018,Staples,Closure,12,North Platte,North Platte
 7/5/2018,Serendipity,Closure,1,Norfolk,Norfolk
+7/2/2018,MB Financial Bank,Layoff,31,Omaha,Omaha
 7/2/2018,Little Blessings,Closure,13,Omaha,Omaha
 7/2/2018,Little Blessings,Closure,7,Lincoln,Lincoln
-7/2/2018,MB Financial Bank,Layoff,31,Omaha,Omaha
-6/30/2018,Shopko xxxx,Closure,12,Crete,Crete
-6/30/2018,Shopko Corporate Office,Closure,12,Crete,Crete
 6/30/2018,Akin's Natural Foods,Closure,10,Lincoln,Lincoln
 6/30/2018,Adams County Senior Services,Closure,9,Hastings,Hastings
-6/30/2018,Building Healthy Futures,Closure,5,Omaha,Omaha
 6/30/2018,Randolph Car Wash,Closure,20,Lincoln,Lincoln
+6/30/2018,Building Healthy Futures,Closure,5,Omaha,Omaha
 6/30/2018,Joseph's College,Closure,2,North Platte,North Platte
+6/30/2018,Shopko xxxx,Closure,12,Crete,Crete
+6/30/2018,Shopko Corporate Office,Closure,12,Crete,Crete
 6/29/2018,Maximus,Closure,41,Omaha,Omaha
 6/27/2018,Toys-R-Us,Closure,30,Omaha,Omaha - Oakview Mall
 6/27/2018,Toys-R-Us,Closure,30,Lincoln,Lincoln
@@ -686,9 +686,9 @@ Date,Company,Type,Jobs Affected,City,Location
 6/15/2018,Good Samaritan Assisted Living,Closure,7,Scribner,Scribner
 6/14/2018,Applebee's,Closure,5,Hastings,Hastings
 5/31/2018,The Minuteman Hotel,Layoff,4,Lexington,Lexington
-5/31/2018,Roadrunner Temperature Controlled,Layoff,28,Omaha,Omaha
 5/31/2018,Convergys Corporation,Closure,123,Omaha,Omaha
 5/31/2018,Grace University,Closure,135,Omaha,Omaha
+5/31/2018,Roadrunner Temperature Controlled,Layoff,28,Omaha,Omaha
 5/16/2018,Wells Fargo,Closure,18,Grand Island,Grand Island
 5/10/2018,Cenveo Corporation,Layoff,52,Omaha,Omaha
 5/4/2018,Streck,Layoff,9,La Vista,La Vista
@@ -704,9 +704,9 @@ Date,Company,Type,Jobs Affected,City,Location
 4/6/2018,C & C Specialty Market,Closure,3,Beatrice,Beatrice
 4/4/2018,PCT Livestock,Closure,2,St. Libory,St. Libory
 4/3/2018,Direct Check,Closure,1,McCook,McCook
+4/2/2018,Eagle Distributing,Layoff,2,Norfolk,Norfolk
 4/2/2018,Corelink Administrative Solutions,Layoff,14,Fargo,HQ
 4/2/2018,Election Systems & Software,Layoff,1,Omaha,Omaha
-4/2/2018,Eagle Distributing,Layoff,2,Norfolk,Norfolk
 4/1/2018,Great Plains Health,Layoff,7,North Platte,North Platte
 3/31/2018,Defy Gravity Trampoline Park,Closure,,La Vista,La Vista
 3/29/2018,Nifast,Closure,4,Beatrice,Beatrice
@@ -722,8 +722,8 @@ Date,Company,Type,Jobs Affected,City,Location
 2/26/2018,Hickory Road BBQ,Closure,10,Lincoln,Lincoln
 2/25/2018,Taco Bell,Closure,18,North Platte,North Platte
 2/20/2018,Omaha World Herald,Layoff,24,Bellevue,Bellevue
-2/15/2018,Chocolatier Blue,Closure,1,Lincoln,Lincoln
 2/15/2018,Lot 2 Restaurant and Wine Bar,Closure,15,Omaha,Omaha
+2/15/2018,Chocolatier Blue,Closure,1,Lincoln,Lincoln
 2/14/2018,Strategic Health Solutions,Closure,41,Omaha,Omaha
 2/11/2018,Village Inn,Closure,32,Lincoln,Lincoln
 2/8/2018,"Heartland Products-Hog Slat, Inc.",Layoff,5,Columbus,Columbus
