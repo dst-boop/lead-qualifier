@@ -8,7 +8,7 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x7fcc84f634c0> found
+<function system at 0x7f0cda31d300> found
 scrape_state verify: True
 Site init SSL verification status: True
 scraped 31 of 41 jurisdictions
@@ -17,7 +17,7 @@ failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   FL  IndexError: list index out of range
   GA  ConnectTimeout: HTTPSConnectionPool(host='www.tcsg.edu', port=443): Max retries exceeded with url: /warn-public-view/entry/83150/ (Caused by ConnectTimeoutError(<HTTPSConnection(host='www.tcsg.edu', port=443) at 0x7f
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#43272f2a316d342c3128252c3120266d272635262f2c33032b2234222a2a6d242c35': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#43272f2a316d34
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#4e2a22273c6039213c2528213c2d2b602a2b382b22213e0e262f392f272760292138': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#4e2a22273c6039
   ID  PdfminerException: No /Root object! - Is this really a PDF?
   LA  TypeError: write() argument must be str, not None
   MI  KeyError: 'Site address'
