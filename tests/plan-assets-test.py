@@ -35,7 +35,7 @@ F5500 = (
 
 base = P.parse_5500_csv(F5500)
 
-OPTIONAL = {"net_assets", "balances", "sep_future", "in_service", "distributed"}
+OPTIONAL = {"welfare_type", "net_assets", "balances", "sep_future", "in_service", "distributed"}
 ck("the real 5500 columns all map except assets and the finer refinements",
    set(base["unmapped"]) - OPTIONAL == {"assets"}, base["unmapped"])
 ck("  ...sponsor, state, participants and plan name are found",

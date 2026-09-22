@@ -115,7 +115,7 @@ ck("  ...with only the optional ones absent",
    # already carries assets needs no join back to a schedule. The finer
    # pricing fields (net assets, balances, codes) are refinements with
    # fallbacks, so a file without them still prices.
-   set(pl["unmapped"]) <= {"plan_type", "plan_year", "ein", "plan_name", "ack_id",
+   set(pl["unmapped"]) <= {"plan_type", "welfare_type", "plan_year", "ein", "plan_name", "ack_id",
                            "net_assets", "balances", "sep_future", "in_service",
                            "distributed"},
    pl["unmapped"])
@@ -426,14 +426,16 @@ ck("  ...and only for Maryland — other feeds are untouched",
 # Only defined-contribution filings price a rollover. A welfare plan's
 # "participants" hold no balances; a DB pension has no accounts.
 _CODED = ("SPONS_DFE_EIN,SPONSOR_DFE_NAME,SPONS_DFE_MAIL_US_STATE,"
-          "TYPE_PENSION_BNFT_CODE,TOT_PARTCP_BOY_CNT,PARTCP_ACCOUNT_BAL_CNT,"
+          "TYPE_PENSION_BNFT_CODE,TYPE_WELFARE_BNFT_CODE,"
+          "TOT_PARTCP_BOY_CNT,PARTCP_ACCOUNT_BAL_CNT,"
           "TOT_ASSETS_EOY_AMT,NET_ASSETS_EOY_AMT,RTD_SEP_PARTCP_FUT_CNT,"
           "ALL_PLAN_AST_DISTRIB_IND\n"
-          "111111111,DELTA FABRICATION LLC,NJ,2J,900,600,90000000,84000000,45,\n"
-          "222222222,DELTA HEALTH TRUST,NJ,4A,5000,,300000000,,,\n"
-          "333333333,GRANITE DB PENSION CO,NJ,1A,1200,,500000000,,,\n"
-          "444444444,EMPTY SHELL CORP,NJ,2J,300,200,20000000,19000000,,1\n"
-          "555555555,NO CODE FILER INC,NJ,,400,,30000000,,,\n")
+          "111111111,DELTA FABRICATION LLC,NJ,2J,,900,600,90000000,84000000,45,\n"
+          "222222222,DELTA HEALTH TRUST,NJ,,4A,5000,,300000000,,,\n"
+          "333333333,GRANITE DB PENSION CO,NJ,1A,,1200,,500000000,,,\n"
+          "444444444,EMPTY SHELL CORP,NJ,2J,,300,200,20000000,19000000,,1\n"
+          "555555555,NO CODE FILER INC,NJ,,,400,,30000000,,,\n"
+          "666666666,ZERO HOLDERS LLC,NJ,2J,,500,0,10000000,9000000,,\n")
 _pl = P.parse_5500_csv(_CODED)["plans"]
 ck("a welfare filing is not priced as a 401(k)",
    P.norm_company("DELTA HEALTH TRUST") not in _pl, sorted(_pl))
@@ -443,6 +445,11 @@ ck("  ...nor a plan whose assets were fully distributed",
    P.norm_company("EMPTY SHELL CORP") not in _pl)
 ck("a filer with no code at all is kept — unknown is not a disqualifier",
    P.norm_company("NO CODE FILER INC") in _pl)
+ck("a welfare-only filer is excluded via its OWN column — blank pension is not unknown here",
+   P.norm_company("DELTA HEALTH TRUST") not in _pl)
+_z = _pl[P.norm_company("ZERO HOLDERS LLC")]
+ck("a reported zero account holders yields no average — never the raw headcount",
+   _z["avg_balance"] is None and _z["balances"] == 0, _z["avg_balance"])
 _d = _pl[P.norm_company("DELTA FABRICATION LLC")]
 ck("the average is net assets over participants WITH balances",
    _d["avg_balance"] == round(84000000 / 600), _d["avg_balance"])
@@ -456,6 +463,21 @@ _plans2 = {"x": {"sponsor": "X", "ack_id": "A1", "assets": None,
 P.attach_assets(_plans2, {"A1": 64000000})
 ck("attach_assets divides by participants with balances",
    _plans2["x"]["avg_balance"] == 100000, _plans2["x"]["avg_balance"])
+_plans3 = {"z": {"sponsor": "Z", "ack_id": "A2", "assets": None,
+                 "participants": 800, "balances": 0, "avg_balance": None}}
+P.attach_assets(_plans3, {"A2": 5000000})
+ck("  ...and a reported zero stays zero there too",
+   _plans3["z"]["avg_balance"] is None, _plans3["z"]["avg_balance"])
+
+# A schedule row with a blank net value prices from its own total — the
+# net-over-gross preference is per row, not per file.
+_SCH = ("ACK_ID,TOT_ASSETS_EOY_AMT,NET_ASSETS_EOY_AMT\n"
+        "K1,50000000,47000000\n"
+        "K2,12000000,\n")
+_sa = P.parse_schedule_assets(_SCH)["assets"]
+ck("net assets win where present", _sa["K1"] == 47000000, _sa.get("K1"))
+ck("  ...but a blank net falls back to that row's total, not to nothing",
+   _sa["K2"] == 12000000, _sa.get("K2"))
 
 # Money in motion carries the separated-with-balances count outward.
 _o2 = P.build_opportunities(

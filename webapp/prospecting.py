@@ -372,7 +372,10 @@ PLAN_ALIASES = {
     "ack_id": ["ack id"],
     "plan_year": ["form tax prd", "tax prd", "plan year begin date",
                   "form plan year begin date"],
-    "plan_type": ["type pension bnft code", "type welfare bnft code", "pension code"],
+    "plan_type": ["type pension bnft code", "pension code"],
+    # Separate column on the real export: a welfare-only filing has a BLANK
+    # pension code and its 4x codes here, so both must be read (Codex review).
+    "welfare_type": ["type welfare bnft code"],
     # The fields the ProspectPilot plan-catalog methodology showed matter.
     # Net assets and participants-with-balances are the honest average: gross
     # assets include liabilities, and the BOY participant count includes
@@ -427,6 +430,11 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
         if idx.get("plan_type") is not None and codes \
                 and not any(c.startswith("2") for c in codes):
             continue
+        # No pension code but welfare codes present: a welfare-only filing
+        # (health, life, disability) — nobody in it holds a plan balance.
+        # Both columns blank stays kept: unknown is still not a disqualifier.
+        if not codes and re.findall(r"[1-4][A-Z]", cell(row, "welfare_type").upper()):
+            continue
         # A plan whose assets were fully distributed is an empty shell — its
         # last reported balance is money already gone.
         if cell(row, "distributed") == "1":
@@ -439,7 +447,9 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
         # a balance. Each side falls back to the cruder figure when the finer
         # one is absent, which is exactly today's behavior on older files.
         avg_assets = net if net is not None else assets
-        denom = balances or participants
+        # An explicitly reported zero is an answer — a plan with no account
+        # holders must not borrow the raw headcount as its denominator.
+        denom = balances if balances is not None else participants
         prev = plans.get(key)
         # One sponsor can file several plans. Keep the largest — it is the one
         # a rollover would come from, and summing would double-count.
@@ -484,30 +494,38 @@ def parse_schedule_assets(text: str) -> dict:
     except StopIteration:
         return {"assets": {}, "column": None, "rows": 0, "kept": 0}
     ack = pick_column(headers, ["ack id"])
-    col = None
-    for alias in SCHEDULE_ASSET_ALIASES:      # in preference order, not header order
-        col = pick_column(headers, [alias])
-        if col is not None:
-            break
-    if ack is None or col is None:
-        return {"assets": {}, "column": headers[col] if col is not None else None,
+    # All candidate columns, in preference order — the fallback has to work
+    # per ROW, not per file: a filing with a blank net value but a populated
+    # total must price from its total, not be skipped (Codex review).
+    cols: list[int] = []
+    for alias in SCHEDULE_ASSET_ALIASES:
+        c = pick_column(headers, [alias])
+        if c is not None and c not in cols:
+            cols.append(c)
+    if ack is None or not cols:
+        return {"assets": {}, "column": headers[cols[0]] if cols else None,
                 "ack_column": headers[ack] if ack is not None else None,
                 "rows": 0, "kept": 0,
                 "note": "Schedule file has no ACK_ID or no assets column."}
     out, n = {}, 0
     for row in reader:
         n += 1
-        if ack >= len(row) or col >= len(row):
+        if ack >= len(row):
             continue
         key = row[ack].strip()
-        amt = to_money(row[col].strip())
+        amt = None
+        for c in cols:
+            if c < len(row):
+                amt = to_money(row[c].strip())
+                if amt is not None:
+                    break
         if not key or amt is None:
             continue
         # One filing can appear more than once across amended rows; the largest
         # is the one that matches the plan as filed.
         if key not in out or amt > out[key]:
             out[key] = amt
-    return {"assets": out, "column": headers[col], "ack_column": headers[ack],
+    return {"assets": out, "column": headers[cols[0]], "ack_column": headers[ack],
             "rows": n, "kept": len(out)}
 
 
@@ -526,8 +544,9 @@ def attach_assets(plans: dict, assets_by_ack: dict) -> dict:
             continue
         p["assets"] = amt
         # Participants with balances beats the raw headcount as a denominator,
-        # for the same reason as in parse_5500_csv.
-        pc = p.get("balances") or p.get("participants")
+        # for the same reason as in parse_5500_csv — and a reported zero is an
+        # answer, never a reason to fall back to the headcount.
+        pc = p.get("balances") if p.get("balances") is not None else p.get("participants")
         p["avg_balance"] = round(amt / pc) if pc else None
         filled += 1
     return {"filled": filled, "sponsors": len(plans)}
