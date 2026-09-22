@@ -112,8 +112,12 @@ ck("every load-bearing 5500 column is mapped",
    REQUIRED_PLAN.isdisjoint(pl["unmapped"]), pl["unmapped"])
 ck("  ...with only the optional ones absent",
    # ack_id is optional here for the same reason assets is not: a file that
-   # already carries assets needs no join back to a schedule.
-   set(pl["unmapped"]) <= {"plan_type", "plan_year", "ein", "plan_name", "ack_id"},
+   # already carries assets needs no join back to a schedule. The finer
+   # pricing fields (net assets, balances, codes) are refinements with
+   # fallbacks, so a file without them still prices.
+   set(pl["unmapped"]) <= {"plan_type", "plan_year", "ein", "plan_name", "ack_id",
+                           "net_assets", "balances", "sep_future", "in_service",
+                           "distributed"},
    pl["unmapped"])
 
 # zipped, the way the DOL ships it
@@ -387,6 +391,78 @@ ck("  ...but a different headcount on the same day is kept",
    sum(1 for x in _o if x["employer_key"] == "recent") == 2, _k)
 ck("the archive stays reachable when the window is off",
    any(x["employer_key"] == "old" for x in P.build_opportunities(_EV, {}, today=_T, max_age_days=None)))
+
+
+# --- what the ProspectPilot review taught the parsers ------------------------
+# New York's currently published feed. The old aliases matched none of these
+# headers, so the home market parsed as zero events.
+_NY = ("Business Legal Name,Impacted Site Address,Impacted Site County,"
+       "Number of Affected Workers,Date of WARN Notice,Date Layoff/Closure Starts\n"
+       'Alray Precision LLC,"12 Mill Rd, Utica",Oneida,214,2026-07-01,2026-08-30\n')
+_g = P.parse_warn_csv(_NY, default_state="NY")
+ck("NY's current headers parse", len(_g["events"]) == 1, _g["unmapped"])
+_e = _g["events"][0]
+ck("  ...employer from Business Legal Name", _e["employer"] == "Alray Precision LLC")
+ck("  ...headcount from Number of Affected Workers", _e["workers"] == 214)
+ck("  ...both dates land in their own fields",
+   _e["notice_date"] == "2026-07-01" and _e["effective_date"] == "2026-08-30",
+   (_e.get("notice_date"), _e.get("effective_date")))
+
+# Maryland publishes no header row at all — eight columns, date first.
+_MD = ('10/03/2025,3345,Chesapeake Forge Inc,"400 Key Hwy, Baltimore",'
+       "Baltimore City,86,12/01/2025,Closure\n"
+       '11/14/2025,4411,Harbor Point Motors,"1 Dock St, Annapolis",'
+       "Anne Arundel,42,01/15/2026,Layoff\n")
+_g = P.parse_warn_csv(_MD, default_state="MD")
+ck("Maryland's headerless log parses", len(_g["events"]) == 2,
+   [e.get("employer") for e in _g["events"]])
+ck("  ...with employer, count and both dates",
+   _g["events"][0]["employer"] == "Chesapeake Forge Inc"
+   and _g["events"][0]["workers"] == 86
+   and _g["events"][0]["effective_date"] == "2025-12-01")
+ck("  ...and only for Maryland — other feeds are untouched",
+   len(P.parse_warn_csv(_MD, default_state="CA")["events"]) == 0)
+
+# Only defined-contribution filings price a rollover. A welfare plan's
+# "participants" hold no balances; a DB pension has no accounts.
+_CODED = ("SPONS_DFE_EIN,SPONSOR_DFE_NAME,SPONS_DFE_MAIL_US_STATE,"
+          "TYPE_PENSION_BNFT_CODE,TOT_PARTCP_BOY_CNT,PARTCP_ACCOUNT_BAL_CNT,"
+          "TOT_ASSETS_EOY_AMT,NET_ASSETS_EOY_AMT,RTD_SEP_PARTCP_FUT_CNT,"
+          "ALL_PLAN_AST_DISTRIB_IND\n"
+          "111111111,DELTA FABRICATION LLC,NJ,2J,900,600,90000000,84000000,45,\n"
+          "222222222,DELTA HEALTH TRUST,NJ,4A,5000,,300000000,,,\n"
+          "333333333,GRANITE DB PENSION CO,NJ,1A,1200,,500000000,,,\n"
+          "444444444,EMPTY SHELL CORP,NJ,2J,300,200,20000000,19000000,,1\n"
+          "555555555,NO CODE FILER INC,NJ,,400,,30000000,,,\n")
+_pl = P.parse_5500_csv(_CODED)["plans"]
+ck("a welfare filing is not priced as a 401(k)",
+   P.norm_company("DELTA HEALTH TRUST") not in _pl, sorted(_pl))
+ck("  ...nor is a defined-benefit pension",
+   P.norm_company("GRANITE DB PENSION CO") not in _pl)
+ck("  ...nor a plan whose assets were fully distributed",
+   P.norm_company("EMPTY SHELL CORP") not in _pl)
+ck("a filer with no code at all is kept — unknown is not a disqualifier",
+   P.norm_company("NO CODE FILER INC") in _pl)
+_d = _pl[P.norm_company("DELTA FABRICATION LLC")]
+ck("the average is net assets over participants WITH balances",
+   _d["avg_balance"] == round(84000000 / 600), _d["avg_balance"])
+ck("  ...not gross assets over the raw headcount",
+   _d["avg_balance"] != round(90000000 / 900))
+ck("  ...and the separated-with-balances count rides along", _d["sep_future"] == 45)
+
+# The schedule join uses the finer denominator too.
+_plans2 = {"x": {"sponsor": "X", "ack_id": "A1", "assets": None,
+                 "participants": 1000, "balances": 640, "avg_balance": None}}
+P.attach_assets(_plans2, {"A1": 64000000})
+ck("attach_assets divides by participants with balances",
+   _plans2["x"]["avg_balance"] == 100000, _plans2["x"]["avg_balance"])
+
+# Money in motion carries the separated-with-balances count outward.
+_o2 = P.build_opportunities(
+    [{"employer_key": "delta fabrication", "company": "Delta Fabrication",
+      "state": "NJ", "workers": 50, "effective_date": "2026-08-01"}],
+    _pl, today=date(2026, 9, 1))
+ck("opportunities expose plan_sep_future", _o2[0]["plan_sep_future"] == 45, _o2[0].get("plan_sep_future"))
 
 print(("\nFAILURES: %d of %d" % (fail, TOTAL[0])) if fail else "\nall %d checks passed" % TOTAL[0])
 sys.exit(1 if fail else 0)

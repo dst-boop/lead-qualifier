@@ -35,8 +35,9 @@ F5500 = (
 
 base = P.parse_5500_csv(F5500)
 
-ck("the real 5500 columns all map except assets",
-   set(base["unmapped"]) == {"assets"}, base["unmapped"])
+OPTIONAL = {"net_assets", "balances", "sep_future", "in_service", "distributed"}
+ck("the real 5500 columns all map except assets and the finer refinements",
+   set(base["unmapped"]) - OPTIONAL == {"assets"}, base["unmapped"])
 ck("  ...sponsor, state, participants and plan name are found",
    base["mapped"]["name"] == "SPONSOR_DFE_NAME"
    and base["mapped"]["state"] == "SPONS_DFE_MAIL_US_STATE"
@@ -124,7 +125,7 @@ SF = (
 sf = P.parse_5500_csv(SF)
 sfp = sf["plans"].get(P.norm_company("Preferred Construction, LLC"))
 ck("the SF-prefixed columns map without special-casing",
-   sfp is not None and set(sf["unmapped"]) <= {"plan_type"}, sf["unmapped"])
+   sfp is not None and set(sf["unmapped"]) - OPTIONAL <= {"plan_type"}, sf["unmapped"])
 ck("  ...and the SF prices itself: assets inline, average computed",
    sfp and sfp["assets"] == 1740000 and sfp["participants"] == 9
    and sfp["avg_balance"] == 193333, sfp)

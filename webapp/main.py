@@ -4893,8 +4893,8 @@ async def employer_plans(body: PlanRequest, request: Request):
         # avg_balance is computed by the parser, so the WARN pricing and this
         # lookup cannot drift into two different definitions of the same number.
         out[name] = {k: p.get(k) for k in
-                     ("plan_name", "participants", "assets", "avg_balance", "sponsor",
-                      "state", "plan_year")}
+                     ("plan_name", "participants", "balances", "assets", "avg_balance",
+                      "sponsor", "state", "plan_year", "sep_future", "in_service")}
     return {"plans": out, "asked": len(body.employers or []), "matched": len(out)}
 
 

@@ -2625,3 +2625,37 @@ fallback chain in `_warn_feeds_value()` is now: value saved in the app →
 configured; the settings field is an override for firms with their own feed
 list, and the button now reads "Back to the built-in feed" and clears the
 override rather than pasting a URL the app already knows.
+
+## 49. Best of both: what ProspectPilot's review taught this app
+
+**2026-09-22.** The parallel ProspectPilot Research Lab build
+(dst-boop/prospectpilot.io) reviewed the same public data this app consumes
+and found real defects in it. Its infrastructure choices are its own (§ see
+the comparison in the PR), but three findings were correctness bugs here and
+are now ported:
+
+1. **WARN aliases missed the home market.** New York currently publishes
+"Business Legal Name" / "Date of WARN Notice" / "Date Layoff/Closure
+Starts" — none matched, so NY parsed as zero events. Maryland publishes no
+header row at all. The alias table now carries the states' verified current
+headers, and parse_warn_csv injects Maryland's eight known columns when the
+feed is MD-shaped.
+
+2. **The 5500 average priced the wrong plans with the wrong division.**
+Welfare filings and defined-benefit pensions were priced as if their
+participants held 401(k) balances, and the average divided gross assets by
+the raw beginning-of-year headcount. Now: only defined-contribution filings
+(pension code 2x) price when the code column exists (unknown codes are
+kept, never disqualified), fully-distributed shells are dropped, and the
+average is net assets over participants **with** balances, falling back to
+the cruder figures only when the finer columns are absent.
+
+3. **Two fields worth carrying:** RTD_SEP_PARTCP_FUT_CNT (separated
+employees still holding balances — money in motion before any WARN notice,
+now on every opportunity row as plan_sep_future) and
+SF_IN_SERVICE_DISTRIB_IND (the small filer says whether in-service
+distributions exist).
+
+Not ported, by choice: the PostgreSQL job queue, the cost ledger, and the
+five-gate evidence model are ProspectPilot's architecture, not patches.
+Which app owns which job is a decision recorded with the operator.
