@@ -144,20 +144,36 @@ def to_date(v) -> Optional[str]:
 # importing blanks.
 
 WARN_ALIASES = {
+    # The extra names here were verified against the states' currently
+    # published feeds by the ProspectPilot WARN review (2026-09-05): New York
+    # now files "Business Legal Name" / "Date of WARN Notice" / "Date
+    # Layoff/Closure Starts", none of which the older generic aliases hit —
+    # so NY, the practice's home market, parsed as nothing at all.
     "employer": ["company", "employer", "company name", "employer name",
-                 "business name", "organization", "name of company"],
-    "city": ["city", "location", "city name", "site city"],
+                 "business name", "organization", "name of company",
+                 "business legal name", "organization name", "affected company",
+                 "location name"],
+    "city": ["city", "location", "city name", "site city", "location city"],
     "state": ["state", "st", "state code"],
-    "county": ["county", "region", "area"],
+    "county": ["county", "region", "area", "impacted site county"],
     "workers": ["number of employees affected", "employees affected", "affected employees",
                 "number affected", "workers affected", "number of workers",
-                "employees", "workers", "total employees", "impacted workers"],
+                "employees", "workers", "total employees", "impacted workers",
+                "number of affected workers", "number of impacted workers",
+                "jobs affected", "affected workers", "num employees",
+                "laid off", "no of employees"],
     "effective_date": ["layoff date", "effective date", "separation date",
                        "layoff begin date", "closing date", "date of layoff",
-                       "effective layoff date", "planned starting date"],
+                       "effective layoff date", "planned starting date",
+                       "date layoff closure starts", "layoff start date",
+                       "impact date", "date of impact", "expected layoff",
+                       "closing dates", "layoff dates", "date effective"],
     "notice_date": ["notice date", "received date", "date received", "warn date",
-                    "date of notice", "notice received"],
-    "reason": ["reason", "closure or layoff", "type", "notice type", "layoff type"],
+                    "date of notice", "notice received",
+                    "date of warn notice", "warn document date",
+                    "initial report date", "notification date"],
+    "reason": ["reason", "closure or layoff", "type", "notice type", "layoff type",
+               "reason for layoff closure", "warn type", "closure type"],
 }
 
 # Feeds default to nothing: a wrong guessed URL that silently 404s is worse than
@@ -233,6 +249,14 @@ def date_from_prose(text: str) -> tuple:
 def parse_warn_csv(text: str, default_state: str = "") -> dict:
     """WARN rows out of a CSV, plus what the matcher did with the columns."""
     rows = list(csv.reader(io.StringIO(text)))
+    # Maryland publishes its log with no header row at all — eight columns,
+    # date first. Verified against the state's own page by the ProspectPilot
+    # WARN review; without this the whole feed reads as one garbled header.
+    if (default_state.upper() == "MD" and rows and len(rows[0]) == 8
+            and re.match(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{1,2}-\d{1,2}$",
+                         (rows[0][0] or "").strip())):
+        rows.insert(0, ["Notice Date", "NAICS", "Company", "Location",
+                        "County", "Employees Affected", "Effective Date", "Type"])
     if len(rows) < 2:
         return {"events": [], "headers": rows[0] if rows else [], "mapped": {}, "unmapped": []}
     headers = [h.strip() for h in rows[0]]
@@ -348,7 +372,21 @@ PLAN_ALIASES = {
     "ack_id": ["ack id"],
     "plan_year": ["form tax prd", "tax prd", "plan year begin date",
                   "form plan year begin date"],
-    "plan_type": ["type pension bnft code", "type welfare bnft code", "pension code"],
+    "plan_type": ["type pension bnft code", "pension code"],
+    # Separate column on the real export: a welfare-only filing has a BLANK
+    # pension code and its 4x codes here, so both must be read (Codex review).
+    "welfare_type": ["type welfare bnft code"],
+    # The fields the ProspectPilot plan-catalog methodology showed matter.
+    # Net assets and participants-with-balances are the honest average: gross
+    # assets include liabilities, and the BOY participant count includes
+    # eligible people with no balance at all.
+    "net_assets": ["net assets eoy amt"],
+    "balances": ["partcp account bal cnt", "tot partcp account bal cnt"],
+    # Separated employees still holding balances — the rollover population
+    # already sitting in the plan, before any WARN notice.
+    "sep_future": ["rtd sep partcp fut cnt"],
+    "in_service": ["in service distrib ind"],
+    "distributed": ["all plan ast distrib ind"],
 }
 
 
@@ -382,8 +420,36 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
         if states and st and st not in states:
             continue
         key = norm_company(sponsor)
+        # Only defined-contribution filings can price a rollover: a welfare
+        # plan's "participants" hold no balances and a defined-benefit pension
+        # has no accounts. Code 2x marks DC (2J specifically a 401(k)).
+        # Filtered only when the code column exists and the row carries one —
+        # a deployment's pre-joined file without codes keeps today's behavior,
+        # and an unknown is not treated as a disqualifier.
+        codes = re.findall(r"[1-4][A-Z]", cell(row, "plan_type").upper())
+        if idx.get("plan_type") is not None and codes \
+                and not any(c.startswith("2") for c in codes):
+            continue
+        # No pension code but welfare codes present: a welfare-only filing
+        # (health, life, disability) — nobody in it holds a plan balance.
+        # Both columns blank stays kept: unknown is still not a disqualifier.
+        if not codes and re.findall(r"[1-4][A-Z]", cell(row, "welfare_type").upper()):
+            continue
+        # A plan whose assets were fully distributed is an empty shell — its
+        # last reported balance is money already gone.
+        if cell(row, "distributed") == "1":
+            continue
         assets = to_money(cell(row, "assets"))
         participants = to_int(cell(row, "participants"))
+        net = to_money(cell(row, "net_assets"))
+        balances = to_int(cell(row, "balances"))
+        # The honest average: net assets over participants who actually hold
+        # a balance. Each side falls back to the cruder figure when the finer
+        # one is absent, which is exactly today's behavior on older files.
+        avg_assets = net if net is not None else assets
+        # An explicitly reported zero is an answer — a plan with no account
+        # holders must not borrow the raw headcount as its denominator.
+        denom = balances if balances is not None else participants
         prev = plans.get(key)
         # One sponsor can file several plans. Keep the largest — it is the one
         # a rollover would come from, and summing would double-count.
@@ -394,7 +460,13 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
             "ack_id": cell(row, "ack_id"),
             "plan_name": cell(row, "plan_name"),
             "assets": assets, "participants": participants,
-            "avg_balance": round(assets / participants) if assets and participants else None,
+            "balances": balances,
+            "avg_balance": round(avg_assets / denom) if avg_assets and denom else None,
+            # Separated employees still holding balances, and whether the SF
+            # filer reports in-service distributions — both surfaced, never
+            # used to assert anything about an individual.
+            "sep_future": to_int(cell(row, "sep_future")),
+            "in_service": {"1": True, "2": False}.get(cell(row, "in_service")),
             "plan_year": cell(row, "plan_year"),
         }
         seen += 1
@@ -402,8 +474,9 @@ def parse_5500_csv(text: str, states: Optional[set] = None, limit: int = 0) -> d
             "unmapped": [k for k, v in names.items() if v is None], "rows": n, "kept": seen}
 
 
-SCHEDULE_ASSET_ALIASES = ["tot assets eoy amt", "small tot assets eoy amt",
-                          "total assets eoy", "net assets eoy amt",
+SCHEDULE_ASSET_ALIASES = ["net assets eoy amt", "small net assets eoy amt",
+                          "tot assets eoy amt", "small tot assets eoy amt",
+                          "total assets eoy",
                           "tot assets boy amt", "small tot assets boy amt"]
 
 
@@ -421,30 +494,38 @@ def parse_schedule_assets(text: str) -> dict:
     except StopIteration:
         return {"assets": {}, "column": None, "rows": 0, "kept": 0}
     ack = pick_column(headers, ["ack id"])
-    col = None
-    for alias in SCHEDULE_ASSET_ALIASES:      # in preference order, not header order
-        col = pick_column(headers, [alias])
-        if col is not None:
-            break
-    if ack is None or col is None:
-        return {"assets": {}, "column": headers[col] if col is not None else None,
+    # All candidate columns, in preference order — the fallback has to work
+    # per ROW, not per file: a filing with a blank net value but a populated
+    # total must price from its total, not be skipped (Codex review).
+    cols: list[int] = []
+    for alias in SCHEDULE_ASSET_ALIASES:
+        c = pick_column(headers, [alias])
+        if c is not None and c not in cols:
+            cols.append(c)
+    if ack is None or not cols:
+        return {"assets": {}, "column": headers[cols[0]] if cols else None,
                 "ack_column": headers[ack] if ack is not None else None,
                 "rows": 0, "kept": 0,
                 "note": "Schedule file has no ACK_ID or no assets column."}
     out, n = {}, 0
     for row in reader:
         n += 1
-        if ack >= len(row) or col >= len(row):
+        if ack >= len(row):
             continue
         key = row[ack].strip()
-        amt = to_money(row[col].strip())
+        amt = None
+        for c in cols:
+            if c < len(row):
+                amt = to_money(row[c].strip())
+                if amt is not None:
+                    break
         if not key or amt is None:
             continue
         # One filing can appear more than once across amended rows; the largest
         # is the one that matches the plan as filed.
         if key not in out or amt > out[key]:
             out[key] = amt
-    return {"assets": out, "column": headers[col], "ack_column": headers[ack],
+    return {"assets": out, "column": headers[cols[0]], "ack_column": headers[ack],
             "rows": n, "kept": len(out)}
 
 
@@ -462,7 +543,10 @@ def attach_assets(plans: dict, assets_by_ack: dict) -> dict:
         if amt is None:
             continue
         p["assets"] = amt
-        pc = p.get("participants")
+        # Participants with balances beats the raw headcount as a denominator,
+        # for the same reason as in parse_5500_csv — and a reported zero is an
+        # answer, never a reason to fall back to the headcount.
+        pc = p.get("balances") if p.get("balances") is not None else p.get("participants")
         p["avg_balance"] = round(amt / pc) if pc else None
         filled += 1
     return {"filled": filled, "sponsors": len(plans)}
@@ -642,6 +726,9 @@ def build_opportunities(events: list[dict], plans: dict, *,
             "plan_name": (plan or {}).get("plan_name", ""),
             "plan_assets": (plan or {}).get("assets"),
             "plan_participants": (plan or {}).get("participants"),
+            # Separated employees still holding balances: money that was in
+            # motion at this employer before any WARN notice.
+            "plan_sep_future": (plan or {}).get("sep_future"),
             "avg_balance": avg,
             "dollars_in_motion": dollars,
             "days_until": days,
