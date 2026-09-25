@@ -145,6 +145,12 @@ survives. A deletion also leaves a hashed tombstone (`forgotten`
 collection) that every list save is filtered against — without it, a second
 tab holding the old array resurrects the person on its next edit (Codex
 review on PR 102). Deleting while a colleague's shared list is open purges
-only your own lists; the owner's list is never written back. Still open: sealed WhitePages/Attom cache entries are keyed by
-lookup inputs, not by person, so they age out on their TTL rather than being
-purged — a person-keyed purge needs a key registry.
+only your own lists; the owner's list is never written back. Sealed WhitePages/Attom cache entries are keyed by lookup inputs,
+not by person, so the lead carries them instead: every paid lookup returns the
+cache ids it used on `X-Cache-Refs` (hashes, never the query), the client keeps
+them as `L.cacheRefs`, and the server records who asked (`cache_owners`). A
+deletion purges exactly those ids, and only ones its caller looked up. The
+cache is firm-wide, so a colleague who asked about the same person pays again
+next time — the right way round for a deletion. Other instances' warm memory
+copies expire with the instance. Leads enriched before this shipped carry no
+refs; their cache entries still age out on the TTL.

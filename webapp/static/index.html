@@ -4599,7 +4599,22 @@ async function api(url,payload,method){
   const r=await fetch(url,opt);
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+  // Which sealed cache entries a paid lookup used \u2014 hashes, not queries.
+  // Non-enumerable so it never rides into a saved record by accident.
+  const refs=r.headers.get('X-Cache-Refs');
+  if(refs&&d&&typeof d==='object')Object.defineProperty(d,'__refs',{value:refs.split(','),enumerable:false});
   return d;
+}
+/* Kept on the lead so "Delete this person" can purge the cached lookups
+   about them too, not just the lead row. */
+function keepRefs(L,d){
+  const refs=(d&&d.__refs)||[];
+  if(!L||!refs.length)return;
+  const before=(L.cacheRefs||[]).length;
+  L.cacheRefs=[...new Set((L.cacheRefs||[]).concat(refs))].slice(-50);
+  // Saved here, not by the caller: several lookups return early on a miss,
+  // and a WhitePages "no record" is cached (and purgeable) like any answer.
+  if(L.cacheRefs.length!==before)save();
 }
 async function loadMe(){
   try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
@@ -4705,7 +4720,7 @@ window.verifyLead=async(id,recheck)=>{
   try{
     const ha=(L.hd&&L.hd.city)?L.hd:{street:L.street,city:L.city,state:L.state,zip:L.zip};
     const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||'',
-      street:ha.street||'',city:ha.city||'',state:ha.state||'',zip:ha.zip||''});
+      street:ha.street||'',city:ha.city||'',state:ha.state||'',zip:ha.zip||''});keepRefs(L,d);
     const mob=(d.line_type||'').toLowerCase().includes('mobile');
     const bits=[];
     if(d.valid===false)bits.push('INVALID');
@@ -5119,7 +5134,7 @@ window.checkDeed=async id=>{
   try{
     const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',
       city:L.city||'',state:L.state||'',street:L.street||'',zip:L.zip||'',
-      phone:L.mobilePhone||L.directPhone||'',email:L.email||'',want_property:true});
+      phone:L.mobilePhone||L.directPhone||'',email:L.email||'',want_property:true});keepRefs(L,d);
     if(!d.found){toast('No record to attach a deed to.');return;}
     applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
@@ -5392,7 +5407,7 @@ window.retryWhere=async id=>{
   const city=m[1].trim(),st=m[2].toUpperCase();
   toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+' in '+city+', '+st+'\u2026');
   try{
-    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:city,state:st,street:'',phone:''});
+    const d=await api('/api/enrich',{first_name:L.firstName||'',last_name:L.lastName||'',city:city,state:st,street:'',phone:''});keepRefs(L,d);
     if(!d.found){toast(d.rejected?('Not attached \u2014 '+d.rejected):('No record found in '+city+', '+st+' either.'));return;}
     applyRecord(L,d,'name \u2014 searched '+city+', '+st+' (you supplied it)');
     L.updatedAt=Date.now();
@@ -5414,7 +5429,7 @@ window.enrichHome=async id=>{
       phone:L.mobilePhone||L.directPhone||'',email:L.email||'',
       // The deed is a second billed lookup answering a different question.
       // It is its own button now.
-      want_property:false});
+      want_property:false});keepRefs(L,d);
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||'nothing under this name at the address on the list'};save();render();return;}
     applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
@@ -5549,8 +5564,9 @@ window.forgetLead=async id=>{
   let note='';
   if(serverState()&&serverOk){
     try{
-      const d=await api('/api/leads/forget',{keys});
+      const d=await api('/api/leads/forget',{keys,cache_refs:L.cacheRefs||[]});
       if(d.shared_lists_not_touched)note=' Lists others shared with you are theirs to purge \u2014 ask the owner.';
+      if(d.cache_failed)note+=' '+d.cache_failed+' cached lookup'+(d.cache_failed===1?'':'s')+' could not be purged just now \u2014 the next deletion retries '+(d.cache_failed===1?'it':'them')+'.';
     }catch(e){toast('Delete failed \u2014 nothing was removed: '+e.message);return;}
     // A list someone else owns is theirs: deleting here removed the person
     // from your lists, and writing this one back would delete the owner's
@@ -5683,7 +5699,7 @@ window.attomValue=async id=>{
   if(!a){toast('No street address on file \u2014 enrich the household first.');return;}
   toast('Pricing '+a.street+'\u2026');
   try{
-    const d=await api('/api/attom',{street:a.street,city:a.city,state:a.state,zip:a.zip});
+    const d=await api('/api/attom',{street:a.street,city:a.city,state:a.state,zip:a.zip});keepRefs(L,d);
     L.attom=d.found?{avm:d.avm||null,high:d.avm_high||null,low:d.avm_low||null,score:d.avm_score||null,
       market:d.market_value||null,assessed:d.assessed_value||null,sale:d.sale_amount||null,
       saleDate:d.sale_date||'',yearBuilt:d.year_built||null,owners:d.owners||[],addr:d.address||'',at:Date.now()}
