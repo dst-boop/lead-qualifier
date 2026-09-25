@@ -4755,7 +4755,7 @@ class ForgetRequest(BaseModel):
     cache_refs: list[str] = []
 
 
-async def _purge_cache_refs(email: str, refs: list) -> int:
+async def _purge_cache_refs(email: str, refs: list) -> tuple[int, list]:
     """Drop sealed lookup answers about a deleted person — only ones this
     caller looked up, so a deletion can never be used to wipe (and force
     re-billing of) entries someone else asked for alone.
@@ -4765,12 +4765,17 @@ async def _purge_cache_refs(email: str, refs: list) -> int:
     the right way round. Warm copies in other instances' memory expire with
     the instance; the durable copy is what goes here.
     """
-    purged = 0
+    purged, failed = 0, []
+    durable = _firestore() is not None
     for ref in {r for r in refs if isinstance(r, str) and CACHE_REF_RE.match(r)}:
         owner = f"{email}|{ref}"
         if not (await _fs_get(FS_CACHE_OWNERS, owner) or _MEM_CACHE_OWNERS.get(owner)):
             continue
-        await _fs_del(FS_CACHE, ref)
+        # A failed delete is not a purge: keep the ownership record so the
+        # deletion can be retried, and say so rather than report success.
+        if not await _fs_del(FS_CACHE, ref) and durable:
+            failed.append(ref)
+            continue
         await _fs_del(FS_CACHE_OWNERS, owner)
         _MEM_CACHE_OWNERS.pop(owner, None)
         mem = _WP_CACHE if ref.startswith("wp:") else _ATTOM_CACHE
@@ -4778,7 +4783,7 @@ async def _purge_cache_refs(email: str, refs: list) -> int:
         for k in [k for k in mem if _cache_ref(prefix, k) == ref]:
             mem.pop(k, None)
         purged += 1
-    return purged
+    return purged, failed
 
 
 @app.post("/api/leads/forget")
@@ -4797,30 +4802,53 @@ async def forget_lead(body: ForgetRequest, request: Request, email: str = Depend
     hashes = {_key_hash(k) for k in keys}
     # The tombstone lands first: a list write racing this purge, or a stale
     # tab's next save, is filtered against it from here on.
+    tomb_doc = await _fs_get(FS_FORGOTTEN, email) or _MEM_FORGOTTEN.get(email) or {}
     tomb = (await _forgotten(email)) | hashes
-    payload = {"data": json.dumps(sorted(tomb)), "saved_at": time.time()}
+    pending = list(tomb_doc.get("pending_cache") or [])
+    payload = {"data": json.dumps(sorted(tomb)), "saved_at": time.time(),
+               "pending_cache": pending}
     if not await _fs_set(FS_FORGOTTEN, email, payload):
         _MEM_FORGOTTEN[email] = payload
     idx = await _ensure_lists(email)
     removed = {}
+    # Cache ids live on whichever copy ran the lookup, which need not be the
+    # copy on screen: collect them from every row about to go. Ids a previous
+    # deletion failed to purge are retried too.
+    refs = list(body.cache_refs or []) + pending
     for entry in idx["lists"]:
         leads = await _read_list(email, entry["id"])
-        kept = [L for L in leads if not _forget_match(L, hashes)]
+        kept = []
+        for L in leads:
+            if _forget_match(L, hashes):
+                refs += (L.get("cacheRefs") or []) if isinstance(L, dict) else []
+            else:
+                kept.append(L)
         if len(kept) != len(leads):
             await _write_list(email, entry["id"], kept)
             entry["count"] = len(kept)
             entry["saved_at"] = time.time()
             removed[entry["id"]] = len(leads) - len(kept)
-    legacy = [L for L in idx["legacy_leads"] if not _forget_match(L, hashes)]
+    legacy = []
+    for L in idx["legacy_leads"]:
+        if _forget_match(L, hashes):
+            refs += (L.get("cacheRefs") or []) if isinstance(L, dict) else []
+        else:
+            legacy.append(L)
     if len(legacy) != len(idx["legacy_leads"]):
         removed["legacy"] = len(idx["legacy_leads"]) - len(legacy)
     await _write_index(email, idx["settings"], idx["lists"], legacy)
     shared = len(await _shared_index(email))
-    purged = await _purge_cache_refs(email, (body.cache_refs or [])[:200])
+    purged, failed = await _purge_cache_refs(email, refs[:400])
+    if failed or pending:
+        # Hashes of cache ids, not personal data; kept only to retry the purge.
+        payload["pending_cache"] = failed
+        if not await _fs_set(FS_FORGOTTEN, email, payload):
+            _MEM_FORGOTTEN[email] = payload
     # Counts only: the audit trail says a deletion happened, never who.
-    print(f"[forget] lists={len(removed)} rows={sum(removed.values())} cache={purged}")
+    print(f"[forget] lists={len(removed)} rows={sum(removed.values())} cache={purged} cache_failed={len(failed)}")
     return {"ok": True, "removed": removed, "total": sum(removed.values()),
-            "cache_purged": purged, "shared_lists_not_touched": shared}
+            "cache_purged": purged, "cache_failed": len(failed),
+            "shared_lists_not_touched": shared}
 
 
 @app.get("/api/lists/{list_id}/shares")

@@ -4610,7 +4610,11 @@ async function api(url,payload,method){
 function keepRefs(L,d){
   const refs=(d&&d.__refs)||[];
   if(!L||!refs.length)return;
+  const before=(L.cacheRefs||[]).length;
   L.cacheRefs=[...new Set((L.cacheRefs||[]).concat(refs))].slice(-50);
+  // Saved here, not by the caller: several lookups return early on a miss,
+  // and a WhitePages "no record" is cached (and purgeable) like any answer.
+  if(L.cacheRefs.length!==before)save();
 }
 async function loadMe(){
   try{const r=await fetch('/api/me');if(!r.ok)return;window.ME=await r.json();}catch(e){return;}
@@ -5562,6 +5566,7 @@ window.forgetLead=async id=>{
     try{
       const d=await api('/api/leads/forget',{keys,cache_refs:L.cacheRefs||[]});
       if(d.shared_lists_not_touched)note=' Lists others shared with you are theirs to purge \u2014 ask the owner.';
+      if(d.cache_failed)note+=' '+d.cache_failed+' cached lookup'+(d.cache_failed===1?'':'s')+' could not be purged just now \u2014 the next deletion retries '+(d.cache_failed===1?'it':'them')+'.';
     }catch(e){toast('Delete failed \u2014 nothing was removed: '+e.message);return;}
     // A list someone else owns is theirs: deleting here removed the person
     // from your lists, and writing this one back would delete the owner's

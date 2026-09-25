@@ -87,5 +87,39 @@ ck("unknown and malformed refs are ignored, not errors", r.get("ok") is True)
 c.post("/api/verify-phone", json={"phone": "2065550123", "last_name": "Whitfield"})
 ck("asking again after deletion is a fresh (paid) lookup — the answer really went", len(fetched) == 2)
 
+
+# --- refs are gathered from every row about to go, not just the one on screen --
+M._WP_CACHE.clear()
+r = c.post("/api/verify-phone", json={"phone": "2065550199", "last_name": "Whitfield"})
+ref2 = r.headers.get("X-Cache-Refs")
+c.get("/api/lists")
+camp = c.post("/api/lists", json={"name": "Boeing SCS"}).json()["list"]["id"]
+# The lookup ran on the campaign copy; the master copy on screen has no refs.
+c.put(f"/api/lists/{camp}", json={"leads": [{"id": "c1", "email": "dana.w2@boeing.com", "cacheRefs": [ref2]}]})
+c.put("/api/lists/default", json={"leads": [{"id": "m1", "email": "dana.w2@boeing.com"}]})
+r = c.post("/api/leads/forget", json={"keys": ["lid:m1", "em:dana.w2@boeing.com"], "cache_refs": []}).json()
+ck("a lookup run on another list's copy is still purged", r.get("cache_purged") == 1 and (M.FS_CACHE, ref2) not in STORE, r)
+
+# --- a failed delete is not a purge, and is retried ---------------------------------
+r = c.post("/api/verify-phone", json={"phone": "2065550177", "last_name": "Whitfield"})
+ref3 = r.headers.get("X-Cache-Refs")
+real_del, real_fs = M._fs_del, M._firestore
+
+
+async def flaky_del(col, key):
+    return False if col == M.FS_CACHE else await real_del(col, key)
+M._fs_del, M._firestore = flaky_del, (lambda: object())
+r = c.post("/api/leads/forget", json={"keys": ["em:x@y.com"], "cache_refs": [ref3]}).json()
+ck("a Firestore delete that fails is reported, not counted as purged",
+   r.get("cache_purged") == 0 and r.get("cache_failed") == 1, r)
+ck("  ...the entry and its ownership record both survive, so it can be retried",
+   (M.FS_CACHE, ref3) in STORE and (M.FS_CACHE_OWNERS, f"dan@fpa.com|{ref3}") in STORE)
+M._fs_del, M._firestore = real_del, real_fs
+r = c.post("/api/leads/forget", json={"keys": ["em:someone@else.com"], "cache_refs": []}).json()
+ck("the next deletion retries it, even without being handed the id again",
+   r.get("cache_purged") == 1 and (M.FS_CACHE, ref3) not in STORE, r)
+r = c.post("/api/leads/forget", json={"keys": ["em:third@else.com"], "cache_refs": []}).json()
+ck("  ...and once purged it is not retried forever", r.get("cache_purged") == 0 and r.get("cache_failed") == 0, r)
+
 print(("\nFAILURES: %d of %d" % (bad, n)) if bad else "\nall %d checks passed" % n)
 sys.exit(1 if bad else 0)
