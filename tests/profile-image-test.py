@@ -164,25 +164,50 @@ ck("no JSON back is a loud 502, not an empty success", r.status_code == 502)
 dana = {"id": "d1", "firstName": "Dana", "lastName": "Whitfield", "employer": "Boeing",
         "email": "dana@boeing.com", "img": {"found": {"education": []}},
         "profile": {"education": [{"school": "Purdue"}]}, "hd": {"age": 61}}
-dana_copy = dict(dana, id="d1")                                       # master copy of the same row
+# An early import landed Dana on the master with name and employer only; a later
+# campaign import (with her email) was deduplicated against it on name@employer.
+dana_old = {"id": "d0", "firstName": "Dana", "lastName": "Whitfield", "employer": "Boeing"}
 namesake = {"id": "n1", "firstName": "Dana", "lastName": "Whitfield", "employer": "Chevron",
             "email": "dana.w@chevron.com"}
+# Same name, same employer, but her own email: a colleague, not Dana.
+colleague = {"id": "n2", "firstName": "Dana", "lastName": "Whitfield", "employer": "Boeing",
+             "email": "dana.whitfield2@boeing.com"}
 other = {"id": "o1", "firstName": "Ada", "lastName": "Lee", "employer": "Delta"}
 c.get("/api/lists")
-c.put("/api/lists/default", json={"leads": [dana_copy, namesake, other]})
+c.put("/api/lists/default", json={"leads": [dana_old, namesake, colleague, other]})
 camp = c.post("/api/lists", json={"name": "Boeing SCS"}).json()["list"]["id"]
-c.put(f"/api/lists/{camp}", json={"leads": [dict(dana, id="d9")]})   # a different row id, same email
+c.put(f"/api/lists/{camp}", json={"leads": [dict(dana, id="d9")]})
 
-r = c.post("/api/leads/forget", json={"keys": ["lid:d1", "em:dana@boeing.com"]})
+keys = ["lid:d9", "em:dana@boeing.com", "ne:dana whitfield@boeing"]
+r = c.post("/api/leads/forget", json={"keys": keys})
 d = r.json()
 ck("forget answers with where it removed from", r.status_code == 200 and d["total"] == 2, d)
 master = c.get("/api/lists/default").json()["leads"]
-ck("  ...the master copy is gone — the archive is not exempt",
-   [x["id"] for x in master] == ["n1", "o1"], [x["id"] for x in master])
+ck("  ...the name-only master copy is gone — linked by the key dedupe used",
+   not any(x["id"] == "d0" for x in master), [x["id"] for x in master])
 ck("  ...the campaign copy is gone too", c.get(f"/api/lists/{camp}").json()["leads"] == [])
 ck("  ...the namesake at another employer is untouched", any(x["id"] == "n1" for x in master))
+ck("  ...and so is a same-named colleague with her own email", any(x["id"] == "n2" for x in master))
 counts = {l["id"]: l["count"] for l in c.get("/api/lists").json()["lists"]}
-ck("  ...and the index counts follow", counts.get("default") == 2 and counts.get(camp) == 0, counts)
+ck("  ...and the index counts follow", counts.get("default") == 3 and counts.get(camp) == 0, counts)
+
+# --- a stale tab cannot bring them back ---------------------------------------
+stale = [dana_old, namesake, colleague, other]            # what another tab still holds
+r = c.put("/api/lists/default", json={"leads": stale}).json()
+master = c.get("/api/lists/default").json()["leads"]
+ck("a stale save does not resurrect the deleted person", not any(x["id"] == "d0" for x in master),
+   [x["id"] for x in master])
+ck("  ...and says which rows it kept off, so the tab can drop them", r.get("suppressed") == ["d0"], r.get("suppressed"))
+r = c.put(f"/api/lists/{camp}", json={"leads": [dict(dana, id="zz")]}).json()
+ck("  ...nor a re-import under a new row id, by email", r.get("suppressed") == ["zz"], r)
+r = c.put(f"/api/lists/{camp}", json={"leads": [colleague]}).json()
+ck("  ...while the colleague saves normally", r.get("suppressed") == [] and r["leads"] == 1, r)
+tomb = M._MEM_FORGOTTEN.get("dan@fpa.com") or {}
+ck("the tombstone holds hashes, not the person",
+   tomb and "dana" not in json.dumps(tomb).lower() and "boeing" not in json.dumps(tomb).lower())
+r = c.put("/api/state", json={"settings": {}, "leads": [dana_old]}).json()
+ck("the legacy state save is filtered too", r.get("suppressed") == ["d0"], r)
+
 r = c.post("/api/leads/forget", json={"keys": []})
 ck("no keys, no sweep", r.status_code == 400)
 r = c.post("/api/leads/forget", json={"keys": ["nonsense"]})

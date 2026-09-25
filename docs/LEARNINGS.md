@@ -141,6 +141,10 @@ field that holds personal data ships with its deletion path in the same PR.
 `POST /api/leads/forget` now removes a person from every list the caller
 owns (master and legacy array included), matching on row id and the strong
 dedupe keys; name@employer only when nothing stronger exists, so a namesake
-survives. Still open: sealed WhitePages/Attom cache entries are keyed by
+survives. A deletion also leaves a hashed tombstone (`forgotten`
+collection) that every list save is filtered against — without it, a second
+tab holding the old array resurrects the person on its next edit (Codex
+review on PR 102). Deleting while a colleague's shared list is open purges
+only your own lists; the owner's list is never written back. Still open: sealed WhitePages/Attom cache entries are keyed by
 lookup inputs, not by person, so they age out on their TTL rather than being
 purged — a person-keyed purge needs a key registry.

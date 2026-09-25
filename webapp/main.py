@@ -4315,11 +4315,12 @@ async def get_state(request: Request, email: str = Depends(signed_in)):
 
 @app.put("/api/state")
 async def put_state(body: LeadState, request: Request, email: str = Depends(signed_in)):
-    payload = {"data": json.dumps({"settings": body.settings, "leads": body.leads}),
-               "saved_at": time.time(), "lead_count": len(body.leads)}
+    leads, dropped = await _drop_forgotten(email, body.leads)
+    payload = {"data": json.dumps({"settings": body.settings, "leads": leads}),
+               "saved_at": time.time(), "lead_count": len(leads)}
     if not await _fs_set(FS_STATE, email, payload):
         _MEM_STATE[email] = payload
-    return {"ok": True, "leads": len(body.leads), "backend": storage_backend()}
+    return {"ok": True, "leads": len(leads), "suppressed": dropped, "backend": storage_backend()}
 
 
 # ------------------------- named lead lists -------------------------
@@ -4591,25 +4592,28 @@ async def save_list(list_id: str, body: ListSave, request: Request, email: str =
         oidx = await _read_index(owner)
         if not any(l["id"] == rid for l in oidx["lists"]):
             raise HTTPException(status_code=404, detail="The owner has deleted that list.")
-        await _write_list(owner, rid, body.leads)
+        leads, dropped = await _drop_forgotten(owner, body.leads)
+        await _write_list(owner, rid, leads)
         for l in oidx["lists"]:
             if l["id"] == rid:
-                l["count"] = len(body.leads)
+                l["count"] = len(leads)
                 l["saved_at"] = time.time()
         await _write_index(owner, oidx["settings"], oidx["lists"], oidx["legacy_leads"])
-        return {"ok": True, "leads": len(body.leads),
+        return {"ok": True, "leads": len(leads), "suppressed": dropped,
                 "lists": (await get_lists(request, email))["lists"]}
     idx = await _ensure_lists(email)
     lists = idx["lists"]
     if not any(l["id"] == rid for l in lists):
         raise HTTPException(status_code=404, detail="No such list.")
-    await _write_list(email, rid, body.leads)
+    # A person this user deleted stays deleted, whatever a stale tab sends.
+    leads, dropped = await _drop_forgotten(email, body.leads)
+    await _write_list(email, rid, leads)
     for l in lists:
         if l["id"] == rid:
-            l["count"] = len(body.leads)
+            l["count"] = len(leads)
             l["saved_at"] = time.time()
     await _write_index(email, idx["settings"], lists, idx["legacy_leads"])
-    return {"ok": True, "leads": len(body.leads),
+    return {"ok": True, "leads": len(leads), "suppressed": dropped,
             "lists": (await get_lists(request, email))["lists"]}
 
 
@@ -4643,6 +4647,58 @@ def _lead_keys(lead: dict) -> set:
     return k
 
 
+_STRONG_KEYS = ("id:", "em:", "li:")
+FS_FORGOTTEN = os.environ.get("FIRESTORE_FORGOTTEN_COLLECTION", "forgotten")
+_MEM_FORGOTTEN: dict[str, dict] = {}
+
+
+def _key_hash(k: str) -> str:
+    # Deletion records must not themselves be a copy of the person: store
+    # only a hash of each identity, enough to recognise them, not to read them.
+    return hashlib.sha256(k.encode()).hexdigest()
+
+
+def _forget_match(lead: dict, hashes: set) -> bool:
+    """Whether a stored row is the forgotten person.
+
+    A row is them if any of its row id, contact id, email or LinkedIn URL is
+    named. Name@employer alone counts only for a row that carries none of the
+    strong identities — the name-only copy an early import left on the master
+    list, which flushToMaster deduplicated on exactly that key. A same-named
+    colleague with their own email is someone else and is kept.
+    """
+    keys = _lead_keys(lead)
+    strong = {k for k in keys if not k.startswith("ne:")}
+    if {_key_hash(k) for k in strong} & hashes:
+        return True
+    if any(k.startswith(_STRONG_KEYS) for k in strong):
+        return False
+    return any(_key_hash(k) in hashes for k in keys if k.startswith("ne:"))
+
+
+async def _forgotten(owner: str) -> set:
+    doc = await _fs_get(FS_FORGOTTEN, owner) or _MEM_FORGOTTEN.get(owner) or {}
+    try:
+        return set(json.loads(doc.get("data") or "[]"))
+    except ValueError:
+        return set()
+
+
+async def _drop_forgotten(owner: str, leads: list) -> tuple[list, list]:
+    """(rows to keep, row ids dropped): a save from a tab still holding a
+    deleted person must not bring them back."""
+    hashes = await _forgotten(owner)
+    if not hashes:
+        return leads, []
+    kept, dropped = [], []
+    for L in leads:
+        if isinstance(L, dict) and _forget_match(L, hashes):
+            dropped.append(str(L.get("id") or ""))
+        else:
+            kept.append(L)
+    return kept, dropped
+
+
 class ForgetRequest(BaseModel):
     keys: list[str]
 
@@ -4660,17 +4716,24 @@ async def forget_lead(body: ForgetRequest, request: Request, email: str = Depend
     keys = {str(k)[:300] for k in (body.keys or []) if isinstance(k, str) and ":" in k}
     if not keys or len(keys) > 12:
         raise HTTPException(status_code=400, detail="Name the person to delete.")
+    hashes = {_key_hash(k) for k in keys}
+    # The tombstone lands first: a list write racing this purge, or a stale
+    # tab's next save, is filtered against it from here on.
+    tomb = (await _forgotten(email)) | hashes
+    payload = {"data": json.dumps(sorted(tomb)), "saved_at": time.time()}
+    if not await _fs_set(FS_FORGOTTEN, email, payload):
+        _MEM_FORGOTTEN[email] = payload
     idx = await _ensure_lists(email)
     removed = {}
     for entry in idx["lists"]:
         leads = await _read_list(email, entry["id"])
-        kept = [L for L in leads if not (_lead_keys(L) & keys)]
+        kept = [L for L in leads if not _forget_match(L, hashes)]
         if len(kept) != len(leads):
             await _write_list(email, entry["id"], kept)
             entry["count"] = len(kept)
             entry["saved_at"] = time.time()
             removed[entry["id"]] = len(leads) - len(kept)
-    legacy = [L for L in idx["legacy_leads"] if not (_lead_keys(L) & keys)]
+    legacy = [L for L in idx["legacy_leads"] if not _forget_match(L, hashes)]
     if len(legacy) != len(idx["legacy_leads"]):
         removed["legacy"] = len(idx["legacy_leads"]) - len(legacy)
     await _write_index(email, idx["settings"], idx["lists"], legacy)

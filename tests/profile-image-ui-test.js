@@ -176,10 +176,30 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   ck('the server is asked to forget them by row id and email',
      forgot.length === 1 && forgot[0].keys.includes('lid:d') && forgot[0].keys.includes('em:dana@boeing.com'),
      JSON.stringify(forgot[0]));
-  ck('  ...not by name@employer when an email exists (a namesake is not them)',
-     forgot.length === 1 && !forgot[0].keys.some(k => k.startsWith('ne:')));
+  ck('  ...and by name@employer, which the server only honours on rows with no identity of their own',
+     forgot.length === 1 && forgot[0].keys.includes('ne:dana whitfield@boeing'));
   ck('the lead is gone from the page', await p.evaluate(() => !byId('d')));
   ck('  ...and the namesake at Chevron is still here', await p.evaluate(() => !!byId('n')));
+
+
+  // --- rows the server keeps off a save are dropped from the page too ----------
+  await p.unroute('**/api/lists/*');
+  await p.route('**/api/lists/*', r => r.fulfill({ json: { ok: true, lists: [{ id: 'default', name: 'All leads', count: 1, role: 'owner', owner: '' }], suppressed: ['m'] } }));
+  await p.evaluate(() => { byId('n').notes = 'touched'; save(); });
+  await p.waitForFunction(() => !byId('m'), null, { timeout: 3000 }).catch(() => {});
+  ck('a row the server refused as deleted-earlier leaves the page', await p.evaluate(() => !byId('m') && !!byId('n')));
+
+  // --- a list someone else owns is never written from here -----------------------
+  await p.waitForTimeout(700);                 // let dropSuppressed's own save land first
+  let puts = 0;
+  await p.unroute('**/api/lists/*');
+  await p.route('**/api/lists/*', r => { if (r.request().method() === 'PUT') puts++;
+    return r.fulfill({ json: { ok: true, lists: [], suppressed: [] } }); });
+  await p.evaluate(() => { activeList = 'boss@x.com~camp'; window.appConfirm = async () => true; return forgetLead('n'); });
+  await p.waitForTimeout(700);
+  ck('deleting while a shared list is open purges your lists on the server', forgot.length === 2);
+  ck('  ...but leaves the owner\u2019s list alone: no local removal, no write back',
+     await p.evaluate(() => !!byId('n')) && puts === 0, 'puts=' + puts);
 
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);

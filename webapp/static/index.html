@@ -1187,6 +1187,7 @@ function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
       if(activeList){
         const r=await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
         myLists=r.lists||myLists;renderLists();
+        dropSuppressed(r.suppressed);
         await api('/api/settings',{settings:state.settings},'PUT');
         await flushToMaster();
       }else{
@@ -5515,24 +5516,49 @@ window.useWebPhone=id=>{
    enrichment payload riding on it (household record, phone check, public
    records, web and site findings, screenshot extractions, confirmed profile
    lines) from every list the user owns \u2014 the master list included, which
-   nothing else ever prunes. The keys are the dedupe identities, minus
-   name@employer when a stronger one exists, so a namesake is never swept up. */
-function forgetKeys(L){
-  const k=dedupeKeys(L).filter(x=>!x.startsWith('ne:')||!(L.contactId||L.email||L.linkedinUrl));
-  return ['lid:'+L.id].concat(k);
+   nothing else ever prunes. All the dedupe identities go, name@employer
+   included: the server matches that one only on rows carrying no email,
+   contact id or LinkedIn URL of their own (_forget_match), which reaches the
+   name-only master copy an early import left without sweeping up a
+   same-named colleague. The server also keeps a hashed tombstone, so a stale
+   tab's next save cannot bring them back. */
+function forgetKeys(L){return ['lid:'+L.id].concat(dedupeKeys(L));}
+/* Rows the server refused on save because their person was deleted. */
+function dropSuppressed(ids){
+  if(!ids||!ids.length)return;
+  const gone=new Set(ids);
+  const before=state.leads.length;
+  state.leads=state.leads.filter(x=>!gone.has(''+x.id));
+  if(state.leads.length<before){
+    save();render();
+    toast((before-state.leads.length)+' deleted '+(before-state.leads.length===1?'person was':'people were')+' kept off this list \u2014 they were deleted earlier.');
+  }
 }
 window.forgetLead=async id=>{
   const L=byId(id);if(!L)return;
   const name=((L.firstName||'')+' '+(L.lastName||'')).trim()||'this lead';
   if(!(await appConfirm('Delete '+name+' and everything this app learned about them \u2014 enrichment, screenshot extractions, notes and activity \u2014 from every one of your lists, the master list included. This cannot be undone. Lookups you paid for are not refunded.','Delete this person?')))return;
-  const keys=forgetKeys(L),ks=new Set(keys);
-  const hit=x=>ks.has('lid:'+x.id)||dedupeKeys(x).some(k=>ks.has(k));
+  const keys=forgetKeys(L);
+  // Same rule as the server's _forget_match: name@employer only for a row
+  // with no strong identity of its own.
+  const strong=new Set(keys.filter(k=>!k.startsWith('ne:')));
+  const ne=new Set(keys.filter(k=>k.startsWith('ne:')));
+  const hit=x=>{const xk=dedupeKeys(x);
+    if(strong.has('lid:'+x.id)||xk.some(k=>strong.has(k)))return true;
+    return !xk.some(k=>!k.startsWith('ne:'))&&xk.some(k=>ne.has(k));};
   let note='';
   if(serverState()&&serverOk){
     try{
       const d=await api('/api/leads/forget',{keys});
       if(d.shared_lists_not_touched)note=' Lists others shared with you are theirs to purge \u2014 ask the owner.';
     }catch(e){toast('Delete failed \u2014 nothing was removed: '+e.message);return;}
+    // A list someone else owns is theirs: deleting here removed the person
+    // from your lists, and writing this one back would delete the owner's
+    // row too. Leave it on screen and say why.
+    if((activeList||'').includes('~')){
+      toast(name+' deleted from your own lists. This list belongs to someone else \u2014 the owner removes their copy.');
+      return;
+    }
   }
   state.leads=state.leads.filter(x=>!hit(x));
   MASTER_PENDING=MASTER_PENDING.filter(x=>!hit(x));
