@@ -1187,6 +1187,7 @@ function save(){clearTimeout(_pt);_pt=setTimeout(async()=>{
       if(activeList){
         const r=await api('/api/lists/'+encodeURIComponent(activeList),{leads:state.leads},'PUT');
         myLists=r.lists||myLists;renderLists();
+        dropSuppressed(r.suppressed);
         await api('/api/settings',{settings:state.settings},'PUT');
         await flushToMaster();
       }else{
@@ -1445,7 +1446,7 @@ function inferredAge(L){
   const gy=parseInt(L.gradYear,10), fy=parseInt(L.firstJobYear,10);
   const basis = stated>0 ? `${stated} yrs experience + ${ASSUMED_START_AGE}`
     : (fy>1900&&(!(gy>1900)||fy<=gy)) ? `first worked ${fy} + ${ASSUMED_START_AGE}`
-    : `graduated ${gy} + ${ASSUMED_START_AGE}`;
+    : `graduated ${gy}${L.gradYearSrc==='image'?' (screenshot)':''} + ${ASSUMED_START_AGE}`;
   return {age:Math.round(yrs+ASSUMED_START_AGE), basis};
 }
 function ageSource(L){
@@ -2790,6 +2791,8 @@ function researchActions(L){
     out.push(['attomValue','Home value (Attom trial)','What their home is worth \u2014 automated valuation with a confidence score, plus deed owner, last sale and year built','free \u2014 trial']);
   if(!L.web&&L.lastName&&window.ME&&ME.features&&ME.features.web_research)
     out.push(['webResearch','Search the web (AI)','Searches name + employer + title the way you would by hand: location, age clues, spouse, socials, office phone, email pattern \u2014 quoted and linked, for you to accept or discard','free \u2014 AI tokens']);
+  if(!L.img&&L.lastName&&window.ME&&ME.features&&ME.features.profile_image)
+    out.push(['profileImage','Profile screenshot (AI)','Upload a screenshot of their LinkedIn, company bio or speaker page. AI reads the printed education, graduation years, certifications and career \u2014 each line quoted, for you to confirm. The image is not kept','free \u2014 AI tokens']);
   return out;
 }
 function researchCount(L){return researchActions(L).length;}
@@ -2889,6 +2892,69 @@ function webSection(L){
   b.push('<p class="hint" style="margin-top:3px">Found on the web \u2014 read a source before trusting a line. Accepting one is your call; nothing here was written onto the lead by the app.</p>');
   return b.join('');
 }
+/* What a profile screenshot said (Tier 4). Every line is the text it was read
+   from; nothing is on the lead until the operator confirms it. The printed
+   name gates the buttons, the same way a surname gates the site reader's:
+   a screenshot of a namesake must not put a graduation year on this lead.
+   Confirmed lines move to L.profile, which outlives a re-read. */
+const PROFILE_KINDS=[['education','Education'],['certifications','Certifications'],['career','Career'],['interests','Interests']];
+function hasProfile(L){return !!(L.profile&&PROFILE_KINDS.some(([k])=>(L.profile[k]||[]).length));}
+function imgNameOk(L){
+  const n=(L.img&&L.img.name||'').toLowerCase(),sn=(L.lastName||'').trim().toLowerCase();
+  if(!n)return null;
+  return !!sn&&n.includes(sn);
+}
+function imgLine(kind,x){
+  const yrs=(a,b)=>(a||b)?' · '+[a||'?',b||(kind==='career'?'present':'?')].join('–'):'';
+  if(kind==='education')return [x.school,[x.degree,x.field].filter(Boolean).join(', ')].filter(Boolean).join(' · ')+yrs(x.start_year,x.end_year);
+  if(kind==='certifications')return x.name+(x.issuer?' · '+x.issuer:'')+(x.year?' · '+x.year:'');
+  if(kind==='career')return [x.title,x.employer].filter(Boolean).join(' at ')+((x.start_year||x.end_year||x.current)?yrs(x.start_year,x.current?null:x.end_year):'');
+  return x.text||'';
+}
+function isConfirmed(L,kind,x){return !!(L.profile&&(L.profile[kind]||[]).some(p=>p.quote===x.quote&&imgLine(kind,p)===imgLine(kind,x)));}
+function imgSection(L){
+  if(!L.img&&!hasProfile(L))return '';
+  const b=['<h4 style="margin-top:12px">Profile screenshot</h4>'];
+  const q=t=>`<span class="pts" style="white-space:normal;text-align:right;font-weight:400;max-width:55%">“${esc(t||'')}”</span>`;
+  const f=L.img&&L.img.found;
+  if(L.img&&!f)b.push(`<p class="hint">${esc(L.img.reason||'nothing readable')}.</p>`);
+  if(f){
+    const ok=imgNameOk(L);
+    if(ok===false)b.push(`<p class="hint" style="color:var(--tierX)"><strong>This profile says ${esc(L.img.name)}.</strong> That is not ${esc(((L.firstName||'')+' '+(L.lastName||'')).trim())}, so nothing here can be confirmed onto this lead.</p>`);
+    else if(ok===null)b.push('<p class="hint" style="color:var(--tierB)">No name was readable in the screenshot — make sure it is this person before confirming anything.</p>');
+    const can=ok!==false;
+    const btn=(call,label)=>can?`<div style="margin-top:2px"><button class="mbtn" onclick="${call}">${label}</button></div>`:'';
+    if(f.grad_year){
+      const gy=parseInt(L.gradYear,10),conflict=gy>1900&&gy!==f.grad_year.year;
+      b.push(`<div class="sigrow hit"><span>Bachelor’s ${f.grad_year.year}${conflict?' — the list says '+gy:''}</span>${q(f.grad_year.quote)}</div>`);
+      if(gy!==f.grad_year.year)b.push(btn(`confirmImgGrad('${L.id}')`,conflict?`Replace ${gy} with ${f.grad_year.year}`:`Use ${f.grad_year.year} as graduation year`));
+    }
+    if(f.career_start){
+      const fy=parseInt(L.firstJobYear,10),conflict=fy>1900&&fy!==f.career_start.year;
+      b.push(`<div class="sigrow hit"><span>Career began ${f.career_start.year}${conflict?' — on file: '+fy:''}</span>${q(f.career_start.quote)}</div>`);
+      if(fy!==f.career_start.year)b.push(btn(`confirmImgStart('${L.id}')`,conflict?`Replace ${fy} with ${f.career_start.year}`:`Use ${f.career_start.year} as career start`));
+    }
+    if(f.location){
+      const place=[f.location.city,f.location.state].filter(Boolean).join(', ');
+      const conflict=L.state&&f.location.state&&L.state!==f.location.state;
+      b.push(`<div class="sigrow hit"><span>Located: ${esc(place)}${conflict?' — the list says '+esc(L.state):''}</span>${q(f.location.quote)}</div>`);
+      if((L.city||'')!==(f.location.city||'')||conflict)b.push(btn(`confirmImgLocation('${L.id}')`,conflict?'Replace '+esc(L.state)+' with '+esc(place):'Use '+esc(place)));
+    }
+    PROFILE_KINDS.forEach(([k,label])=>(f[k]||[]).forEach((x,i)=>{
+      const done=isConfirmed(L,k,x);
+      b.push(`<div class="sigrow ${done?'hit':''}" style="align-items:flex-start"><span>${esc(label)}: ${esc(imgLine(k,x))}${done?' ✓':''}${(!done&&can)?` <button class="mbtn" onclick="confirmImgItem('${L.id}','${k}',${i})">Confirm</button>`:''}</span>${q(x.quote)}</div>`);
+    }));
+  }
+  if(hasProfile(L)){
+    b.push('<h4 style="margin-top:10px">Confirmed from screenshots</h4>');
+    PROFILE_KINDS.forEach(([k,label])=>(L.profile[k]||[]).forEach(x=>
+      b.push(`<div class="sigrow hit"><span>${esc(label)}: ${esc(imgLine(k,x))}</span><span class="pts">${x.confirmedAt?new Date(x.confirmedAt).toISOString().slice(0,10):''}</span></div>`)));
+  }
+  const tok=L.img&&L.img.tokens?(L.img.tokens.input+L.img.tokens.output).toLocaleString()+' AI tokens':'';
+  b.push(`<p class="hint" style="margin-top:3px">Extracted from an image you uploaded${tok?' — '+tok:''}. The image itself was not kept. Confirming a line is your call; nothing here overwrites a verified field.</p>`);
+  if(L.img&&window.ME&&ME.features&&ME.features.profile_image)b.push(`<div style="margin-top:4px"><button class="mbtn" onclick="profileImage('${L.id}')">Read another screenshot</button></div>`);
+  return b.join('');
+}
 /* The Attom answer, in the record. The deed is the corroboration check the
    operator taught us: a surname on it ties the value to THIS person; a trust
    or an LLC is a flag to read before leaning on the number. */
@@ -2963,7 +3029,7 @@ function detailRow(L){
   const props=propertyList(L);
   const gProp=(L.attom&&L.attom.avm)?'$'+Math.round(L.attom.avm).toLocaleString()+' est.':((L.attom&&L.attom.found===false)?'no property on file':(props.length?props.length+(props.length===1?' address':' addresses'):''));
   const gPub=L.pub?[((L.pub.donations||{}).count?(L.pub.donations.count+' donations'):'no donations'),((L.pub.filings||[]).length?L.pub.filings.length+' insider filing'+((L.pub.filings||[]).length===1?'':'s'):'no insider filings')].join(' · '):(L.edgar?(L.edgar.age?'age '+L.edgar.age+' in a proxy':'no proxy age'):((L.hd&&L.hd.priorPlaces&&L.hd.priorPlaces.length)?'prior addresses':''));
-  const gWeb=[L.site?('their site'+(L.site.found?' ✓':' — nothing')):'',L.web?('web'+(L.web.found?' ✓':' — nothing')):''].filter(Boolean).join(' · ');
+  const gWeb=[L.site?('their site'+(L.site.found?' ✓':' — nothing')):'',L.web?('web'+(L.web.found?' ✓':' — nothing')):'',L.img?('screenshot'+(L.img.found?' ✓':' — nothing')):''].filter(Boolean).join(' · ');
   const gAct=(L.activity&&L.activity.length)?L.activity.length+(L.activity.length===1?' entry':' entries'):'none yet';
   return `<tr class="detail"><td colspan="11"><div class="detail-grid">
     ${leadCard(L)}
@@ -3030,13 +3096,15 @@ function detailRow(L){
       ${L.edgar.url?`<a target="_blank" rel="noopener" href="${esc(L.edgar.url)}">${esc(L.edgar.company||'Proxy statement')}, filed ${esc(L.edgar.filed||'')}</a> &mdash; read it and confirm this is the right person.`:''}</p>`
       :`<p class="hint">${esc(L.edgar.reason||'No age found in a proxy statement.')}<br>Officers and directors of public companies are listed with an age; nobody else is.</p>`}`:''}
       </div></details>`:''}
-    ${(L.site||L.web)?`${DRL('web','Their own site &amp; the web',gWeb)}
-      ${siteSection(L)}${webSection(L)}</div></details>`:''}
+    ${(L.site||L.web||L.img||hasProfile(L))?`${DRL('web','Their own site &amp; the web',gWeb)}
+      ${siteSection(L)}${webSection(L)}${imgSection(L)}</div></details>`:''}
       <h4 style="margin-top:12px">Notes / comments (exports to CRM)</h4>
       <textarea onchange="setNote('${L.id}',this.value)">${esc(L.notes)}</textarea>
     </div>
     <div class="dsec" id="research-${L.id}"><h4>Look this person up</h4>${researchPanel(L)}
       <div style="margin-top:8px"><button class="abtn li" onclick="openLI('${L.id}')" title="Copies your note, then opens their profile">Connect on LinkedIn</button></div>
+      <div style="margin-top:14px"><button class="mbtn" style="color:var(--tierX);border-color:var(--tierX)" onclick="forgetLead('${L.id}')">Delete this person</button>
+      <span class="hint" style="margin-left:6px">Removes them and everything learned about them from all your lists, the master list included.</span></div>
     </div>
     <div class="dsec">${DRL('crm','CRM export fields',(L.assignedTo?esc(L.assignedTo):'unassigned'))}
       <div class="fieldgrid">
@@ -4844,7 +4912,7 @@ document.getElementById('btnInsights').addEventListener('click',()=>{renderInsig
 document.getElementById('btnLifeData').addEventListener('click',()=>{
   const leads=state.leads;
   if(!leads.length){toast('No leads on this list.');return;}
-  const H=['Lead External ID','First Name','Last Name','Job Title','Employer','State','Status','Set','Tier','Score','Campaign','Age basis','Age','Signals fired','Phone check','Household data','Public records','SEC age','AI grade','Calls','Emails','Created','Last updated','Batch / source','Notes','Home value (Attom)'];
+  const H=['Lead External ID','First Name','Last Name','Job Title','Employer','State','Status','Set','Tier','Score','Campaign','Age basis','Age','Signals fired','Phone check','Household data','Public records','SEC age','AI grade','Calls','Emails','Created','Last updated','Batch / source','Notes','Home value (Attom)','Education (confirmed from screenshot)','Certifications (confirmed from screenshot)'];
   const q=v=>{v=''+(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=leads.map(L=>{
     const ab=ageBasis(L);
@@ -4857,7 +4925,9 @@ document.getElementById('btnLifeData').addEventListener('click',()=>{
       L.createdAt?new Date(L.createdAt).toISOString().slice(0,10):'',
       L.updatedAt?new Date(L.updatedAt).toISOString().slice(0,10):'',
       L.batch||'',L.notes||'',
-      (L.attom&&(L.attom.avm||L.attom.market||L.attom.assessed))||''].map(q).join(',');
+      (L.attom&&(L.attom.avm||L.attom.market||L.attom.assessed))||'',
+      ((L.profile&&L.profile.education)||[]).map(x=>imgLine('education',x)).join('; '),
+      ((L.profile&&L.profile.certifications)||[]).map(x=>imgLine('certifications',x)).join('; ')].map(q).join(',');
   });
   dl(new Blob([[H.join(',')].concat(rows).join('\r\n')],{type:'text/csv'}),'life-data-'+new Date().toISOString().slice(0,10)+'.csv');
   toast('Life Data: '+leads.length+' leads exported.'+(activeList==='default'?'':' Tip: switch to All leads for the lifetime record.'));
@@ -5439,6 +5509,159 @@ window.useWebPhone=id=>{
   if(L.directPhone){toast('A business phone is already on file \u2014 not overwritten.');return;}
   L.directPhone=ph.number;L.updatedAt=Date.now();scoreLead(L);
   logAct(id,'web','office phone '+ph.number+' added (web, you accepted)');
+  save();render();
+};
+/* ---- delete this person ----
+   First-class, per CLAUDE.md: one action removes the lead and every
+   enrichment payload riding on it (household record, phone check, public
+   records, web and site findings, screenshot extractions, confirmed profile
+   lines) from every list the user owns \u2014 the master list included, which
+   nothing else ever prunes. All the dedupe identities go, name@employer
+   included: the server matches that one only on rows carrying no email,
+   contact id or LinkedIn URL of their own (_forget_match), which reaches the
+   name-only master copy an early import left without sweeping up a
+   same-named colleague. The server also keeps a hashed tombstone, so a stale
+   tab's next save cannot bring them back. */
+function forgetKeys(L){return ['lid:'+L.id].concat(dedupeKeys(L));}
+/* Rows the server refused on save because their person was deleted. */
+function dropSuppressed(ids){
+  if(!ids||!ids.length)return;
+  const gone=new Set(ids);
+  const before=state.leads.length;
+  state.leads=state.leads.filter(x=>!gone.has(''+x.id));
+  if(state.leads.length<before){
+    save();render();
+    toast((before-state.leads.length)+' deleted '+(before-state.leads.length===1?'person was':'people were')+' kept off this list \u2014 they were deleted earlier.');
+  }
+}
+window.forgetLead=async id=>{
+  const L=byId(id);if(!L)return;
+  const name=((L.firstName||'')+' '+(L.lastName||'')).trim()||'this lead';
+  if(!(await appConfirm('Delete '+name+' and everything this app learned about them \u2014 enrichment, screenshot extractions, notes and activity \u2014 from every one of your lists, the master list included. This cannot be undone. Lookups you paid for are not refunded.','Delete this person?')))return;
+  const keys=forgetKeys(L);
+  // Same rule as the server's _forget_match: name@employer only for a row
+  // with no strong identity of its own.
+  const strong=new Set(keys.filter(k=>!k.startsWith('ne:')));
+  const ne=new Set(keys.filter(k=>k.startsWith('ne:')));
+  const hit=x=>{const xk=dedupeKeys(x);
+    if(strong.has('lid:'+x.id)||xk.some(k=>strong.has(k)))return true;
+    return !xk.some(k=>!k.startsWith('ne:'))&&xk.some(k=>ne.has(k));};
+  let note='';
+  if(serverState()&&serverOk){
+    try{
+      const d=await api('/api/leads/forget',{keys});
+      if(d.shared_lists_not_touched)note=' Lists others shared with you are theirs to purge \u2014 ask the owner.';
+    }catch(e){toast('Delete failed \u2014 nothing was removed: '+e.message);return;}
+    // A list someone else owns is theirs: deleting here removed the person
+    // from your lists, and writing this one back would delete the owner's
+    // row too. Leave it on screen and say why.
+    if((activeList||'').includes('~')){
+      toast(name+' deleted from your own lists. This list belongs to someone else \u2014 the owner removes their copy.');
+      return;
+    }
+  }
+  state.leads=state.leads.filter(x=>!hit(x));
+  MASTER_PENDING=MASTER_PENDING.filter(x=>!hit(x));
+  SEL.delete(id);
+  save();render();
+  toast(name+' deleted.'+note);
+};
+/* ---- profile screenshot (Tier 4) ----
+   The operator's own screenshot of a public profile, read by Claude vision.
+   One image, one lead, the operator's hand on every step: they choose the
+   file, they confirm each line. The server passes the image to the Claude API
+   and keeps nothing; the findings live on the lead and go when it goes.
+   Never an automated fetch — there is no URL to give it. */
+ACT_LABEL.img='Profile screenshot';
+function pickImage(){
+  return new Promise(res=>{
+    const i=document.createElement('input');
+    i.type='file';i.accept='image/png,image/jpeg,image/webp,image/gif';
+    i.onchange=()=>res((i.files&&i.files[0])||null);
+    i.click();
+  });
+}
+/* Downscale before upload: the API resizes anything past ~1568px anyway, so
+   a larger image only costs upload time. PNG keeps screenshot text crisp. */
+async function shrinkImage(file){
+  if(file.size>20e6)throw new Error('that file is over 20 MB — crop it to the profile');
+  const url=await new Promise((res,rej)=>{const r=new FileReader();
+    r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('could not read the file'));r.readAsDataURL(file);});
+  if(file.type==='image/gif')return url;
+  const img=await new Promise((res,rej)=>{const i=new Image();
+    i.onload=()=>res(i);i.onerror=()=>rej(new Error('not an image this browser can open'));i.src=url;});
+  const k=Math.min(1,1568/Math.max(img.naturalWidth,img.naturalHeight));
+  if(k===1&&file.size<3.5e6)return url;
+  const c=document.createElement('canvas');
+  c.width=Math.round(img.naturalWidth*k);c.height=Math.round(img.naturalHeight*k);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+  let out=c.toDataURL('image/png');
+  if(out.length>6.5e6)out=c.toDataURL('image/jpeg',0.9);
+  return out;
+}
+window.profileImage=async id=>{
+  const L=byId(id);if(!L)return;
+  if(L.img&&!(await appConfirm('Reading another screenshot replaces these findings and spends AI tokens again. Anything you already confirmed stays on the lead.','Read another screenshot?')))return;
+  const file=await pickImage();if(!file)return;
+  let url;
+  try{url=await shrinkImage(file);}catch(e){toast('Screenshot: '+e.message);return;}
+  await readProfileImage(id,url);
+};
+window.readProfileImage=async(id,dataUrl)=>{
+  const L=byId(id);if(!L)return;
+  toast('Reading the screenshot…');
+  try{
+    const d=await api('/api/profile-image',{image:dataUrl,first_name:L.firstName||'',
+      last_name:L.lastName||'',employer:L.employer||''});
+    const f=d.found||{};
+    const n=PROFILE_KINDS.reduce((s,[k])=>s+(f[k]||[]).length,0)+(f.location?1:0);
+    // A miss is recorded like any other answer, so the button retires rather
+    // than inviting the same spend on the same image.
+    L.img={at:Date.now(),found:n?f:null,name:f.profile_name||'',src:'extracted-from-image',
+           tokens:d.tokens||null,reason:n?'':'no profile text could be read in that image'};
+    L.updatedAt=Date.now();
+    const bits=[];
+    if(f.grad_year)bits.push('bachelor’s '+f.grad_year.year);
+    if((f.certifications||[]).length)bits.push(f.certifications.map(c=>c.name).join(', '));
+    if((f.career||[]).length)bits.push(f.career.length+' role'+(f.career.length>1?'s':''));
+    const tok=d.tokens?(d.tokens.input+d.tokens.output)+' tokens':'';
+    const who=imgNameOk(L)===false?' — NAME MISMATCH ('+L.img.name+')':'';
+    logAct(id,'img',(bits.join(' · ')||'nothing readable')+who+(tok?' · '+tok:''));
+    save();render();
+    toast('Screenshot read — '+(bits.join(' · ')||'nothing usable')+(who?'. It names someone else.':'. Confirm what is right.'));
+  }catch(e){toast('Screenshot read failed: '+e.message);}
+};
+function imgFound(id){
+  const L=byId(id);
+  return (L&&L.img&&L.img.found&&imgNameOk(L)!==false)?[L,L.img.found]:[null,null];
+}
+window.confirmImgGrad=id=>{
+  const [L,f]=imgFound(id);if(!f||!f.grad_year)return;
+  const was=L.gradYear;
+  L.gradYear=f.grad_year.year;L.gradYearSrc='image';L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'img','graduation year '+f.grad_year.year+(was?' (was '+was+')':'')+' confirmed from screenshot — now '+L.tier+'·'+L.score);
+  save();render();
+};
+window.confirmImgStart=id=>{
+  const [L,f]=imgFound(id);if(!f||!f.career_start)return;
+  const was=L.firstJobYear;
+  L.firstJobYear=f.career_start.year;L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'img','career start '+f.career_start.year+(was?' (was '+was+')':'')+' confirmed from screenshot — now '+L.tier+'·'+L.score);
+  save();render();
+};
+window.confirmImgLocation=id=>{
+  const [L,f]=imgFound(id);const loc=f&&f.location;if(!loc)return;
+  L.city=loc.city||L.city;L.state=loc.state||L.state;L.updatedAt=Date.now();scoreLead(L);
+  logAct(id,'img','location set to '+[loc.city,loc.state].filter(Boolean).join(', ')+' (screenshot, you confirmed)');
+  save();render();
+};
+window.confirmImgItem=(id,kind,i)=>{
+  const [L,f]=imgFound(id);const x=f&&(f[kind]||[])[i];
+  if(!x||!PROFILE_KINDS.some(([k])=>k===kind)||isConfirmed(L,kind,x))return;
+  L.profile=L.profile||{};
+  (L.profile[kind]=L.profile[kind]||[]).push({...x,src:'extracted-from-image',confirmedAt:Date.now()});
+  L.updatedAt=Date.now();
+  logAct(id,'img',kind+' confirmed: '+imgLine(kind,x));
   save();render();
 };
 /* ---- Attom (TRIAL) ----

@@ -129,9 +129,10 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
     window.dl = (blob, name) => { window.dl = old; blob.text().then(t => res(t)); };
     document.getElementById('btnLifeData').click();
   }));
+  // Found by name, not position: later columns append after it.
+  const hv = csv.split('\r\n')[0].split(',').indexOf('Home value (Attom)');
   ck('the Life Data export carries the home value out',
-     csv.split('\r\n')[0].endsWith('Home value (Attom)')
-     && csv.split('\r\n').some(l => l.endsWith(',612000')), csv.split('\r\n')[0].slice(-40));
+     hv > -1 && csv.split('\r\n').slice(1).some(l => l.split(',')[hv] === '612000'), csv.split('\r\n')[0].slice(-40));
 
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);

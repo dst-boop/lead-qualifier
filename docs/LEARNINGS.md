@@ -121,3 +121,30 @@ callback IS the sign-in; provider tokens are attachments that individual
 features (Drive, sending) require with their own error sentences. Any new
 gate must be tested against a session whose tokens have aged out — that hour
 arrives for every user, every day.
+
+## 2026-09 · The Life Data header row is not CSV-quoted
+
+Adding "Education (confirmed, screenshot)" as a Life Data column split the
+header into two columns and shifted every column after it: the export quotes
+cell values but joins header names raw. Caught by the new UI suite, not by
+eye — the file still opened. **Rule:** no commas in export header names (or
+quote the header row too). Any new export column gets a test that splits the
+header and finds it by name.
+
+## 2026-09 · There was no way to delete one person
+
+CLAUDE.md calls "delete this person" first-class, and every Tier 2/3/4 field
+has to be covered by a purge path — but the app could only delete whole
+lists, and never the master list, so every lead ever landed was permanent.
+Profile-screenshot extractions would have made that worse. **Rule:** a new
+field that holds personal data ships with its deletion path in the same PR.
+`POST /api/leads/forget` now removes a person from every list the caller
+owns (master and legacy array included), matching on row id and the strong
+dedupe keys; name@employer only when nothing stronger exists, so a namesake
+survives. A deletion also leaves a hashed tombstone (`forgotten`
+collection) that every list save is filtered against — without it, a second
+tab holding the old array resurrects the person on its next edit (Codex
+review on PR 102). Deleting while a colleague's shared list is open purges
+only your own lists; the owner's list is never written back. Still open: sealed WhitePages/Attom cache entries are keyed by
+lookup inputs, not by person, so they age out on their TTL rather than being
+purged — a person-keyed purge needs a key registry.

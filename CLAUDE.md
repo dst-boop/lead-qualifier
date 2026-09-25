@@ -78,19 +78,19 @@ Maximize useful data per lead and per dollar. Depth comes from exhausting paid s
 
 **Enrichment tiers (progressive, cheapest first):**
 
-- **Tier 0 — Employer-level, free:** DOL Form 5500 / EFAST2 data per employer — total plan assets, participant count, plan type, match structure. Compute **average plan balance per participant** and attach it to every lead at that employer. Cache per employer per plan year; refresh annually. Zero credits, zero PII. *(Not yet built — highest-value open roadmap item.)*
+- **Tier 0 — Employer-level, free:** DOL Form 5500 / EFAST2 data per employer — total plan assets, participant count, plan type, match structure. Compute **average plan balance per participant** and attach it to every lead at that employer. Cache per employer per plan year; refresh annually. Zero credits, zero PII. *(Shipped: `/api/plans` prices employers from the Form 5500 and 5500-SF files, set under Money in motion — see ADR §16.)*
 - **Tier 1 — Cheap search fields:** ZoomInfo search-level fields (title, level, tenure via positionStartDateMax, location, company linkage) to qualify leads against the campaign config.
 - **Tier 2 — Paid contact enrichment (gated):** ZoomInfo contact enrichment + Trestle validation, only for leads that clear the Tier 0/1 qualification threshold. Both phases of the credit guardrail apply.
 - **Tier 3 — Derived fields (tokens, not credits):** Claude API synthesis — pension-eligibility score, likely retirement window, composite lead score, personalization hooks. Provenance = inferred, never mixed with verified fields. *(Shipped: AI QC grades with gate evidence and first-call checklists.)*
 - **Tier 4 — Operator-provided data (free, highest trust for its scope):**
   - **Manual fields:** age and/or year of graduation, entered directly in the UI. If only graduation year is given, derive estimated age (grad year − ~22 for bachelor's) as an inferred field; the entered year itself is operator-provided.
-  - **Profile image upload:** the operator can upload a screenshot or photo of a lead's public profile (LinkedIn, company bio page, personal website, conference bio). Claude vision extracts structured fields — education, graduation years, certifications, career history, interests — written with provenance extracted-from-image, each flagged for one-click operator confirmation before being treated as reliable. *(Not yet built.)*
+  - **Profile image upload:** the operator can upload a screenshot or photo of a lead's public profile (LinkedIn, company bio page, personal website, conference bio). Claude vision extracts structured fields — education, graduation years, certifications, career history, interests — written with provenance extracted-from-image, each flagged for one-click operator confirmation before being treated as reliable. *(Shipped: `/api/profile-image`; the image is never stored — see the upload rules below.)*
   - Operator-provided and image-extracted fields feed Tier 3 scoring (age dramatically improves the retirement-window model) but never silently overwrite API-verified fields — conflicts are surfaced, not auto-resolved.
 
 **Operator upload implementation rules:**
 
-- Uploaded images go to the private GCS bucket; Firestore stores the reference, extraction results, and timestamps.
-- Images are PII and are covered by the purge path — deleting a lead deletes its images and extractions. Prefer auto-deleting the source image after confirmed extraction, keeping only the structured fields.
+- Shipped design: the image is **never stored**. It goes from the request to the Claude API and is dropped; only the quoted findings return, and they live on the lead record (`L.img`, confirmed lines in `L.profile`). If a future feature must keep images, they go to a private GCS bucket with Firestore holding only the reference.
+- Images and extractions are PII and are covered by the purge path — "Delete this person" (`/api/leads/forget`) removes the lead with its extractions from every list the user owns, master included.
 - Vision extraction is a token cost (Tier 3 class), not an enrichment credit — still report it in job cost summaries.
 - This is manual, one-at-a-time operator input of publicly visible information. Do NOT build automated fetching, crawling, or bulk-capture of profile pages around this feature.
 
