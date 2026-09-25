@@ -84,8 +84,10 @@ const me = o => ({ signed_in: true, provider: 'password', name: 'ana', email: 'a
   // --- the ask, before the spend ----------------------------------------------
   await p.click('#bulkWp'); await p.waitForTimeout(300);
   const q = await p.evaluate(() => document.getElementById('cfMsg').textContent);
+  // Every rung the name search can bill counts: a = number check + email +
+  // name (3), b = email + name (2). The old figure (4) under-stated it.
   ck('the confirmation names the count and worst case',
-     /2 leads/.test(q) && /worst case 4 lookups/.test(q), q.slice(0, 110));
+     /2 leads/.test(q) && /worst case 5 lookups/.test(q), q.slice(0, 110));
   ck('  ...says the answered are skipped', /2 already answered are skipped/.test(q), q.slice(-120));
   ck('  ...and shows the allowance', /98 of your monthly lookups left/.test(q), q.slice(-80));
   await p.evaluate(() => cfDone(false)); await p.waitForTimeout(300);
