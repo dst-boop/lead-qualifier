@@ -154,3 +154,21 @@ cache is firm-wide, so a colleague who asked about the same person pays again
 next time — the right way round for a deletion. Other instances' warm memory
 copies expire with the instance. Leads enriched before this shipped carry no
 refs; their cache entries still age out on the TTL.
+
+## 2026-09 · Automation is one approval per run, capped server-side
+
+"Automate as much of this process as possible directly through the app."
+The steps all existed, as separate buttons with different scopes (whole
+list, filtered view, selection) and a confirm each. Autopilot chains them
+cheapest-first under a named profile. **Rules:** (1) the two-phase guardrail
+holds at run level — the plan states each paid step's cap before anything
+runs, and the WhitePages cap is enforced where the credit is spent
+(`_wp_fetch`, keyed by `X-Autopilot-Job`), counted in its own
+increment-only document so a progress write cannot clobber it; (2) a
+refused lookup (allowance or run cap) ends the step, never retried lead by
+lead — bulk WhitePages had the same gap and now stops too; (3) tier filters
+for ZoomInfo/WhitePages use `wouldBeTier` for leads held in X only for want
+of a mobile, because finding that mobile is what those steps are for;
+(4) outreach stays manual (TCPA, FINRA 3230), and web findings still wait
+for the operator's accept. Unattended scheduled runs need a server-side job
+runner and a scheduler credential — not built yet.
