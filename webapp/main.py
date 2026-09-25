@@ -1391,6 +1391,9 @@ async def me(request: Request):
         # Per-lead web research through the Claude API's search tool — a
         # licensed API, never scraping, and never run as a sweep.
         "web_research": bool(ANTHROPIC_API_KEY),
+        # Tier 4: the operator uploads a screenshot of a lead's public profile
+        # and Claude reads the printed text. Token class, one image at a time.
+        "profile_image": bool(ANTHROPIC_API_KEY),
         # TRIAL: Attom property data. Lives and dies with the env var — when
         # the 10-day trial key is removed, the buttons disappear and the
         # already-fetched answers stay on their leads.
@@ -4610,6 +4613,74 @@ async def save_list(list_id: str, body: ListSave, request: Request, email: str =
             "lists": (await get_lists(request, email))["lists"]}
 
 
+# ------------------------- delete this person -------------------------
+# CLAUDE.md makes "delete this person" a first-class operation: one action
+# removes the lead's enrichment payloads and image extractions everywhere the
+# user holds them. Every enrichment answer (household record, phone check,
+# public records, site and web findings, screenshot extractions and confirmed
+# profile lines) lives on the lead object itself, so removing the lead from
+# every list that carries it IS the purge. Screenshots are never stored
+# (see /api/profile-image), so there is no image object to chase.
+
+
+def _lead_keys(lead: dict) -> set:
+    """The identities one lead answers to — the client's dedupeKeys, plus its
+    own row id. Kept in step with dedupeKeys() in index.html."""
+    if not isinstance(lead, dict):
+        return set()
+    k = set()
+    if lead.get("id"):
+        k.add("lid:" + str(lead["id"]))
+    if lead.get("contactId"):
+        k.add("id:" + str(lead["contactId"]))
+    if lead.get("email"):
+        k.add("em:" + str(lead["email"]).lower().strip())
+    if lead.get("linkedinUrl"):
+        k.add("li:" + re.sub(r"/+$", "", re.sub(r"[?#].*$", "", str(lead["linkedinUrl"]).lower())))
+    nm = f"{lead.get('firstName') or ''} {lead.get('lastName') or ''}".strip().lower()
+    if nm and lead.get("employer"):
+        k.add("ne:" + nm + "@" + str(lead["employer"]).lower().strip())
+    return k
+
+
+class ForgetRequest(BaseModel):
+    keys: list[str]
+
+
+@app.post("/api/leads/forget")
+async def forget_lead(body: ForgetRequest, request: Request, email: str = Depends(signed_in)):
+    """Remove one person from every list the caller owns, master included.
+
+    The master list is otherwise never pruned — it is the archive — which is
+    exactly why this has to reach it: a deletion that leaves the master copy
+    behind has deleted nothing. Lists other people own are theirs to purge;
+    the response says how many of those were shared with the caller so the
+    client can say so rather than imply a clean sweep.
+    """
+    keys = {str(k)[:300] for k in (body.keys or []) if isinstance(k, str) and ":" in k}
+    if not keys or len(keys) > 12:
+        raise HTTPException(status_code=400, detail="Name the person to delete.")
+    idx = await _ensure_lists(email)
+    removed = {}
+    for entry in idx["lists"]:
+        leads = await _read_list(email, entry["id"])
+        kept = [L for L in leads if not (_lead_keys(L) & keys)]
+        if len(kept) != len(leads):
+            await _write_list(email, entry["id"], kept)
+            entry["count"] = len(kept)
+            entry["saved_at"] = time.time()
+            removed[entry["id"]] = len(leads) - len(kept)
+    legacy = [L for L in idx["legacy_leads"] if not (_lead_keys(L) & keys)]
+    if len(legacy) != len(idx["legacy_leads"]):
+        removed["legacy"] = len(idx["legacy_leads"]) - len(legacy)
+    await _write_index(email, idx["settings"], idx["lists"], legacy)
+    shared = len(await _shared_index(email))
+    # Counts only: the audit trail says a deletion happened, never who.
+    print(f"[forget] lists={len(removed)} rows={sum(removed.values())}")
+    return {"ok": True, "removed": removed, "total": sum(removed.values()),
+            "shared_lists_not_touched": shared}
+
+
 @app.get("/api/lists/{list_id}/shares")
 async def list_shares(list_id: str, request: Request, email: str = Depends(signed_in)):
     owner, rid = _split_ref(list_id)
@@ -5300,6 +5371,206 @@ def _clean_web_findings(f: dict) -> dict:
     return {"summary": txt(f.get("summary"), 400), "location": loc, "age_hints": hints,
             "ages": ages, "spouse": spouse, "office_phone": phone,
             "email_pattern": pat, "links": links}
+
+
+# ------------------------- profile screenshot (Tier 4) -------------------------
+# The operator uploads a screenshot of a lead's public profile — a LinkedIn
+# page, a company bio, a conference speaker card — and Claude reads the printed
+# text: education, graduation years, certifications, career, interests.
+#
+# The image is never stored. It goes from the request to the Claude API and is
+# dropped when this function returns; only the structured findings travel back,
+# and they live on the lead record, so deleting the lead deletes them. That is
+# CLAUDE.md's "prefer auto-deleting the source image" taken to its limit: there
+# is no bucket, no object to purge, and no public URL that could ever leak.
+#
+# Manual and one at a time by design. There is no URL parameter here and there
+# never should be: fetching profile pages is exactly what this is not.
+
+PROFILE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+# The Claude API refuses a single image over 5 MB. The client downscales first,
+# so a real screenshot never gets near this; it bounds a hostile request.
+PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+_IMAGE_MAGIC = {"image/png": (b"\x89PNG",), "image/jpeg": (b"\xff\xd8\xff",),
+                "image/gif": (b"GIF87a", b"GIF89a"), "image/webp": (b"RIFF",)}
+_DATA_URL_RE = re.compile(r"^data:(image/[a-z]+);base64,([A-Za-z0-9+/=\s]+)$")
+_BACHELOR_RE = re.compile(r"\b(b\.?\s?a\.?|b\.?\s?s\.?|bsc|bba|bfa|bse|bsba|a\.?b\.?|bachelor'?s?)\b", re.I)
+
+
+class ProfileImageRequest(BaseModel):
+    image: str                      # data URL: data:image/png;base64,...
+    first_name: str = ""
+    last_name: str = ""
+    employer: str = ""
+
+
+def _decode_profile_image(data_url: str) -> tuple[str, str, int]:
+    """(media_type, base64 payload, byte count), or a 4xx naming what is wrong."""
+    if len(data_url or "") > PROFILE_IMAGE_MAX_BYTES * 4 // 3 + 200:
+        raise HTTPException(status_code=413, detail="That image is over 5 MB. Crop it to the profile and try again.")
+    m = _DATA_URL_RE.match(data_url or "")
+    if not m or m.group(1) not in PROFILE_IMAGE_TYPES:
+        raise HTTPException(status_code=415, detail="Upload a PNG, JPEG, WebP or GIF screenshot.")
+    media, payload = m.group(1), re.sub(r"\s", "", m.group(2))
+    try:
+        raw = base64.b64decode(payload, validate=True)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="That image did not decode — try saving it again.")
+    if len(raw) > PROFILE_IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="That image is over 5 MB. Crop it to the profile and try again.")
+    # The declared type must match the bytes. A mislabelled file is refused
+    # here rather than spending tokens on a call the API would reject anyway.
+    if not raw.startswith(_IMAGE_MAGIC[media]) or (media == "image/webp" and raw[8:12] != b"WEBP"):
+        raise HTTPException(status_code=415, detail="The file is not the image type it claims to be.")
+    return media, payload, len(raw)
+
+
+@app.post("/api/profile-image")
+async def profile_image(body: ProfileImageRequest, request: Request):
+    """Read the printed text on one profile screenshot, for one lead.
+
+    Token class (Tier 3/4), not a credit: no enrichment vendor is called. The
+    token usage comes back with the findings so the client can report it the
+    way every other enrichment reports its cost. Nothing lands on the lead
+    from here — each finding is shown with the text it was read from, and the
+    operator confirms it or leaves it.
+    """
+    await _active_token(request)
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=400, detail="ANTHROPIC_API_KEY is not set on this service.")
+    if not body.last_name.strip():
+        raise HTTPException(status_code=400, detail="Reading a profile needs the lead's last name, "
+                                                    "so a screenshot of someone else is caught.")
+    media, payload, nbytes = _decode_profile_image(body.image)
+    name = f"{body.first_name} {body.last_name}".strip()
+    at = f" at {body.employer.strip()}" if body.employer.strip() else ""
+    prompt = (
+        f"This is a screenshot of a public professional profile. The operator believes "
+        f"it belongs to {name}{at}. Transcribe the facts PRINTED in it as one JSON object "
+        "and nothing else:\n"
+        '{"profile_name": "<the name the profile shows, or null>", '
+        '"location": {"city": "<or null>", "state": "<2-letter US state or null>", "quote": "<text as printed>"}, '
+        '"education": [{"school": "<name>", "degree": "<as printed, or null>", "field": "<or null>", '
+        '"start_year": <int or null>, "end_year": <int or null>, "quote": "<text as printed>"}], '
+        '"certifications": [{"name": "<e.g. CFP, CPA, PE>", "issuer": "<or null>", "year": <int or null>, '
+        '"quote": "<text as printed>"}], '
+        '"career": [{"title": "<or null>", "employer": "<or null>", "start_year": <int or null>, '
+        '"end_year": <int or null, null if current>, "current": <true|false>, "quote": "<text as printed>"}], '
+        '"interests": [{"text": "<a cause, group, volunteer role or interest>", "quote": "<text as printed>"}]}\n\n'
+        "Rules. Transcribe; do not infer. Every entry needs a quote copied from the text "
+        "in the image — an entry you cannot quote does not belong here. Read ONLY printed "
+        "text: never describe, estimate or infer anything from a photograph of a person "
+        "(no age, no appearance, nothing). Do not compute an age or a birth year. If the "
+        "profile is for a different person than the one named, still set profile_name to "
+        "the name shown and return empty lists. Years are four-digit integers exactly as "
+        "printed; a range like '1982 - 1986' is start 1982, end 1986. Return nulls and "
+        "empty lists rather than guesses."
+    )
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    try:
+        msg = await client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=2500,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media, "data": payload}},
+                {"type": "text", "text": prompt}]}],
+        )
+    except anthropic.APIStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error {e.status_code}: {str(e)[:200]}")
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Claude API error: {str(e)[:200]}")
+    if getattr(msg, "stop_reason", "") == "refusal":
+        raise HTTPException(status_code=502, detail="Claude declined to read this image.")
+    raw = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+    a, z = raw.find("{"), raw.rfind("}")
+    if a == -1 or z == -1:
+        raise HTTPException(status_code=502, detail="Claude returned no JSON object.")
+    try:
+        found = _clean_image_findings(json.loads(raw[a:z + 1]))
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON.")
+    usage = getattr(msg, "usage", None)
+    tokens = {"input": int(getattr(usage, "input_tokens", 0) or 0),
+              "output": int(getattr(usage, "output_tokens", 0) or 0)}
+    # Metadata and cost only — never the findings, which are demographic PII.
+    print(f"[profile-image] bytes={nbytes} type={media} "
+          f"edu={len(found['education'])} career={len(found['career'])} "
+          f"certs={len(found['certifications'])} tokens_in={tokens['input']} "
+          f"tokens_out={tokens['output']}")
+    return {"ok": True, "found": found, "tokens": tokens, "model": CLAUDE_MODEL, "stored": False}
+
+
+def _clean_image_findings(f: dict) -> dict:
+    """Drop anything unquoted or implausible before it reaches a screen.
+
+    The same discipline as the site reader and web research: a value with no
+    printed text behind it is an inference, and inferences do not ride in the
+    extracted-from-image column. Also derives the two suggestions the scoring
+    can use — a bachelor's graduation year and the earliest career start —
+    each carrying the quote it came from.
+    """
+    if not isinstance(f, dict):
+        f = {}
+    now = time.gmtime().tm_year
+
+    def txt(v, n=160):
+        return str(v).strip()[:n] if isinstance(v, (str, int)) and str(v).strip() else None
+
+    def year(v):
+        return v if isinstance(v, int) and 1940 <= v <= now + 6 else None
+
+    def items(key, cap):
+        v = f.get(key)
+        return [x for x in v if isinstance(x, dict) and txt(x.get("quote"))][:cap] if isinstance(v, list) else []
+
+    edu = []
+    for e in items("education", 8):
+        if not txt(e.get("school")):
+            continue
+        s, t = year(e.get("start_year")), year(e.get("end_year"))
+        if s and t and t < s:
+            s = t = None
+        edu.append({"school": txt(e.get("school"), 120), "degree": txt(e.get("degree"), 80),
+                    "field": txt(e.get("field"), 80), "start_year": s, "end_year": t,
+                    "quote": txt(e.get("quote"), 200)})
+
+    certs = [{"name": txt(c.get("name"), 80), "issuer": txt(c.get("issuer"), 80),
+              "year": year(c.get("year")), "quote": txt(c.get("quote"), 200)}
+             for c in items("certifications", 10) if txt(c.get("name"))]
+
+    career = []
+    for c in items("career", 15):
+        if not (txt(c.get("title")) or txt(c.get("employer"))):
+            continue
+        s, t = year(c.get("start_year")), year(c.get("end_year"))
+        if s and t and t < s:
+            s = t = None
+        career.append({"title": txt(c.get("title"), 120), "employer": txt(c.get("employer"), 120),
+                       "start_year": s, "end_year": t, "current": c.get("current") is True,
+                       "quote": txt(c.get("quote"), 200)})
+
+    interests = [{"text": txt(i.get("text"), 120), "quote": txt(i.get("quote"), 200)}
+                 for i in items("interests", 8) if txt(i.get("text"))]
+
+    loc = f.get("location") if isinstance(f.get("location"), dict) else {}
+    st = txt(loc.get("state"), 2)
+    loc = {"city": txt(loc.get("city"), 80),
+           "state": st.upper() if st and len(st) == 2 and st.isalpha() else None,
+           "quote": txt(loc.get("quote"), 200)}
+    if not loc["quote"] or not (loc["city"] or loc["state"]):
+        loc = None
+
+    # A bachelor's end year is the grad-year age proxy. Only a degree printed
+    # as a bachelor's counts: a master's or an unlabeled entry would put the
+    # estimate years off, and a wrong age is worse than a blank one.
+    bach = sorted((e for e in edu if e["end_year"] and e["degree"] and _BACHELOR_RE.search(e["degree"])),
+                  key=lambda e: e["end_year"])
+    grad = {"year": bach[0]["end_year"], "quote": bach[0]["quote"], "school": bach[0]["school"]} if bach else None
+    starts = sorted((c for c in career if c["start_year"]), key=lambda c: c["start_year"])
+    first = {"year": starts[0]["start_year"], "quote": starts[0]["quote"]} if starts else None
+
+    return {"profile_name": txt(f.get("profile_name"), 120), "location": loc,
+            "education": edu, "certifications": certs, "career": career,
+            "interests": interests, "grad_year": grad, "career_start": first}
 
 
 def _clean_site_findings(f: dict) -> dict:
