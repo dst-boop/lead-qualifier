@@ -25,6 +25,7 @@ Environment variables:
 
 import asyncio
 import base64
+import contextvars
 import hashlib
 import json
 import os
@@ -549,6 +550,54 @@ async def https_middleware(request: Request, call_next):
     # Without this, a browser that has once reached the site over HTTP will
     # keep guessing HTTP from its own autocomplete.
     response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+# ------------------------- which cache entries a request used -------------------------
+# Sealed lookup answers (WhitePages, Attom) are cached firm-wide under a hash of
+# what was asked, not of who it was about, so "delete this person" cannot find
+# them by the person. Instead every paid lookup reports the cache entries it
+# wrote or read: the ids ride back on X-Cache-Refs, the client keeps them on
+# the lead, and a deletion hands them back. The server also records that this
+# user asked, so a deletion can only ever purge entries its caller looked up.
+
+FS_CACHE_OWNERS = os.environ.get("FIRESTORE_CACHE_OWNERS_COLLECTION", "cache_owners")
+_MEM_CACHE_OWNERS: dict[str, dict] = {}
+_CACHE_TOUCHED: contextvars.ContextVar = contextvars.ContextVar("cache_touched", default=None)
+CACHE_REF_RE = re.compile(r"^(wp|attom):[0-9a-f]{64}$")
+
+
+def _cache_ref(prefix: str, key: str) -> str:
+    """The FS_CACHE document id for a lookup key — a hash, never the query."""
+    return prefix + ":" + hashlib.sha256(key.encode()).hexdigest()
+
+
+def _touch_cache(ref: str) -> None:
+    got = _CACHE_TOUCHED.get()
+    if got is not None and ref not in got:
+        got.append(ref)
+
+
+@app.middleware("http")
+async def cache_ref_middleware(request: Request, call_next):
+    touched: list = []
+    token = _CACHE_TOUCHED.set(touched)
+    try:
+        response = await call_next(request)
+    finally:
+        _CACHE_TOUCHED.reset(token)
+    if touched:
+        who = ""
+        try:
+            who = await _who(request)
+        except Exception:
+            who = ""
+        if who:
+            for ref in touched:
+                row = {"at": time.time()}
+                if not await _fs_set(FS_CACHE_OWNERS, f"{who}|{ref}", row):
+                    _MEM_CACHE_OWNERS[f"{who}|{ref}"] = row
+        response.headers["X-Cache-Refs"] = ",".join(touched)
     return response
 
 
@@ -1811,6 +1860,7 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
         )
 
     key = _wp_key(kind, params)
+    _touch_cache(_cache_ref("wp", key))
     if not fresh:
         found, value = await _wp_cached(key)
         if found:
@@ -4701,6 +4751,34 @@ async def _drop_forgotten(owner: str, leads: list) -> tuple[list, list]:
 
 class ForgetRequest(BaseModel):
     keys: list[str]
+    # FS_CACHE ids this lead's lookups used (X-Cache-Refs, kept on the lead).
+    cache_refs: list[str] = []
+
+
+async def _purge_cache_refs(email: str, refs: list) -> int:
+    """Drop sealed lookup answers about a deleted person — only ones this
+    caller looked up, so a deletion can never be used to wipe (and force
+    re-billing of) entries someone else asked for alone.
+
+    The cache is firm-wide: a colleague who looked up the same person loses
+    the cached answer too and would pay to ask again. For a deletion that is
+    the right way round. Warm copies in other instances' memory expire with
+    the instance; the durable copy is what goes here.
+    """
+    purged = 0
+    for ref in {r for r in refs if isinstance(r, str) and CACHE_REF_RE.match(r)}:
+        owner = f"{email}|{ref}"
+        if not (await _fs_get(FS_CACHE_OWNERS, owner) or _MEM_CACHE_OWNERS.get(owner)):
+            continue
+        await _fs_del(FS_CACHE, ref)
+        await _fs_del(FS_CACHE_OWNERS, owner)
+        _MEM_CACHE_OWNERS.pop(owner, None)
+        mem = _WP_CACHE if ref.startswith("wp:") else _ATTOM_CACHE
+        prefix = ref.split(":", 1)[0]
+        for k in [k for k in mem if _cache_ref(prefix, k) == ref]:
+            mem.pop(k, None)
+        purged += 1
+    return purged
 
 
 @app.post("/api/leads/forget")
@@ -4738,10 +4816,11 @@ async def forget_lead(body: ForgetRequest, request: Request, email: str = Depend
         removed["legacy"] = len(idx["legacy_leads"]) - len(legacy)
     await _write_index(email, idx["settings"], idx["lists"], legacy)
     shared = len(await _shared_index(email))
+    purged = await _purge_cache_refs(email, (body.cache_refs or [])[:200])
     # Counts only: the audit trail says a deletion happened, never who.
-    print(f"[forget] lists={len(removed)} rows={sum(removed.values())}")
+    print(f"[forget] lists={len(removed)} rows={sum(removed.values())} cache={purged}")
     return {"ok": True, "removed": removed, "total": sum(removed.values()),
-            "shared_lists_not_touched": shared}
+            "cache_purged": purged, "shared_lists_not_touched": shared}
 
 
 @app.get("/api/lists/{list_id}/shares")
@@ -5260,6 +5339,7 @@ async def attom_property(body: AttomRequest, request: Request):
                             detail="Attom needs a street address and a city/state — enrich the "
                                    "household first, or accept a web-research location.")
     key = ("attom|" + street + "|" + locality).lower()
+    _touch_cache(_cache_ref("attom", key))
     found_cached, cached = await _attom_cached(key)
     if found_cached:
         return {**cached, "cached": True}

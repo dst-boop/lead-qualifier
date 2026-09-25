@@ -201,6 +201,20 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   ck('  ...but leaves the owner\u2019s list alone: no local removal, no write back',
      await p.evaluate(() => !!byId('n')) && puts === 0, 'puts=' + puts);
 
+
+  // --- paid lookups hand back their cache ids; deletion sends them -------------
+  const REF = 'wp:' + 'a'.repeat(64);
+  await p.route('**/api/verify-phone', r => r.fulfill({ json: { valid: true }, headers: { 'X-Cache-Refs': REF } }));
+  const got = await p.evaluate(async () => { const d = await api('/api/verify-phone', { phone: '1' });
+    const L = byId('n'); keepRefs(L, d); keepRefs(L, d);
+    return { refs: L.cacheRefs, leaks: Object.keys(d).includes('__refs') || JSON.stringify(d).includes('__refs') }; });
+  ck('a lookup\u2019s cache id is kept on the lead, once', JSON.stringify(got.refs) === JSON.stringify([REF]), JSON.stringify(got));
+  ck('  ...without leaking into the response object that gets saved', !got.leaks);
+  await p.evaluate(() => { activeList = 'default'; window.appConfirm = async () => true; return forgetLead('n'); });
+  await p.waitForTimeout(300);
+  ck('Delete this person sends the lead\u2019s cache ids for purging',
+     forgot.length === 3 && JSON.stringify(forgot[2].cache_refs) === JSON.stringify([REF]), JSON.stringify(forgot[2] || {}));
+
   ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
   console.log(fail ? `\nFAILURES: ${fail} of ${n}` : `\nall ${n} checks passed`);
   await b.close(); process.exit(fail ? 1 : 0);
