@@ -3206,7 +3206,7 @@ document.getElementById('bulkWp').addEventListener('click',async()=>{
   if(BULK){if(BULK.kind==='wp')BULK.stop=true;return;}
   const ids=[...SEL].filter(id=>{const pl=wpPlan(byId(id));return pl&&pl[0]!=='recheck';});
   if(!ids.length)return;
-  const maxLk=ids.reduce((t,id)=>t+(wpPlan(byId(id)).includes('home')?2:1),0);
+  const maxLk=ids.reduce((t,id)=>t+wpWorst(byId(id)),0);
   const skipped=SEL.size-ids.length;
   const wl=(typeof CREDITS!=='undefined'&&CREDITS&&CREDITS.whitepages)?` You have ${CREDITS.whitepages.yours_left??CREDITS.whitepages.left} of your monthly lookups left.`:'';
   if(!await appConfirm(`Enrich ${ids.length} lead${ids.length>1?'s':''} with WhitePages \u2014 worst case ${maxLk} lookup${maxLk>1?'s':''}. Each lead's number is checked first and the name search runs only if that leaves the household empty${skipped?`; ${skipped} already answered ${skipped>1?'are':'is'} skipped`:''}.${wl}`,'Enrich selected'))return;
@@ -3222,7 +3222,7 @@ document.getElementById('bulkWp').addEventListener('click',async()=>{
     done++;
     // An exhausted allowance refuses every remaining lead too: stop and say so
     // rather than toasting the same refusal once per lead.
-    if(/allowance|used all/i.test(WP_LAST_ERR)){BULK.stop=true;BULK.why=WP_LAST_ERR;}
+    if(WP_LAST_REFUSAL){BULK.stop=true;BULK.why=WP_LAST_ERR;}
   }
   const stopped=BULK.stop,why=BULK.why;BULK=null;btn.textContent='Enrich with WhitePages';
   toast(`Bulk WhitePages: ${done} of ${ids.length} looked up${failed?', '+failed+' failed':''}${why?' \u2014 stopped: '+why:stopped?' \u2014 stopped, the rest are untouched':''}.`);
@@ -4622,18 +4622,17 @@ function applyZiMcpAvailability(){
 }
 /* =============== unified backend (sign-in, real send, verify, AI QC, assign) =============== */
 window.ME={signed_in:false,features:{},providers:{}};
-/* Set only while autopilot's WhitePages step is looking a lead up, so the
-   server holds those calls to the run's approved cap. */
-let AP_WP_HDR='';
 let AP_BOOT_JOB=null;
-let WP_LAST_ERR='';
-async function api(url,payload,method){
-  const opt={method:method||'POST',headers:{}};
-  if(AP_WP_HDR)opt.headers['X-Autopilot-Job']=AP_WP_HDR;
+/* The last WhitePages failure, and its X-Refusal code when the server refused
+   outright (allowance, run-cap, run-inactive) — decided by code, not by
+   matching the wording of the message. */
+let WP_LAST_ERR='', WP_LAST_REFUSAL='';
+async function api(url,payload,method,hdrs){
+  const opt={method:method||'POST',headers:{...(hdrs||{})}};
   if(payload!==null&&payload!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(payload);}
   const r=await fetch(url,opt);
   const d=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+  if(!r.ok){const e=new Error(d.detail||('HTTP '+r.status));e.refusal=r.headers.get('X-Refusal')||'';throw e;}
   // Which sealed cache entries a paid lookup used \u2014 hashes, not queries.
   // Non-enumerable so it never rides into a saved record by accident.
   const refs=r.headers.get('X-Cache-Refs');
@@ -4733,19 +4732,34 @@ function wpPlan(L){
   if(!L.hd&&L.lastName)steps.push('home');
   return steps.length?steps:null;
 }
-window.wpLookup=async id=>{
+/* runHdr is autopilot's run id: it rides on this lead's calls only, so a
+   lookup pressed by hand mid-run is never counted against the run's cap. */
+window.wpLookup=async(id,runHdr)=>{
   const L=byId(id);if(!L)return;
   const steps=wpPlan(L)||[];
-  WP_LAST_ERR='';
-  if(steps[0]==='verify')await verifyLead(id);
-  else if(steps[0]==='recheck')await verifyLead(id,true);
+  WP_LAST_ERR='';WP_LAST_REFUSAL='';
+  if(steps[0]==='verify')await verifyLead(id,false,runHdr);
+  else if(steps[0]==='recheck')await verifyLead(id,true,runHdr);
   // A refusal (allowance spent, a run's approved cap reached) would refuse the
   // name search too. Any other failure still falls through to it, as before.
-  if(/allowance|approved|no longer active|used all/i.test(WP_LAST_ERR))return;
+  if(WP_LAST_REFUSAL)return;
   const after=byId(id);
-  if(after&&!after.hd&&after.lastName&&steps.includes('home'))await enrichHome(id);
+  if(after&&!after.hd&&after.lastName&&steps.includes('home'))await enrichHome(id,runHdr);
 };
-window.verifyLead=async(id,recheck)=>{
+/* The most one lead's lookup can bill: the number check, then the name
+   search's ladder (phone, email, name), each rung a billed call unless the
+   answer is cached. The phone rung is cached when the check ran first. */
+function wpWorst(L){
+  const pl=wpPlan(L)||[];
+  let n=(pl[0]==='verify'||pl[0]==='recheck')?1:0;
+  if(pl.includes('home')){
+    if((L.mobilePhone||L.directPhone)&&pl[0]!=='verify')n++;
+    if(/@/.test(L.email||''))n++;
+    if(L.lastName)n++;
+  }
+  return n;
+}
+window.verifyLead=async(id,recheck,runHdr)=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first \u2014 phone lookups use your WhitePages credits.');return;}
   // Re-running spends a credit on a number that already has an answer, so it
@@ -4759,7 +4773,8 @@ window.verifyLead=async(id,recheck)=>{
   try{
     const ha=(L.hd&&L.hd.city)?L.hd:{street:L.street,city:L.city,state:L.state,zip:L.zip};
     const d=await api('/api/verify-phone',{phone:phone,first_name:L.firstName||'',last_name:L.lastName||'',
-      street:ha.street||'',city:ha.city||'',state:ha.state||'',zip:ha.zip||''});keepRefs(L,d);
+      street:ha.street||'',city:ha.city||'',state:ha.state||'',zip:ha.zip||''},undefined,
+      runHdr?{'X-Autopilot-Job':runHdr}:null);keepRefs(L,d);
     const mob=(d.line_type||'').toLowerCase().includes('mobile');
     const bits=[];
     if(d.valid===false)bits.push('INVALID');
@@ -4789,7 +4804,7 @@ window.verifyLead=async(id,recheck)=>{
     // record belongs to someone else.
     if(d.record&&!wrong)applyRecord(L,d.record,'phone');
     L.updatedAt=Date.now();logAct(id,'verify',L.pv.label);save();render();loadCredits();
-  }catch(e){WP_LAST_ERR=e.message;toast('Verify failed: '+e.message);}
+  }catch(e){WP_LAST_ERR=e.message;WP_LAST_REFUSAL=e.refusal||'';toast('Verify failed: '+e.message);}
 };
 /* ---- Data coverage: why the scores look the way they do ----
    A signal with no input scores zero on every lead, which is indistinguishable
@@ -5461,7 +5476,7 @@ window.retryWhere=async id=>{
     save();render();
   }catch(e){toast('Lookup failed: '+e.message);}
 };
-window.enrichHome=async id=>{
+window.enrichHome=async(id,runHdr)=>{
   const L=byId(id);if(!L)return;
   if(!(window.ME&&ME.signed_in)){toast('Sign in first — lookups use your WhitePages credits.');return;}
   toast('Looking up '+(L.firstName||'')+' '+(L.lastName||'')+'…');
@@ -5475,14 +5490,14 @@ window.enrichHome=async id=>{
       phone:L.mobilePhone||L.directPhone||'',email:L.email||'',
       // The deed is a second billed lookup answering a different question.
       // It is its own button now.
-      want_property:false});keepRefs(L,d);
+      want_property:false},undefined,runHdr?{'X-Autopilot-Job':runHdr}:null);keepRefs(L,d);
     if(!d.found){toast(d.rejected?('Not attached — '+d.rejected):'No WhitePages record found.');L.hd={city:'',state:'',mobiles:[],owner:'',rejected:d.rejected||'nothing under this name at the address on the list'};save();render();return;}
     applyRecord(L,d,d.matched_by||'name');
     L.updatedAt=Date.now();
     loadCredits();
     logAct(id,'enrichHome',(dobLabel(L)?'born '+dobLabel(L):(d.age?'age '+d.age:'age unknown'))+(d.home_city?' · '+d.home_city+', '+d.home_state:'')+' · '+((d.mobiles||[]).length)+' mobile'+(d.properties_owned?' · '+d.properties_owned+' property':'')+' — now '+L.tier+'·'+L.score+lookupCost(d));
     save();render();
-  }catch(e){WP_LAST_ERR=e.message;toast('Enrich failed: '+e.message);}
+  }catch(e){WP_LAST_ERR=e.message;WP_LAST_REFUSAL=e.refusal||'';toast('Enrich failed: '+e.message);}
 };
 ACT_LABEL.edgar='SEC filing';
 ACT_LABEL.site='Company site';
@@ -5864,7 +5879,7 @@ const AP_PRESETS=[
   {name:'Outreach-ready',steps:[{k:'free',on:true},{k:'zi',on:true,tiers:['A','B'],cap:25},{k:'wp',on:true,tiers:['A','B'],cap:25},{k:'web',on:true,tiers:['A'],cap:15},{k:'qc',on:true,tiers:['A','B'],cap:100},{k:'assign',on:true}]},
 ];
 const AP_RANK={A:0,B:1,C:2,X:3};
-let AP=null, AP_DRAFT=null, AP_PENDING=null;
+let AP=null, AP_DRAFT=null, AP_PENDING=null, AP_LAST_WHY='';
 function apProfiles(){
   const saved=((state.settings.autopilot||{}).profiles)||[];
   const names=new Set(saved.map(p=>p.name));
@@ -5894,7 +5909,9 @@ function apInTiers(L,st){return !AP_DEF[st.k].tiers||(st.tiers||[]).includes(apT
 function apEligible(k,pool,st){
   const f=(window.ME&&ME.features)||{};
   if(k==='free')return pool.filter(L=>L.lastName&&(!L.pub||pubIncomplete(L)||(f.edgar&&L.employer&&!L.edgar)));
-  if(k==='zi')return pool.filter(L=>needsEnrich(L)&&apInTiers(L,st));
+  // An enriched lead has its ZoomInfo answer recorded, a miss included: re-
+  // sending it is a re-run the operator did not ask for (ADR decision 4).
+  if(k==='zi')return pool.filter(L=>!L.enriched&&needsEnrich(L)&&apInTiers(L,st));
   if(k==='wp')return pool.filter(L=>{const pl=wpPlan(L);return pl&&pl[0]!=='recheck'&&apInTiers(L,st);});
   if(k==='web')return pool.filter(L=>!L.web&&L.lastName&&apInTiers(L,st));
   if(k==='qc')return pool.filter(L=>!L.qc&&L.tier!=='X'&&apInTiers(L,st));
@@ -5946,7 +5963,7 @@ function apPlanText(draft,pool){
     const d=AP_DEF[st.k];const el=apEligible(st.k,pool,st);
     let line=`<strong>${esc(d.label)}</strong>: ${el.length} lead${el.length===1?'':'s'} eligible now`;
     if(st.k==='wp'){
-      const worst=el.reduce((t,L)=>t+wpPlan(L).length,0);
+      const worst=el.reduce((t,L)=>t+wpWorst(L),0);
       line+=` — at most <strong>${st.cap}</strong> lookup${st.cap===1?'':'s'} (today's worst case ${worst})`;
       const left=(CREDITS&&CREDITS.whitepages)?(CREDITS.whitepages.yours_left??CREDITS.whitepages.left):null;
       if(left!=null)line+=`; you have ${left} left this month, and that allowance still applies`;
@@ -5998,21 +6015,28 @@ function apPool(){
   if(!sc.length)return state.leads;
   const want=new Set(sc);return state.leads.filter(L=>want.has(L.id));
 }
+/* Which open page is driving a run: a run is driven by one page at a time. */
+const AP_TAB='t'+Math.random().toString(36).slice(2,10);
 async function apSync(status,extra){
   if(!AP)return null;
   try{
     const r=await api('/api/autopilot',{list_id:AP.list,id:AP.job.id,step:AP.i,status,
-      progress:{...AP.spent,...(extra||{})}},'PUT');
+      progress:{...AP.spent,...(extra||{})},holder:AP_TAB,take:!!AP.take},'PUT');
+    AP.take=false;
     AP.wpSpent=(r.job&&r.job.wp_spent)||0;AP.last=r.job;return r.job;
   }catch(e){
-    // A newer run replaced this one (another tab, another device): stand down.
-    if(/newer autopilot run/i.test(e.message)){AP.stop=true;AP.replaced=true;}
+    // A newer run replaced this one, or another page is driving it: stand down.
+    if(/newer autopilot run|another tab/i.test(e.message)){AP.stop=true;AP.replaced=true;AP.why=e.message;}
     return null;
   }
 }
 const AP_STEP={
   free:async()=>{
+    if(SWEEP)throw new Error('Enrich all (free) is already running \u2014 let it finish, then resume autopilot');
     const f=await enrichAllFree({preapproved:true,leads:apPool()});
+    // Its own Stop (the button's second press) pauses the run: the step
+    // did not finish, so it must not be recorded as done.
+    if(f&&f.stopped){AP.stop=true;return;}
     if(f&&f.summary)AP.log.push(f.summary);
   },
   zi:async st=>{
@@ -6031,15 +6055,17 @@ const AP_STEP={
     for(const L of apByPriority(apEligible('wp',apPool(),st),'wp')){
       if(AP.stop||AP.wpSpent>=cap)break;
       const pl=wpPlan(L);if(!pl||pl[0]==='recheck')continue;
-      if(AP.wpSpent+pl.length>cap)continue;      // a cheaper lead may still fit
-      WP_LAST_ERR='';AP_WP_HDR=hdr;
-      try{await wpLookup(L.id);}finally{AP_WP_HDR='';}
+      // Only a lead whose worst case fits what is left: the server would
+      // refuse a rung part-way, after the earlier rungs were billed.
+      if(AP.wpSpent+wpWorst(L)>cap)continue;
+      await wpLookup(L.id,hdr);
       n++;
-      await apSync('running');                    // re-reads the server's count
+      if(!await apSync('running')&&!AP.replaced){AP.stop=true;break;}  // re-reads the server's count
       apNoteRender();
-      // The server refused: the run's cap, the monthly allowance, or a run
-      // replaced elsewhere. Every further lead would be refused too.
-      if(/approved|no longer active|allowance|used all/i.test(WP_LAST_ERR)){AP.log.push('WhitePages stopped — '+WP_LAST_ERR);break;}
+      // The server refused. The run's cap or the monthly allowance ends this
+      // step (later steps still run); a run no longer active pauses the run.
+      if(WP_LAST_REFUSAL==='run-inactive'){AP.stop=true;break;}
+      if(WP_LAST_REFUSAL){AP.log.push('WhitePages stopped \u2014 '+WP_LAST_ERR);break;}
     }
     if(n)AP.log.push(n+' looked up in WhitePages');
   },
@@ -6061,46 +6087,54 @@ const AP_STEP={
   },
   assign:async()=>{const n=autoAssign(apPool());if(n)AP.log.push(n+' assigned');},
 };
-async function apRun(job){
+async function apRun(job,take){
   const steps=(job.profile.steps||[]).filter(st=>st.on)
     .sort((a,b)=>AP_ORDER.indexOf(a.k)-AP_ORDER.indexOf(b.k));
   const pr=job.progress||{};
-  AP={job,list:job.list,steps,i:Math.min(job.step||0,steps.length),stop:false,replaced:false,
+  AP={job,list:job.list,steps,i:Math.min(job.step||0,steps.length),stop:false,replaced:false,take:!!take,
       spent:{zi:+pr.zi||0,web:+pr.web||0,qc:+pr.qc||0},wpSpent:job.wp_spent||0,log:[]};
   AP_PENDING=null;apNoteRender();
+  // Keeps the run's lease while a long step (the free sweep) writes nothing.
+  const beat=setInterval(()=>{if(AP&&!AP.stop)apSync('running');},45000);
   let failed='';
   // A step stopped part-way keeps its index, so a resume re-enters it and
   // skips every lead it already answered.
   while(AP.i<steps.length){
     if(AP.stop)break;
-    await apSync('running');apNoteRender();
+    // Nothing runs unrecorded: if the server cannot be told, stop here.
+    if(!await apSync('running')){
+      if(!AP.replaced)failed='could not record the run on the server';
+      break;
+    }
+    apNoteRender();
     if(AP.stop)break;
     try{await AP_STEP[steps[AP.i].k](steps[AP.i]);}
     catch(e){failed=e.message;break;}
     if(AP.stop)break;
     AP.i++;
   }
+  clearInterval(beat);
   const status=failed?'failed':AP.replaced?'stopped':AP.stop?'paused':'done';
-  await apSync(status);
+  if(!AP.replaced)await apSync(status);
   const summary=AP.log.join(' · ');
   const name=job.profile.name||'Autopilot';
-  const last=AP.last;
+  const last=AP.last;AP_LAST_WHY=AP.why||'';
   AP=null;save();render();
   if(typeof loadCredits==='function')loadCredits();
   if(status==='done'){toast('Autopilot “'+name+'” finished. '+(summary||'Nothing new to do.'));apNoteRender();}
   else{apAdopt(last);
     toast(status==='failed'?('Autopilot stopped on an error: '+failed+' — resume when it is fixed.')
       :status==='paused'?'Autopilot paused. Resume carries on where it stopped.'
-      :'Autopilot stopped: a newer run on this list replaced it.');}
+      :'Autopilot stopped: '+(AP_LAST_WHY||'a newer run on this list replaced it')+'.');}
 }
 window.apStop=()=>{
   if(!AP)return;
   AP.stop=true;if(SWEEP)SWEEP.stop=true;
   toast('Stopping after the current lead — you can resume it later.');
 };
-window.apResume=()=>{
+window.apResume=take=>{
   const j=AP_PENDING;if(!j||AP)return;
-  apRun(j);
+  apRun(j,take);
 };
 window.apDiscard=async()=>{
   if(!AP_PENDING)return;
@@ -6130,8 +6164,8 @@ function apNoteRender(){
     const j=AP_PENDING;
     const steps=(j.profile.steps||[]).filter(st=>st.on).sort((a,b)=>AP_ORDER.indexOf(a.k)-AP_ORDER.indexOf(b.k));
     const st=steps[Math.min(j.step||0,steps.length-1)];
-    const why=j.status==='failed'?'stopped on an error':j.status==='running'?'was interrupted':'is paused';
-    el.innerHTML=`<strong>Autopilot “${esc(j.profile.name||'')}”</strong> ${why} at step ${Math.min((j.step||0)+1,steps.length)} of ${steps.length}${st?' ('+esc(AP_DEF[st.k].label)+')':''}${j.caps&&j.caps.wp?` — ${j.wp_spent||0} of ${j.caps.wp} approved WhitePages lookups used`:''}. <button class="mbtn save" onclick="apResume()">Resume</button> <button class="mbtn" onclick="apDiscard()">Discard</button>`;
+    const why=j.live?'is running in another tab or device':j.status==='failed'?'stopped on an error':j.status==='running'?'was interrupted':'is paused';
+    el.innerHTML=`<strong>Autopilot “${esc(j.profile.name||'')}”</strong> ${why} at step ${Math.min((j.step||0)+1,steps.length)} of ${steps.length}${st?' ('+esc(AP_DEF[st.k].label)+')':''}${j.caps&&j.caps.wp?` — ${j.wp_spent||0} of ${j.caps.wp} approved WhitePages lookups used`:''}. ${j.live?`<button class="mbtn" onclick="apResume(true)">Take over here</button>`:`<button class="mbtn save" onclick="apResume()">Resume</button> <button class="mbtn" onclick="apDiscard()">Discard</button>`}`;
     el.style.display='';if(btn)btn.disabled=false;
   }else{el.style.display='none';el.innerHTML='';if(btn)btn.disabled=false;}
 }

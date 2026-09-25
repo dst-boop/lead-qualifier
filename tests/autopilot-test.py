@@ -107,6 +107,45 @@ r8 = c.post("/api/verify-phone", json={"phone": "2065550107", "last_name": "Whit
 ck("another user's lookups cannot draw on this run", r8.status_code == 400)
 WHO["email"] = "dan@fpa.com"
 
+# --- refusals carry a code; a refused lookup is refunded ---------------------------------
+job3 = c.post("/api/autopilot", json={"list_id": "default", "profile": PROFILE}).json()["job"]
+H3 = {"X-Autopilot-Job": f"default:{job3['id']}"}
+real_left = M._wp_left
+
+
+async def no_allowance(who=""):
+    return {"mine": 0, "firm": 0, "left": 0, "capped_by": "user"}
+M._wp_left = no_allowance
+r = c.post("/api/verify-phone", json={"phone": "2065550201", "last_name": "Whitfield"}, headers=H3)
+ck("an exhausted allowance is a coded refusal", r.status_code == 400 and r.headers.get("X-Refusal") == "allowance", dict(r.headers))
+ck("  ...and the run is not charged for a lookup that never went out",
+   c.get("/api/autopilot", params={"list_id": "default"}).json()["job"]["wp_spent"] == 0)
+M._wp_left = real_left
+c.post("/api/verify-phone", json={"phone": "2065550202", "last_name": "Whitfield"}, headers=H3)
+c.post("/api/verify-phone", json={"phone": "2065550203", "last_name": "Whitfield"}, headers=H3)
+r = c.post("/api/verify-phone", json={"phone": "2065550204", "last_name": "Whitfield"}, headers=H3)
+ck("the run cap is a coded refusal", r.status_code == 400 and r.headers.get("X-Refusal") == "run-cap")
+ck("  ...and the refused attempt is given back, the count stays at the cap",
+   c.get("/api/autopilot", params={"list_id": "default"}).json()["job"]["wp_spent"] == 2)
+
+# --- one page drives a run at a time ------------------------------------------------------
+put = lambda holder, take=False: c.put("/api/autopilot", json={"list_id": "default", "id": job3["id"],
+                                                               "status": "running", "holder": holder, "take": take})
+ck("the page driving a run can write to it", put("tabA").status_code == 200)
+ck("the run reads as live while that page keeps writing",
+   c.get("/api/autopilot", params={"list_id": "default"}).json()["job"]["live"] is True)
+r = put("tabB")
+ck("a second page is refused while the first is live", r.status_code == 409 and "another tab" in r.json()["detail"], r.json())
+ck("  ...unless it takes the run over", put("tabB", take=True).status_code == 200)
+ck("  ...after which the first page is the one refused", put("tabA").status_code == 409)
+
+# --- deleting a list deletes its run ------------------------------------------------------
+camp = c.post("/api/lists", json={"name": "Scratch"}).json()["list"]["id"]
+c.post("/api/autopilot", json={"list_id": camp, "profile": PROFILE})
+c.delete(f"/api/lists/{camp}")
+ck("a deleted list leaves no autopilot run behind",
+   not any(k.startswith(f"dan@fpa.com__{camp}") for k in M._MEM_AUTOPILOT))
+
 # --- discard ---------------------------------------------------------------------------
 c.delete("/api/autopilot", params={"list_id": "default"})
 ck("a discarded run is gone", c.get("/api/autopilot", params={"list_id": "default"}).json()["job"] is None)

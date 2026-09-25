@@ -36,7 +36,8 @@ const LEADS = () => [
     calls.push([name, hdr(r)]);
     if (hdr(r)) {
       if (refuseWp || wpCharged >= job.caps.wp)
-        return r.fulfill({ status: 400, json: { detail: `This autopilot run has used the ${job.caps.wp} WhitePages lookups you approved, so nothing more was looked up.` } });
+        return r.fulfill({ status: 400, headers: { 'X-Refusal': 'run-cap' },
+          json: { detail: `This autopilot run has used the ${job.caps.wp} WhitePages lookups you approved, so nothing more was looked up.` } });
       wpCharged++;
     }
     return name === 'verify'
@@ -101,20 +102,21 @@ const LEADS = () => [
   ck('a step the account cannot run is off and explained',
      await p.$eval('input[data-ap="zi"]', el => el.disabled && !el.checked)
      && /connect ZoomInfo first/.test(await p.textContent('#apSteps')));
-  // Every tier, WhitePages cap 2, web cap 1, QC cap 2.
+  // Every tier, WhitePages cap 3, web cap 1, QC cap 2.
   await p.evaluate(() => {
     AP_DRAFT.steps.forEach(st => { st.tiers = ['A', 'B', 'C']; });
-    AP_DRAFT.steps.find(s => s.k === 'wp').cap = 2;
+    AP_DRAFT.steps.find(s => s.k === 'wp').cap = 3;
     AP_DRAFT.steps.find(s => s.k === 'web').cap = 1;
     AP_DRAFT.steps.find(s => s.k === 'qc').cap = 2;
     apRenderSteps();
   });
   const plan = await p.textContent('#apPlan');
   ck('the plan states the WhitePages cap and the monthly allowance still applying',
-     /at most 2 lookups/.test(plan) && /40 left this month/.test(plan), plan.slice(0, 160));
-  ck('  ...and the worst case for today’s leads', /today's worst case 5/.test(plan), plan);
+     /at most 3 lookups/.test(plan) && /40 left this month/.test(plan), plan.slice(0, 160));
+  // a and c: number check + email and name rungs (3 each); b: email and name (2).
+  ck('  ...and the worst case counts every rung of the name search', /today's worst case 8/.test(plan), plan);
   const runTxt = await p.textContent('#apRun');
-  ck('the Run button names what is being approved', /Approve and run — up to 2 WhitePages lookups/.test(runTxt), runTxt);
+  ck('the Run button names what is being approved', /Approve and run — up to 3 WhitePages lookups/.test(runTxt), runTxt);
   ck('nothing ran just from opening the plan', calls.length === 0, JSON.stringify(calls));
 
   // --- the run ------------------------------------------------------------------------
@@ -127,11 +129,21 @@ const LEADS = () => [
   ck('only WhitePages calls carried the run header',
      calls.filter(c => c[1]).every(c => c[0] === 'verify' || c[0] === 'enrich')
      && calls.filter(c => c[0] === 'verify' || c[0] === 'enrich').every(c => c[1]));
-  ck('WhitePages stopped at the approved cap of 2', wpCharged === 2, 'charged=' + wpCharged);
+  // Worst cases are 3, 2 and 3 against a cap of 3. Whatever the order, once
+  // one lookup is spent no 3-rung lead fits, so at least one lead is left
+  // untouched rather than started and refused part-way, and the cap holds.
+  const untouched = await p.evaluate(() => ['a', 'b', 'c'].filter(id => !byId(id).pv && !byId(id).hd).length);
+  ck('a lead whose worst case no longer fits the cap is not started, and the cap holds',
+     wpCharged >= 1 && wpCharged <= 3 && untouched >= 1, 'charged=' + wpCharged + ' untouched=' + untouched);
   ck('web research ran for exactly its cap of 1', seq.filter(x => x === 'web').length === 1);
   ck('QC graded no more than its cap of 2', calls.filter(c => c[0] === 'qc').reduce((t, c) => t + c[2], 0) === 2);
   ck('the run was recorded as done on the server', job.status === 'done', job.status);
   ck('the status line clears when the run finishes', !(await p.isVisible('#apNote')));
+
+  // --- a lookup pressed by hand is never charged to a run --------------------------------
+  const before = calls.length;
+  await p.evaluate(() => verifyLead('c'));
+  ck('a lookup pressed by hand carries no run header', calls.length === before + 1 && calls[before][1] === false);
 
   // --- a server refusal stops the step, not just one lead ------------------------------
   calls.length = 0; refuseWp = true;
@@ -159,6 +171,15 @@ const LEADS = () => [
   ck('resume picks up at the step it stopped on — the free step is not re-run',
      !calls.some(c => c[0] === 'free') && calls.some(c => c[0] === 'verify' || c[0] === 'enrich'), JSON.stringify(calls.map(c => c[0])));
   ck('  ...and stays inside what was approved', wpCharged <= 3, 'charged=' + wpCharged);
+
+  // --- a run another page is driving is offered for take-over, not resume --------------
+  listRun = { ...listRun, status: 'running', live: true };
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  await p.waitForFunction(() => window.__booted, null, { timeout: 15000 });
+  const liveNote = await p.textContent('#apNote');
+  ck('a run live in another tab says so and offers take-over instead of resume',
+     /running in another tab or device/.test(liveNote) && /Take over here/.test(liveNote) && !/Resume/.test(liveNote), liveNote);
+  listRun = null;
 
   // --- nothing else changes lists under a running run ---------------------------------
   const blocked = await p.evaluate(async () => {

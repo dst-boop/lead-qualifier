@@ -1882,6 +1882,12 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
             value = await asyncio.shield(_WP_INFLIGHT[key])
             WP_SPEND["served_from_cache"] += 1
             return value
+        # An autopilot run pays for this lookup before it is shared: a refusal
+        # of the run's cap belongs to this caller alone, never to the waiters
+        # that would otherwise inherit it through the single-flight future.
+        run = _AP_JOB.get()
+        if run:
+            await _ap_charge_wp(who, run)
         fut = asyncio.get_running_loop().create_future()
         _WP_INFLIGHT[key] = fut
         try:
@@ -1890,6 +1896,8 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
                 fut.set_result(value)
             return value
         except BaseException as e:
+            if run and isinstance(e, HTTPException) and e.status_code == 400:
+                await _ap_refund_wp(who, run)     # refused before any money moved
             # A failure is not an answer: waiters re-raise rather than being
             # handed a corpse, and the key is freed for the next attempt.
             if not fut.done():
@@ -1897,7 +1905,15 @@ async def _wp_get(kind: str, params: dict, fresh: bool = False, who: str = ""):
             raise
         finally:
             _WP_INFLIGHT.pop(key, None)
-    return await _wp_fetch(kind, params, key, who)
+    run = _AP_JOB.get()
+    if run:
+        await _ap_charge_wp(who, run)
+    try:
+        return await _wp_fetch(kind, params, key, who)
+    except HTTPException as e:
+        if run and e.status_code == 400:
+            await _ap_refund_wp(who, run)
+        raise
 
 
 _WP_INFLIGHT: dict = {}
@@ -1925,15 +1941,10 @@ async def _wp_fetch(kind: str, params: dict, key: str, who: str = ""):
                       f"{room['mine']} of your own left. It resets {_month_resets()}, or an "
                       f"admin can raise it. The free sources are unaffected — press "
                       f"Enrich all (free).")
-        raise HTTPException(status_code=400, detail=detail)
+        raise HTTPException(status_code=400, detail=detail, headers={"X-Refusal": "allowance"})
 
     url = WHITEPAGES_BASE_URL + _wp_path(kind)
     WP_SPEND["calls"] += 1
-    # Inside an autopilot run the operator approved a number of lookups for the
-    # whole run, once. Held here, where the money is spent, so no client bug
-    # can overspend it; checked after the monthly allowance and before the call.
-    if _AP_JOB.get():
-        await _ap_charge_wp(who, _AP_JOB.get())
     await _ledger_add("wp", 1, who)
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cx:
         r = await cx.get(url, params=params, headers={"X-Api-Key": WHITEPAGES_API_KEY})
@@ -4704,8 +4715,11 @@ AP_STATUSES = ("running", "paused", "done", "stopped", "failed")
 AP_CAP_MAX = 5000
 
 
+AP_LEASE = 120        # seconds a running run's page counts as alive between writes
+
+
 def _ap_key(email: str, list_id: str) -> str:
-    return f"{email}__{list_id}"
+    return _list_key(email, list_id)
 
 
 async def _ap_get(email: str, list_id: str) -> Optional[dict]:
@@ -4718,12 +4732,15 @@ async def _ap_get(email: str, list_id: str) -> Optional[dict]:
         job = dict(job)
         spend = await _fs_get(FS_AUTOPILOT, key + "__spend") or _MEM_AUTOPILOT.get(key + "__spend") or {}
         job["wp_spent"] = int(spend.get("wp") or 0) if spend.get("run") == job.get("id") else 0
+        # Whether a page is driving it right now, judged on the server's clock.
+        job["live"] = (job.get("status") == "running"
+                       and time.time() - float(job.get("updated_at") or 0) < AP_LEASE)
     return job
 
 
 async def _ap_put(email: str, list_id: str, job: dict) -> None:
     key = _ap_key(email, list_id)
-    row = {k: v for k, v in job.items() if k != "wp_spent"}
+    row = {k: v for k, v in job.items() if k not in ("wp_spent", "live")}
     if not await _fs_set(FS_AUTOPILOT, key, row):
         _MEM_AUTOPILOT[key] = row
 
@@ -4737,17 +4754,34 @@ async def _ap_charge_wp(who: str, header: str) -> None:
     list_id, _, run_id = header.partition(":")
     job = await _ap_get(who, list_id) if (who and list_id and run_id) else None
     if not job or job.get("id") != run_id or job.get("status") != "running":
-        raise HTTPException(status_code=400,
+        raise HTTPException(status_code=400, headers={"X-Refusal": "run-inactive"},
                             detail="That autopilot run is no longer active, so nothing was looked up.")
     cap = int((job.get("caps") or {}).get("wp") or 0)
-    if int(job.get("wp_spent") or 0) >= cap:
-        raise HTTPException(status_code=400,
-                            detail=f"This autopilot run has used the {cap} WhitePages lookup"
-                                   f"{'' if cap == 1 else 's'} you approved, so nothing more was looked up.")
+    # Take the lookup first, then look: two lookups racing at cap-1 both see
+    # the other's increment and both stand down, rather than both reading
+    # cap-1 and both spending. Erring under the cap is the safe direction.
     key = _ap_key(who, list_id) + "__spend"
-    if not await _fs_inc(FS_AUTOPILOT, key, {"wp": 1}):
+    if await _fs_inc(FS_AUTOPILOT, key, {"wp": 1}):
+        spent = int((await _fs_get(FS_AUTOPILOT, key) or {}).get("wp") or 0)
+    else:
         mem = _MEM_AUTOPILOT.setdefault(key, {"run": run_id, "wp": 0})
         mem["wp"] = int(mem.get("wp") or 0) + 1
+        spent = mem["wp"]
+    if spent > cap:
+        await _ap_refund_wp(who, header)
+        raise HTTPException(status_code=400, headers={"X-Refusal": "run-cap"},
+                            detail=f"This autopilot run has used the {cap} WhitePages lookup"
+                                   f"{'' if cap == 1 else 's'} you approved, so nothing more was looked up.")
+
+
+async def _ap_refund_wp(who: str, header: str) -> None:
+    """Give back a lookup the run was charged for but that never went out."""
+    list_id, _, _run = header.partition(":")
+    key = _ap_key(who, list_id) + "__spend"
+    if not await _fs_inc(FS_AUTOPILOT, key, {"wp": -1}):
+        mem = _MEM_AUTOPILOT.get(key)
+        if mem:
+            mem["wp"] = max(0, int(mem.get("wp") or 0) - 1)
 
 
 def _ap_profile(p: dict) -> dict:
@@ -4775,6 +4809,8 @@ class AutopilotUpdate(BaseModel):
     step: int = 0
     status: str = "running"
     progress: dict = {}
+    holder: str = ""          # which open page is driving the run
+    take: bool = False        # take a live run over from another page
 
 
 @app.get("/api/autopilot")
@@ -4819,6 +4855,14 @@ async def autopilot_update(body: AutopilotUpdate, request: Request, email: str =
         raise HTTPException(status_code=409, detail="A newer autopilot run replaced this one.")
     if body.status not in AP_STATUSES:
         raise HTTPException(status_code=400, detail="Unknown run status.")
+    # Two pages driving one run would spend its ZoomInfo and AI budgets
+    # twice. The page that last wrote holds it while it keeps writing.
+    holder = (body.holder or "")[:40]
+    if (job.get("live") and job.get("holder") and holder and holder != job["holder"]
+            and not body.take):
+        raise HTTPException(status_code=409, detail="This autopilot run is active in another tab or device.")
+    if holder:
+        job["holder"] = holder
     job.update({"step": max(0, min(len(AP_STEPS), int(body.step))), "status": body.status,
                 "progress": {str(k)[:20]: v for k, v in list((body.progress or {}).items())[:20]
                              if isinstance(v, (int, float, str)) and len(str(v)) < 200},
@@ -5118,6 +5162,11 @@ async def delete_list(list_id: str, request: Request, email: str = Depends(signe
     key = _list_key(email, list_id)
     await _fs_del(FS_LISTS, key)
     _MEM_LISTS.pop(key, None)
+    # Its autopilot run goes with it: a run record names leads by id and has
+    # nothing left to run against.
+    for k in (_ap_key(email, list_id), _ap_key(email, list_id) + "__spend"):
+        await _fs_del(FS_AUTOPILOT, k)
+        _MEM_AUTOPILOT.pop(k, None)
     # Everyone it was shared with loses it too, or their switcher keeps
     # offering a list that no longer exists.
     for sh in (gone.get("shares") or []):
