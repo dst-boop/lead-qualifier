@@ -19,6 +19,9 @@ const LEADS = [
   { id: 'b', firstName: 'Bea', lastName: 'Young, Jr.', title: 'VP "Ops"', employer: 'Acme', state: 'NY',
     email: 'b@acme.com', status: 'Not Interested', activity: [] },
   { id: 'c', firstName: 'Cy', lastName: '', employer: 'Delta', status: 'New', activity: [] },
+  // The legacy shape: the whole name in firstName (342 leads had it).
+  { id: 'd', firstName: 'Paul Dawe', lastName: '', employer: 'Hydro One', state: 'ON', status: 'New', activity: [] },
+  { id: 'e', firstName: 'Eve', lastName: 'Park', employer: 'Nowhere Co', state: 'Atlantis', status: 'New', activity: [] },
 ];
 
 (async () => {
@@ -29,7 +32,7 @@ const LEADS = [
   p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
   await p.route('**/api/me', r => r.fulfill({ json: me }));
   await p.route('**/api/settings', r => r.fulfill({ json: { ok: true } }));
-  await p.route('**/api/lists', r => r.fulfill({ json: { lists: [{ id: 'default', name: 'All leads', count: 3, role: 'owner', owner: '' }], settings: {} } }));
+  await p.route('**/api/lists', r => r.fulfill({ json: { lists: [{ id: 'default', name: 'All leads', count: 5, role: 'owner', owner: '' }], settings: {} } }));
   await p.route('**/api/lists/*', r => r.request().method() === 'GET'
     ? r.fulfill({ json: { list: { id: 'default', name: 'All leads' }, settings: {}, leads: LEADS } })
     : r.fulfill({ json: { ok: true, lists: [] } }));
@@ -38,7 +41,7 @@ const LEADS = [
   const ck = (name, c, d) => { n++; console.log((c ? 'ok   ' : 'FAIL ') + name + (d !== undefined ? '  ' + d : '')); if (!c) fail++; };
 
   await p.goto('http://127.0.0.1:8099/', { waitUntil: 'domcontentloaded' });
-  await p.waitForFunction(() => window.ME && typeof ppFiles === 'function' && state.leads.length === 3, null, { timeout: 15000 });
+  await p.waitForFunction(() => window.ME && typeof ppFiles === 'function' && state.leads.length === 5, null, { timeout: 15000 });
   await p.evaluate(() => { window.__files = []; window.dl = (blob, name) => blob.text().then(t => __files.push({ name, t })); });
 
   await p.evaluate(() => document.getElementById('btnToPP').click());
@@ -48,16 +51,20 @@ const LEADS = [
   ck('one file, named for ProspectPilot', /^prospectpilot-import-\d{4}-\d{2}-\d{2}\.csv$/.test(f.name), f.name);
   ck('the headers are the ones ProspectPilot\'s importer reads',
      lines[0] === 'First Name,Last Name,Company,Title,Email,Direct Phone,Mobile Phone,LinkedIn URL,City,State,Country,Management Level,Suppressed,ZoomInfo Contact ID,Contact Accuracy Score,Job Start Date,Direct Phone Do Not Call,Mobile Phone Do Not Call', lines[0]);
-  ck('a lead with no last name is left out, the other two carry', lines.length === 3, lines.length);
+  ck('a lead with only a one-word name is left out, the other four carry', lines.length === 5, lines.length);
   ck('identity, routes, ZoomInfo id and do-not-call flags carry',
      lines[1] === 'Ada,Zeta,Boeing,CFO,ada@boeing.com,(206) 555-0100,(206) 555-0101,https://www.linkedin.com/in/ada-zeta,Seattle,WA,US,C Level Exec,no,12345,95,2004-03-01,false,true', lines[1]);
   ck('Not Interested arrives suppressed, and commas and quotes are escaped',
      lines[2] === 'Bea,"Young, Jr.",Acme,"VP ""Ops""",b@acme.com,,,,,NY,US,,yes,,,,,', lines[2]);
+  ck('a whole name stored in firstName is split, and an Ontario lead is Canadian, not US',
+     lines[3].startsWith('Paul,Dawe,Hydro One,') && lines[3].includes(',ON,Canada,'), lines[3]);
+  ck('a place that establishes no country leaves Country blank rather than guessing',
+     lines[4].includes(',Atlantis,,'), lines[4]);
   ck('household mobiles, age and grades do not travel',
      !f.t.includes('2065550199') && !f.t.includes('61') && !/,A,|grade/i.test(f.t));
   const toast = await p.evaluate(() => (document.getElementById('toast') || {}).textContent || '');
   ck('the operator is told what to do, what was left out, and to delete the file',
-     /2 leads ready for ProspectPilot/.test(toast) && /1 without a name/.test(toast) && /delete it once it is uploaded/.test(toast), toast);
+     /4 leads ready for ProspectPilot/.test(toast) && /1 without a name/.test(toast) && /delete it once it is uploaded/.test(toast), toast);
 
   // Over the importer's 5,000-row ceiling, the list comes down in parts.
   const parts = await p.evaluate(() => {

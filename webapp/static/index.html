@@ -5016,15 +5016,22 @@ document.getElementById('btnLifeData').addEventListener('click',()=>{
    so bigger lists come down in parts. */
 const PP_HEADERS=['First Name','Last Name','Company','Title','Email','Direct Phone','Mobile Phone','LinkedIn URL','City','State','Country','Management Level','Suppressed','ZoomInfo Contact ID','Contact Accuracy Score','Job Start Date','Direct Phone Do Not Call','Mobile Phone Do Not Call'];
 const PP_MAX_ROWS=5000;
+// The country, only where the state or province establishes it: a Canadian
+// lead is not written as US, and an unknown one is left blank, not guessed.
+const CA_PROV=new Set(['AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT','ALBERTA','BRITISH COLUMBIA','MANITOBA','NEW BRUNSWICK','NEWFOUNDLAND AND LABRADOR','NOVA SCOTIA','NORTHWEST TERRITORIES','NUNAVUT','ONTARIO','PRINCE EDWARD ISLAND','QUEBEC','QUÉBEC','SASKATCHEWAN','YUKON']);
+const US_CODES=new Set(Object.values(ST_CODE));
+function ppCountry(state){const t=(''+(state||'')).trim();if(!t)return '';if(CA_PROV.has(t.toUpperCase()))return 'Canada';return US_CODES.has(stateCode(t))?'US':'';}
 function ppFlag(v){v=(''+(v??'')).trim().toLowerCase();return /^(true|yes|1|y)$/.test(v)?'true':/^(false|no|0|n)$/.test(v)?'false':'';}
 function ppFiles(leads){
   const q=v=>{v=''+(v??'');return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[],skipped=[];
   for(const L of leads){
     // ProspectPilot needs a name and one identifier it can dedupe on.
-    if(!(L.firstName&&L.lastName)||!(L.employer||L.email||L.linkedinUrl)){skipped.push(L);continue;}
-    rows.push([L.firstName,L.lastName,L.employer,L.title,L.email,L.directPhone,L.mobilePhone,L.linkedinUrl,
-      L.city,L.state,'US',L.mgmtLevel,L.status==='Not Interested'?'yes':'no',L.contactId,L.accuracy,
+    // Older leads can hold the whole name in firstName; exportName splits it.
+    const nm=exportName(L);
+    if(!(nm.first&&nm.last)||!(L.employer||L.email||L.linkedinUrl)){skipped.push(L);continue;}
+    rows.push([nm.first,nm.last,L.employer,L.title,L.email,L.directPhone,L.mobilePhone,L.linkedinUrl,
+      L.city,L.state,ppCountry(L.state),L.mgmtLevel,L.status==='Not Interested'?'yes':'no',L.contactId,L.accuracy,
       L.jobStartDate,ppFlag(L.directDnc),ppFlag(L.mobileDnc)].map(q).join(','));
   }
   const files=[];
