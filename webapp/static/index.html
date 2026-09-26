@@ -459,6 +459,7 @@
         <button id="btnShareList">Share this list&hellip;<small>Give a colleague view or edit access to the leads you are looking at now</small></button>
         <button id="btnRecipe">Search recipe<small>The ZoomInfo filters behind this list, ready to copy or run again</small></button>
         <button id="btnInsights">What&rsquo;s converting<small>The app grades itself: which signals, tiers, employers and enrichment steps actually turn into set appointments &mdash; and what to change</small></button>
+        <button id="btnToPP">Move to ProspectPilot<small>Download these leads in ProspectPilot&rsquo;s import format &mdash; contact details, ZoomInfo do-not-call flags, and Not Interested carried as suppressed</small></button>
         <button id="btnLifeData">Life Data export<small>Every lead with its grade, signals fired, enrichment provenance, outcome and activity &mdash; the lifetime record as one CSV</small></button>
         <button id="btnDrive" style="display:none">Import another sheet&hellip;<small>One-time import from any Google Sheet in your Drive. To change which sheet is watched, use &ldquo;watch a different sheet&rdquo; on the Source card</small></button>
         <button id="btnQC" style="display:none">AI quality control<small>Have Claude grade each lead and flag the ones the score got wrong</small></button>
@@ -5000,6 +5001,52 @@ document.getElementById('btnLifeData').addEventListener('click',()=>{
   });
   dl(new Blob([[H.join(',')].concat(rows).join('\r\n')],{type:'text/csv'}),'life-data-'+new Date().toISOString().slice(0,10)+'.csv');
   toast('Life Data: '+leads.length+' leads exported.'+(activeList==='default'?'':' Tip: switch to All leads for the lifetime record.'));
+});
+/* ---- Move to ProspectPilot ----
+   Lead Qualifier is merging into ProspectPilot (prospectpilot.io, MERGE-PLAN.md
+   there). This writes the leads in the columns ProspectPilot's contact import
+   already reads, so the move needs no new code on that side and nothing
+   travels except a file the operator downloads and uploads themselves.
+   What carries: identity and contact routes, the ZoomInfo id, accuracy, job
+   start date and both do-not-call flags. A lead marked Not Interested arrives
+   suppressed — they said no, and suppression is reversible there, a fresh
+   approach is not. Verification does not carry: ProspectPilot re-checks
+   rather than inherit a badge. Grades, outcomes and activity stay in the
+   Life Data export, the archive copy. Its importer takes 5,000 rows a file,
+   so bigger lists come down in parts. */
+const PP_HEADERS=['First Name','Last Name','Company','Title','Email','Direct Phone','Mobile Phone','LinkedIn URL','City','State','Country','Management Level','Suppressed','ZoomInfo Contact ID','Contact Accuracy Score','Job Start Date','Direct Phone Do Not Call','Mobile Phone Do Not Call'];
+const PP_MAX_ROWS=5000;
+// The country, only where the state or province establishes it: a Canadian
+// lead is not written as US, and an unknown one is left blank, not guessed.
+const CA_PROV=new Set(['AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT','ALBERTA','BRITISH COLUMBIA','MANITOBA','NEW BRUNSWICK','NEWFOUNDLAND AND LABRADOR','NOVA SCOTIA','NORTHWEST TERRITORIES','NUNAVUT','ONTARIO','PRINCE EDWARD ISLAND','QUEBEC','QUÉBEC','SASKATCHEWAN','YUKON']);
+const US_CODES=new Set(Object.values(ST_CODE));
+function ppCountry(state){const t=(''+(state||'')).trim();if(!t)return '';if(CA_PROV.has(t.toUpperCase()))return 'Canada';return US_CODES.has(stateCode(t))?'US':'';}
+function ppFlag(v){v=(''+(v??'')).trim().toLowerCase();return /^(true|yes|1|y)$/.test(v)?'true':/^(false|no|0|n)$/.test(v)?'false':'';}
+function ppFiles(leads){
+  const q=v=>{v=''+(v??'');return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const rows=[],skipped=[];
+  for(const L of leads){
+    // ProspectPilot needs a name and one identifier it can dedupe on.
+    // Older leads can hold the whole name in firstName; exportName splits it.
+    const nm=exportName(L);
+    if(!(nm.first&&nm.last)||!(L.employer||L.email||L.linkedinUrl)){skipped.push(L);continue;}
+    rows.push([nm.first,nm.last,L.employer,L.title,L.email,L.directPhone,L.mobilePhone,L.linkedinUrl,
+      L.city,L.state,ppCountry(L.state),L.mgmtLevel,L.status==='Not Interested'?'yes':'no',L.contactId,L.accuracy,
+      L.jobStartDate,ppFlag(L.directDnc),ppFlag(L.mobileDnc)].map(q).join(','));
+  }
+  const files=[];
+  for(let i=0;i<rows.length;i+=PP_MAX_ROWS)files.push([PP_HEADERS.join(',')].concat(rows.slice(i,i+PP_MAX_ROWS)).join('\r\n'));
+  return {files,rows:rows.length,skipped:skipped.length};
+}
+document.getElementById('btnToPP').addEventListener('click',()=>{
+  if(!state.leads.length){toast('No leads on this list.');return;}
+  const out=ppFiles(state.leads),day=new Date().toISOString().slice(0,10);
+  if(!out.rows){toast('None of these leads has a name and an employer, email or LinkedIn URL, so none can be moved.');return;}
+  out.files.forEach((text,i)=>dl(new Blob([text],{type:'text/csv'}),'prospectpilot-import-'+day+(out.files.length>1?'-part'+(i+1):'')+'.csv'));
+  toast(out.rows+' leads ready for ProspectPilot'+(out.files.length>1?' in '+out.files.length+' files':'')+
+    '. In ProspectPilot open the contact directory, choose Import, and upload '+(out.files.length>1?'each file':'the file')+'.'+
+    (out.skipped?' '+out.skipped+' without a name and an employer, email or LinkedIn URL were left out.':'')+
+    ' The file holds lead data: delete it once it is uploaded.');
 });
 /* After an import, say so when a signal has almost nothing to work with. */
 function coverageWarn(){
