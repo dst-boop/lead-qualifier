@@ -2659,3 +2659,36 @@ distributions exist).
 Not ported, by choice: the PostgreSQL job queue, the cost ledger, and the
 five-gate evidence model are ProspectPilot's architecture, not patches.
 Which app owns which job is a decision recorded with the operator.
+
+## 50. Lead Qualifier merges into ProspectPilot
+
+**Decision (2026-09-26, operator):** "Lead Qualifier needs to merge into
+Prospect Pilot and incorporate the best of both." ProspectPilot
+(dst-boop/prospectpilot.io, prospectpilot.io) is the app that stays. It
+already has the server-side job queue and scheduler that decision 3 names as
+the target, as well as multi-user workspaces and stricter evidence gates. This
+app's features move there one PR at a time, and this domain then redirects
+there. The plan and its decisions are in that repository's `MERGE-PLAN.md`.
+They include:
+- FEC stays out, because ProspectPilot's stricter rule wins.
+- Property values are not evidence.
+- Delete this person is ported first.
+
+**Moving the leads:** More → **Move to ProspectPilot** downloads the list in
+the exact columns that ProspectPilot's contact import reads. Those are
+identity, contact routes, the ZoomInfo id, accuracy, job start date, both
+do-not-call flags, and Not Interested carried as suppressed. Because the
+columns already match, no importer is written on either side and no
+server-to-server path holds lead data: the operator carries one file.
+
+Some things do not travel:
+- Verification badges, because ProspectPilot re-checks.
+- Household mobiles, ages and grades.
+
+The Life Data export stays the archive of grades, outcomes and activity.
+ProspectPilot's importer takes 5,000 rows a file, so larger lists come down in
+parts.
+
+The headers are a contract, pinned on both sides:
+- here in `tests/topp-test.js`;
+- there in `test/lead-qualifier-import.test.mjs`.
