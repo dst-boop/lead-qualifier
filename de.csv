@@ -1,12 +1,40 @@
 employer,notice_date,number_of_employees_affected,warn_type,city,zip,lwib_area,address,record_number,detail_page_url
 "Atlas Hospitality Group, LLC","Apr 30, 2026",67,WARN,Baltimore,21231,1 - Statewide,"1429 Aliceanna Street; Baltimore, Maryland 21231",110,https://joblink.delaware.gov/search/warn_lookups/110
 Conduent,"Jun 29, 2026",1,WARN,Florham Park,07932,1 - Statewide,"Sarah Amoriell, 100 Campus Dr. ; Florham Park, New Jersey 07932",111,https://joblink.delaware.gov/search/warn_lookups/111
-JeniusBank,"Aug 10, 2026",,WARN,New York,10172,1 - Statewide,,112,https://joblink.delaware.gov/search/warn_lookups/112
+JeniusBank,"Aug 10, 2026",106,WARN,New York,10172,1 - Statewide,"277 Park Ave; New York, New York 10172",112,https://joblink.delaware.gov/search/warn_lookups/112
+ILC Dover,"Apr 26, 2023",41,WARN,Frederica,19946,1 - Statewide,"1 Moonwalker Rd; Frederica, Delaware 19946",106,https://joblink.delaware.gov/search/warn_lookups/106
+"Centurion of Delaware, LLC","May 09, 2023",,WARN,Dover,19904,1 - Statewide,,107,https://joblink.delaware.gov/search/warn_lookups/107
+Zenith Home Corp.,"Dec 13, 2022",91,WARN,New Castle,19720,1 - Statewide,"499 Ships Landing Way. New Castle, DE 19720 ; New Castle, Delaware 19720",105,https://joblink.delaware.gov/search/warn_lookups/105
+IKO Wilmington Plant,"Jan 12, 2021",67,WARN,Wilmington,19809,1 - Statewide,"120 Hay Rd.; Wilmington, Delaware 19809",100,https://joblink.delaware.gov/search/warn_lookups/100
+Wesley College,"Apr 15, 2021",62,WARN,Dover,19901,1 - Statewide,"120 North State Street; Dover, Delaware 19901",102,https://joblink.delaware.gov/search/warn_lookups/102
+Aramark Educational Services@DSU,"Jun 24, 2021",132,WARN,Dover,19901,1 - Statewide,"1200 N. DuPont Highway; Dover, Delaware 19901",103,https://joblink.delaware.gov/search/warn_lookups/103
 Barclays Services LLC,"Jun 05, 2019",525,WARN,,,1 - Statewide,,69,https://joblink.delaware.gov/search/warn_lookups/69
 Plow & Hearth,"Sep 16, 2019",10,Non-WARN,Newark,19713,1 - Statewide,"1307 Churchmans Road, Ste A; Newark, Delaware 19713",70,https://joblink.delaware.gov/search/warn_lookups/70
 "Fresh Grocer - Adams Market, LLC","Oct 23, 2019",,WARN,Wilmington,19801,1 - Statewide,,71,https://joblink.delaware.gov/search/warn_lookups/71
-Kmart - Bear,"Aug 29, 2019",,Non-WARN,,,1 - Statewide,,72,https://joblink.delaware.gov/search/warn_lookups/72
-Kmart - Pike Creek,"Aug 29, 2019",,Non-WARN,,,1 - Statewide,,73,https://joblink.delaware.gov/search/warn_lookups/73
-Nestle,"Sep 27, 2019",,Non-WARN,,,1 - Statewide,,74,https://joblink.delaware.gov/search/warn_lookups/74
+Kmart - Bear,"Aug 29, 2019",40,Non-WARN,,,1 - Statewide,,72,https://joblink.delaware.gov/search/warn_lookups/72
+Kmart - Pike Creek,"Aug 29, 2019",45,Non-WARN,,,1 - Statewide,,73,https://joblink.delaware.gov/search/warn_lookups/73
+Nestle,"Sep 27, 2019",33,Non-WARN,,,1 - Statewide,,74,https://joblink.delaware.gov/search/warn_lookups/74
+"Sodexo, Inc., Facility Engineering","Jan 29, 2016",54,WARN,,,1 - Statewide,,51,https://joblink.delaware.gov/search/warn_lookups/51
+DynCorp,"Feb 01, 2016",57,Non-WARN,,,1 - Statewide,,52,https://joblink.delaware.gov/search/warn_lookups/52
+Capital One - Mortgage Services,"Feb 03, 2016",,WARN,,,1 - Statewide,,53,https://joblink.delaware.gov/search/warn_lookups/53
+Foxfire Printing and Packaging,"May 12, 2016",151,WARN,,,1 - Statewide,,54,https://joblink.delaware.gov/search/warn_lookups/54
+AstraZeneca,"Dec 15, 2016",120,WARN,,,1 - Statewide,,64,https://joblink.delaware.gov/search/warn_lookups/64
+Legacy Supply Chain Services,"Feb 06, 2015",,WARN,,,1 - Statewide,,46,https://joblink.delaware.gov/search/warn_lookups/46
+OCI/Service Source,"Mar 06, 2015",33,Non-WARN,,,1 - Statewide,,47,https://joblink.delaware.gov/search/warn_lookups/47
+Chemours,"Jul 06, 2015",131,WARN,974 Centre Road,19805,1 - Statewide,"Chestnut Run Plaza; 974 Centre Road, Delaware 19805",48,https://joblink.delaware.gov/search/warn_lookups/48
+Chemours/Edge Moor Plant,"Aug 20, 2015",203,WARN,,,1 - Statewide,,49,https://joblink.delaware.gov/search/warn_lookups/49
+DuPont,"Dec 29, 2015",,WARN,,,1 - Statewide,,50,https://joblink.delaware.gov/search/warn_lookups/50
+"Color Box, LLC/Georgia Pacific","Oct 10, 2013",95,WARN,,,1 - Statewide,,43,https://joblink.delaware.gov/search/warn_lookups/43
+AstraZeneca,"May 31, 2013",1200,WARN,,,1 - Statewide,,41,https://joblink.delaware.gov/search/warn_lookups/41
+Evraz,"Oct 14, 2013",,WARN,,,1 - Statewide,,44,https://joblink.delaware.gov/search/warn_lookups/44
+HSBC Card and Retail Services,"Jan 18, 2011",530,WARN,,,1 - Statewide,,34,https://joblink.delaware.gov/search/warn_lookups/34
+A&P/Pathmark,"Feb 15, 2011",82,WARN,,,1 - Statewide,,35,https://joblink.delaware.gov/search/warn_lookups/35
+Wilmington Trust/M&T Bank,"Feb 09, 2011",,WARN,,,1 - Statewide,,36,https://joblink.delaware.gov/search/warn_lookups/36
+Access Group,"Dec 11, 2011",150,WARN,,,1 - Statewide,,39,https://joblink.delaware.gov/search/warn_lookups/39
 AstraZeneca,"May 13, 2010",450,WARN,,,1 - Statewide,,30,https://joblink.delaware.gov/search/warn_lookups/30
-Conectiv Energy,"Apr 28, 2010",150,WARN,,,1 - Statewide,,31,https://joblink.delaware.gov/search/warn_lookups/31
+Conectiv Energy,"Apr 28, 2010",,WARN,,,1 - Statewide,,31,https://joblink.delaware.gov/search/warn_lookups/31
+Chrysler Corporation,"Oct 28, 2008",1125,WARN,,,1 - Statewide,,1,https://joblink.delaware.gov/search/warn_lookups/1
+General Motors,"Oct 21, 2008",393,WARN,,,1 - Statewide,,3,https://joblink.delaware.gov/search/warn_lookups/3
+Mundy Services,"Nov 06, 2008",,WARN,,,1 - Statewide,,5,https://joblink.delaware.gov/search/warn_lookups/5
+Invista,"Dec 08, 2008",400,WARN,,,1 - Statewide,,11,https://joblink.delaware.gov/search/warn_lookups/11
+Avon Products,"Jan 16, 2007",400,WARN,,,1 - Statewide,,23,https://joblink.delaware.gov/search/warn_lookups/23
