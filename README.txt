@@ -8,7 +8,7 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x7f54eba01e40> found
+<function system at 0x7fcf8727f420> found
 scrape_state verify: True
 Site init SSL verification status: True
 scraped 31 of 41 jurisdictions
@@ -17,7 +17,7 @@ failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   DC  MissingSchema: Invalid URL '/page/rapid-response': No scheme supplied. Perhaps you meant https:///page/rapid-response?
   FL  IndexError: list index out of range
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#eb8f878299c59c8499808d8499888ec58f8e9d8e87849bab838a9c8a8282c58c849d': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#eb8f878299c59c
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#ee8a82879cc099819c8588819c8d8bc08a8b988b82819eae868f998f8787c0898198': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#ee8a82879cc099
   ID  PdfminerException: No /Root object! - Is this really a PDF?
   LA  TypeError: write() argument must be str, not None
   MI  KeyError: 'Site address'
