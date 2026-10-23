@@ -8,7 +8,7 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x7f7f36e69f80> found
+<function system at 0x7f1018b3b420> found
 scrape_state verify: True
 Site init SSL verification status: True
 scraped 29 of 41 jurisdictions
@@ -17,14 +17,14 @@ failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   DC  MissingSchema: Invalid URL '/page/rapid-response': No scheme supplied. Perhaps you meant https:///page/rapid-response?
   FL  IndexError: list index out of range
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#d5b1b9bca7fba2baa7beb3baa7b6b0fbb1b0a3b0b9baa595bdb4a2b4bcbcfbb2baa3': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#d5b1b9bca7fba2
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#ed8981849fc39a829f868b829f8e88c389889b8881829dad858c9a8c8484c38a829b': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#ed8981849fc39a
   ID  PdfminerException: No /Root object! - Is this really a PDF?
   LA  TypeError: write() argument must be str, not None
-  MI  KeyError: 'Site address'
+  MI  KeyError: 'Site addresses'
   NM  ValueError: scraper produced an empty file
   OH  ValueError: Could not find JSON data div
   RI  UnboundLocalError: cannot access local variable 'headers' where it is not associated with a value
-  TN  AssertionError: 
+  TN  ConnectionError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
   TX  Exception: Scraper isn't scraping.
 
 no scraper exists for these, so they are not covered at all:
