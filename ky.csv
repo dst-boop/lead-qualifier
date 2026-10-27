@@ -1,4 +1,6 @@
 NAICS,address,closure_or_layoff,comments,company,congressional,contact,county,date_effective,date_received,employees,industry,neg,notice_number,notice_url,region,source,trade,union,union_affected
+423210,,Closure,,"Leggett & Platt, Inc",,,Grayson,2026-12-21 00:00:00,2026-10-21 00:00:00,145,,,Notice 2851,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Z6Zq9/gvktpoQYJPK6yfICvRmUceYY8J80yhjCXPNJrZyqX2g,Lincoln Trail,WARN Notice,No,,Both
+541330,,Closure,,PARSONS CORPORATION,,,Madison,2026-12-17 00:00:00,2026-10-14 00:00:00,10,,,Notice 2846,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000YiUjZ/kvNQgQnD9Fv6rEpref7httGwDe9Gp_p4n5Sn9vI2ii4,Bluegrass,WARN Notice,,,
 424820,,Layoff,,"RNDC of Kentucky, LLC",,,Jefferson County - Louisville,2026-12-08 00:00:00,2026-10-12 00:00:00,7,,,Notice 2844,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Yd3Dl/OUtUH_pQGQFy6Q6YWhxr0zRxeafUdKwfiWXr1RxHa0k,Kentuckiana Works,WARN Notice,,,
 424820,,Layoff,,"RNDC of Kentucky, LLC",,,Jefferson County - Louisville,2026-10-16 00:00:00,2026-10-12 00:00:00,206,,,Notice 2845,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Yd7u5/wWTW8jI1KQcM0nrVSJlDN0ARhqn497BuhOTQ_nbDc5M,Kentuckiana Works,WARN Notice,,,
 541330,,Closure,,PARSONS CORPORATION,,,Madison,2026-11-19 00:00:00,2026-09-10 00:00:00,2,,,Notice 2839,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Wx8De/kpztXs6KnqOtbjTf8oju8WFuUrtiWuyutIsdc8uDFhE,Bluegrass,WARN Notice,,,
@@ -34,8 +36,8 @@ NAICS,address,closure_or_layoff,comments,company,congressional,contact,county,da
 541715,,Closure,,Battelle Memorial Institute E3,,,Madison,2026-03-05 00:00:00,2026-01-05 00:00:00,60,,,Notice 2741,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000L0m5N/dzNGJ0evF7p0eqe3gkJ1A2xmpiaHfNjC0uxTXzAc0aA,Bluegrass,WARN Notice,,,Non-Union
 541715,,Closure,,Battelle Memorial Institute E3,,,Madison,2026-02-18 00:00:00,2025-12-17 00:00:00,17,,,Notice 2735,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000K4yZx/hjNHC46tUotP6fQSFooblwIQMdy9n7n9jwycpYtoK2A,Bluegrass,WARN Notice,,,Non-Union
 335911,,Closure,,Blue Oval SK Group/Battery Plant,,,Hardin,2026-03-31 00:00:00,2025-12-16 00:00:00,1514,,,Notice 2737,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Mgcyf/R0rOEwqaqbq2_BLO_3h_bVZSr5L.ydfELzP9lSJBHds,Lincoln Trail,WARN Notice,,,Non-Union
-332991,,Closure,,Thyssenkrupp,,,Boone,2026-02-13 00:00:00,2025-12-15 00:00:00,77,,,Notice 2734,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Jzw2X/XaV0.3wPmFgN09imJ4PSCxAVb1lNP0z6Glx2vjhIsrA,Northern Kentucky,WARN Notice,TBD,,Both
 541330,,Closure,,PARSONS CORPORATION,,,Madison,2026-01-16 00:00:00,2025-12-15 00:00:00,32,,,Notice 2733,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000JzlTh/JZSB0EQsN_7JjzgrGG5lPxUfnNVre1K_KN5cOIxZ1aQ,Bluegrass,WARN Notice,,,Non-Union
+332991,,Closure,,Thyssenkrupp,,,Boone,2026-02-13 00:00:00,2025-12-15 00:00:00,77,,,Notice 2734,https://kydev.my.salesforce.com/sfc/p/t00000004X3h/a/eq00000Jzw2X/XaV0.3wPmFgN09imJ4PSCxAVb1lNP0z6Glx2vjhIsrA,Northern Kentucky,WARN Notice,TBD,,Both
 ,"Corbin, KY",Layoff,,National-Standard Company,,,Knox,,1998-11-18 00:00:00,104,,,,,,,,,
 ,"Tompkinsville, KY",Closure,,Red Kap Industries,,,Monroe,,1998-11-16 00:00:00,146,,,,,,,,,
 ,,Closure,,"Bizwill, Inc. (Martiki Coal)",,,Martin,,1998-11-13 00:00:00,151,,,,,,,,,
