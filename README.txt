@@ -8,26 +8,25 @@ scrape_state verify: True
 Site init SSL verification status: True
 scrape_state verify: True
 Site init SSL verification status: True
-<function system at 0x70aa203449a0> found
+<function system at 0x78de3fe66200> found
 scrape_state verify: True
 Site init SSL verification status: True
-scraped 29 of 41 jurisdictions
+scraped 30 of 41 jurisdictions
 
 failed, and left alone rather than retried into a ban:
   CO  KeyError: 'CO Notifications'
   DC  MissingSchema: Invalid URL '/page/rapid-response': No scheme supplied. Perhaps you meant https:///page/rapid-response?
   FL  IndexError: list index out of range
-  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#1470787d663a637b667f727b6677713a70716271787b64547c7563757d7d3a737b62': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#1470787d663a63
+  HI  MissingSchema: Invalid URL '/cdn-cgi/l/email-protection#c5a1a9acb7ebb2aab7aea3aab7a6a0eba1a0b3a0a9aab585ada4b2a4acaceba2aab3': No scheme supplied. Perhaps you meant https:///cdn-cgi/l/email-protection#c5a1a9acb7ebb2
   ID  PdfminerException: No /Root object! - Is this really a PDF?
   LA  TypeError: write() argument must be str, not None
   MI  KeyError: 'Site address'
   NM  ValueError: scraper produced an empty file
   OH  ValueError: Could not find JSON data div
   RI  UnboundLocalError: cannot access local variable 'headers' where it is not associated with a value
-  TN  AssertionError: 
   TX  Exception: Scraper isn't scraping.
 
 no scraper exists for these, so they are not covered at all:
   AR MA MN MS NC ND NH NV WV WY
 
-wrote 29 feeds to /home/runner/work/_temp/warn/warn_feeds.json
+wrote 30 feeds to /home/runner/work/_temp/warn/warn_feeds.json
